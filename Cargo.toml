@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/routelab-core", "crates/routelab-osm", "crates/routelab-py"]
+members = [
+    "crates/routelab-core",
+    "crates/routelab-gtfs",
+    "crates/routelab-osm",
+    "crates/routelab-py",
+]
 resolver = "2"
 
 [workspace.package]

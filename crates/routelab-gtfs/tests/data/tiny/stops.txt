@@ -1,0 +1,4 @@
+stop_id,stop_name,stop_lat,stop_lon
+A,Ash Street,47.600,-122.330
+B,Birch Street,47.610,-122.330
+C,Cedar Street,47.620,-122.330

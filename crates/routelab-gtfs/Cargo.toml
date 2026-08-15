@@ -1,0 +1,18 @@
+[package]
+name = "routelab-gtfs"
+description = "Read GTFS feeds into the connections a timetable search needs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# GTFS is far more complicated than it looks — service calendars with date
+# exceptions, headway-based service, pickup rules, parent stations. This crate
+# reads a feed into connections; it does not parse one.
+# `read-url` is on by default and pulls in reqwest, hyper and rustls to fetch
+# feeds over HTTP. Downloading is not this crate's job — a caller who wants a
+# feed from the network can fetch it and hand us the file.
+gtfs-structures = { version = "0.48", default-features = false }
+chrono = { version = "0.4", default-features = false }

@@ -1,0 +1,5 @@
+route_id,service_id,trip_id,trip_headsign
+R1,WEEKDAY,WEEKDAY1,To Cedar
+R1,WEEKDAY,WEEKDAY2,To Cedar
+R1,WEEKEND,WEEKEND1,To Birch
+R1,WEEKDAY,NIGHT1,To Birch
