@@ -8,6 +8,12 @@ the part a routing engine normally throws away. Branch widths follow the total
 hanging off each one, so the tree reads like a river network: thick where the
 whole search flowed, thinning to capillaries where it gave up.
 
+Either endpoint can then be dragged, and the route follows the cursor. The
+search space does not: it is up to sixty thousand branches, so it is drawn once
+when the drag stops. Dragging is also the quickest way to feel the difference
+between the algorithms — the route keeps up under a contraction hierarchy and
+visibly does not under Dijkstra.
+
 The extract is read once at startup and the planners are built once; each click
 is a query against them, which is the whole point of a planner being an object
 you keep. Switching profile or algorithm rebuilds only what has to change.
@@ -94,6 +100,10 @@ class Router:
         Extracts are full of stubs that connect to nothing under a given
         profile, and snapping a click to one produces "no route" for reasons
         that have nothing to do with routing.
+
+        A quarter of a second on a city: a whole Dijkstra, and a label for every
+        node it settled. Which is why nothing calls this until a route has
+        already failed — see `route`.
         """
         environment, _ = self.environment(profile)
         compiled = environment.compile()
@@ -107,35 +117,49 @@ class Router:
         origin,
         destination,
         branches: "int | None" = None,
+        explore: bool = True,
     ) -> dict:
-        """Route between two `(lat, lon)` clicks, and report the search too."""
+        """Route between two `(lat, lon)` points, and report the search too.
+
+        `explore` is what makes dragging an endpoint feel live. The route is a
+        few hundred points; the search space behind it is up to sixty thousand
+        branches and ten megabytes of GeoJSON, which is worth building once when
+        the drag stops and not sixty times a second while it is moving.
+        """
         environment, layer = self.environment(profile)
         compiled = environment.compile()
         planner = self.planner(profile, algorithm)
 
         start = layer.nearest(*origin)
-        end = layer.nearest(*destination, within=self._reachable(profile, start))
+        end = layer.nearest(*destination)
 
+        # Snap plainly, and work out what is actually connected only if that
+        # turns out to have failed. Restricting the snap up front costs a
+        # quarter of a second per request — more than any of these algorithms
+        # spends routing, and the same quarter-second for all of them, which
+        # would flatten the difference this demo exists to show. Paying it on
+        # the rare failure keeps a drag answering at the speed of the search.
         began = time.perf_counter()
         result = planner.search(start, targets=[planner.node_id(end)])
         elapsed = (time.perf_counter() - began) * 1000
 
-        journey = planner.route(start, end)
-        if journey is None:
+        if result.cost(planner.node_id(end)) is None:
+            end = layer.nearest(*destination, within=self._reachable(profile, start))
+            began = time.perf_counter()
+            result = planner.search(start, targets=[planner.node_id(end)])
+            elapsed = (time.perf_counter() - began) * 1000
+
+        target = planner.node_id(end)
+        if result.cost(target) is None:
             return {"error": "no route between those points"}
+        # Built from the result already in hand rather than by asking the
+        # planner to route again — the same query twice is the one thing a drag
+        # cannot afford.
+        journey = rl.Journey.from_result(compiled, result, end)
 
         coordinates = layer.coordinates()
-        # The search space, as the planner reports it. Every branch is drawn by
-        # default — keeping only the heaviest keeps the trunk and throws away
-        # the crown, which is exactly the part that shows how far the search
-        # reached. A city-wide Dijkstra is ~40k branches and about 10 MB of
-        # GeoJSON, which localhost and a canvas renderer both take in stride.
-        tree = planner.explored(result)
-        return {
+        answer = {
             "route": journey.geometry,
-            "tree": tree.geojson(limit=branches),
-            "peak": tree.peak,
-            "branch_count": len(tree),
             "snapped": [coordinates[start], coordinates[end]],
             "seconds": journey.cost,
             "legs": len(journey.legs),
@@ -143,6 +167,18 @@ class Router:
             "graph_nodes": compiled.graph.num_nodes,
             "ms": round(elapsed, 1),
         }
+        if explore:
+            # The search space, as the planner reports it. Every branch is drawn
+            # by default — keeping only the heaviest keeps the trunk and throws
+            # away the crown, which is exactly the part that shows how far the
+            # search reached. A city-wide Dijkstra is ~58k branches and about
+            # 10 MB of GeoJSON, which localhost and a canvas renderer both take
+            # in stride.
+            space = planner.explored(result)
+            answer["tree"] = space.geojson(limit=branches)
+            answer["peak"] = space.peak
+            answer["branch_count"] = len(space)
+        return answer
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -171,6 +207,7 @@ class Handler(BaseHTTPRequestHandler):
                 point("from"),
                 point("to"),
                 int(branches) if branches else None,
+                explore=query.get("explore", ["1"])[0] != "0",
             )
         except (KeyError, ValueError) as error:
             payload = {"error": str(error)}
@@ -209,6 +246,12 @@ PAGE = """<!doctype html>
   #status { margin-top: 10px; color: #333; line-height: 1.5; }
   #status b { font-variant-numeric: tabular-nums; }
   .hint { color: #777; font-size: 12px; }
+  /* A div, not Leaflet's default pin: it keeps the endpoint markers looking
+     like the circles they were before they became draggable, and asks the CDN
+     for no images. */
+  .pin { border-radius: 50%; background: #fff; border: 2px solid #1d3557;
+         box-sizing: border-box; cursor: grab; }
+  .leaflet-drag-target .pin { cursor: grabbing; }
 </style>
 <div id="panel">
   <h1>routelab</h1>
@@ -224,6 +267,7 @@ PAGE = """<!doctype html>
     <option value="ch">Contraction hierarchy</option>
   </select>
   <div id="status" class="hint">Click the map to set an origin.</div>
+  <div id="note" class="hint" style="margin-top:6px">Drag either endpoint to re-route.</div>
 </div>
 <div id="map"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -240,47 +284,76 @@ L.tileLayer('https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
   {maxZoom: 19, attribution: '© OpenStreetMap, © CARTO'}).addTo(map);
 
 const status = document.getElementById('status');
-const drawn = L.layerGroup().addTo(map);
-let clicks = [];
+// Two groups, because a drag invalidates them at different rates. The route
+// follows the cursor; the search space behind it is stale the moment the
+// endpoint moves, so it is cleared for the duration and drawn again at the end.
+const space = L.layerGroup().addTo(map);
+const route = L.layerGroup().addTo(map);
+const PIN = L.divIcon({className: 'pin', iconSize: [14, 14], iconAnchor: [7, 7]});
+let pins = [];
 
 map.on('click', event => {
-  const point = [event.latlng.lat, event.latlng.lng];
-  if (clicks.length === 2) { clicks = []; drawn.clearLayers(); }
-  clicks.push(point);
-  L.circleMarker(point, {radius: 6, color: '#1d3557', weight: 2,
-                         fillColor: '#fff', fillOpacity: 1}).addTo(drawn);
-  if (clicks.length === 1) {
+  if (pins.length === 2) {
+    pins.forEach(pin => pin.remove());
+    pins = [];
+    space.clearLayers();
+    route.clearLayers();
+  }
+  const pin = L.marker(event.latlng, {icon: PIN, draggable: true}).addTo(map);
+  // Live while moving, and the whole picture once it stops.
+  pin.on('dragstart', () => space.clearLayers());
+  pin.on('drag', () => trace());
+  pin.on('dragend', () => request(true));
+  pins.push(pin);
+
+  if (pins.length === 1) {
     status.className = 'hint';
     status.textContent = 'Now click a destination.';
   } else {
-    request();
+    request(true);
   }
 });
 
 for (const id of ['profile', 'algorithm']) {
   document.getElementById(id).addEventListener('change', () => {
-    if (clicks.length === 2) { redraw(); }
+    if (pins.length === 2) { request(true); }
   });
 }
 
-function redraw() {
-  drawn.clearLayers();
-  clicks.forEach(point => L.circleMarker(point, {radius: 6, color: '#1d3557',
-    weight: 2, fillColor: '#fff', fillOpacity: 1}).addTo(drawn));
-  request();
+// One request in flight at a time, with the last drag position remembered.
+// Leaflet fires `drag` on every mousemove, and queueing sixty of those a second
+// would make the route lag further behind the cursor the longer you dragged.
+// This instead runs as fast as the server can answer and no faster.
+let busy = false, missed = false;
+async function trace() {
+  if (busy) { missed = true; return; }
+  busy = true;
+  try {
+    await request(false);
+  } finally {
+    busy = false;
+    if (missed) { missed = false; trace(); }
+  }
 }
 
-async function request() {
+async function request(explore) {
   const profile = document.getElementById('profile').value;
   const algorithm = document.getElementById('algorithm').value;
-  status.className = 'hint';
-  status.textContent = 'routing…';
+  if (explore) {
+    status.className = 'hint';
+    status.textContent = 'routing…';
+  }
 
+  const at = pin => { const p = pin.getLatLng(); return `${p.lat},${p.lng}`; };
   const query = new URLSearchParams({
-    from: clicks[0].join(','), to: clicks[1].join(','), profile, algorithm});
+    from: at(pins[0]), to: at(pins[1]), profile, algorithm});
+  if (!explore) { query.set('explore', '0'); }
+
   const answer = await (await fetch('/route?' + query)).json();
   if (answer.error) {
+    status.className = 'hint';
     status.textContent = answer.error;
+    route.clearLayers();
     return;
   }
 
@@ -293,16 +366,21 @@ async function request() {
   // hierarchy's two halves, climbing away from either end — and colouring by it
   // is what makes them tell apart. One colour when it is absent.
   const halves = {forward: '#1d6fa5', backward: '#7a3b9c'};
-  L.geoJSON(answer.tree, {
-    style: feature => ({
-      color: halves[feature.properties.direction] || '#1d6fa5',
-      weight: 0.6 + 9 * Math.sqrt(feature.properties.share),
-      opacity: 0.8,
-    }),
-  }).addTo(drawn);
-  L.polyline(answer.route, {color: '#d1495b', weight: 4}).addTo(drawn);
+  if (answer.tree) {
+    space.clearLayers();
+    L.geoJSON(answer.tree, {
+      style: feature => ({
+        color: halves[feature.properties.direction] || '#1d6fa5',
+        weight: 0.6 + 9 * Math.sqrt(feature.properties.share),
+        opacity: 0.8,
+      }),
+    }).addTo(space);
+  }
+
+  route.clearLayers();
+  L.polyline(answer.route, {color: '#d1495b', weight: 4}).addTo(route);
   answer.snapped.forEach(p => L.circleMarker(p, {radius: 4, stroke: false,
-    fillOpacity: 1, fillColor: '#1d3557'}).addTo(drawn));
+    fillOpacity: 1, fillColor: '#1d3557'}).addTo(route));
 
   const minutes = (answer.seconds / 60).toFixed(1);
   const share = (100 * answer.settled_count / answer.graph_nodes).toFixed(1);
@@ -310,9 +388,11 @@ async function request() {
   status.innerHTML =
     `<b>${minutes}</b> min over <b>${answer.legs}</b> legs<br>` +
     `settled <b>${answer.settled_count.toLocaleString()}</b> nodes ` +
-    `(${share}% of ${answer.graph_nodes.toLocaleString()}) in <b>${answer.ms}</b> ms<br>` +
-    `<span class="hint">tree: ${answer.branch_count.toLocaleString()} branches, ` +
-    `${answer.tree.features.length.toLocaleString()} drawn</span>`;
+    `(${share}% of ${answer.graph_nodes.toLocaleString()}) in <b>${answer.ms}</b> ms` +
+    (answer.tree
+      ? `<br><span class="hint">tree: ${answer.branch_count.toLocaleString()} branches, ` +
+        `${answer.tree.features.length.toLocaleString()} drawn</span>`
+      : `<br><span class="hint">drop the pin to draw the search</span>`);
 }
 </script>
 """
