@@ -339,6 +339,13 @@ const route = L.layerGroup().addTo(map);
 const PIN = L.divIcon({className: 'pin', iconSize: [14, 14], iconAnchor: [7, 7]});
 let pins = [];
 
+// A pin's position as the query string spells it. Shared, because both the
+// request and the URL it is recorded in have to agree about the wording.
+function at(pin) {
+  const point = pin.getLatLng();
+  return `${point.lat},${point.lng}`;
+}
+
 function dropPin(latlng) {
   const pin = L.marker(latlng, {icon: PIN, draggable: true}).addTo(map);
   // Live while moving, and the whole picture once it stops.
@@ -474,7 +481,6 @@ async function request(explore) {
     status.textContent = 'routing…';
   }
 
-  const at = pin => { const p = pin.getLatLng(); return `${p.lat},${p.lng}`; };
   const query = new URLSearchParams({
     from: at(pins[0]), to: at(pins[1]), profile, algorithm,
     departing: departing()});
