@@ -273,7 +273,7 @@ async function request() {
   L.geoJSON(answer.tree, {
     style: feature => ({
       color: '#1d6fa5',
-      weight: 0.4 + 6 * Math.sqrt(feature.properties.share),
+      weight: 0.6 + 9 * Math.sqrt(feature.properties.share),
       opacity: 0.8,
     }),
   }).addTo(drawn);
