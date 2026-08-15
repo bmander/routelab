@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import random
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import pytest
 
@@ -41,6 +42,85 @@ def random_graph(
         for _ in range(int(num_nodes * density))
     ]
     return rl.Graph.from_edges(edges, num_nodes=num_nodes), edges
+
+
+class GeometricGraph(NamedTuple):
+    """A graph whose edges are priced against the distance they cover."""
+
+    graph: rl.Graph
+    xs: List[float]
+    ys: List[float]
+    cost_per_distance: float
+
+    def heuristic(self) -> "rl.SearchResult":
+        """The kernel heuristic this instance is built to make admissible."""
+        return rl._routelab.Heuristic.euclidean(self.xs, self.ys, self.cost_per_distance)
+
+    def distance(self, a: int, b: int) -> float:
+        return math.dist((self.xs[a], self.ys[a]), (self.xs[b], self.ys[b]))
+
+
+def random_geometric_graph(
+    seed: int,
+    *,
+    num_nodes: int = 40,
+    density: float = 3.0,
+    cost_per_distance: float = 2.0,
+    extent: float = 1000.0,
+) -> GeometricGraph:
+    """Random points, with every edge costing at least the ground it covers.
+
+    That floor is what makes ``cost_per_distance`` a true lower bound and the
+    Euclidean heuristic admissible — by construction, so a test failure means the
+    search is wrong rather than the instance being unfair. Weights are inflated by
+    a random detour factor, because a heuristic that is exactly tight is a
+    suspiciously easy case.
+    """
+    rng = random.Random(seed)
+    xs = [rng.uniform(0.0, extent) for _ in range(num_nodes)]
+    ys = [rng.uniform(0.0, extent) for _ in range(num_nodes)]
+
+    edges = []
+    for _ in range(int(num_nodes * density)):
+        tail = rng.randrange(num_nodes)
+        head = rng.randrange(num_nodes)
+        straight = math.dist((xs[tail], ys[tail]), (xs[head], ys[head]))
+        weight = math.ceil(straight * cost_per_distance) + rng.randrange(0, 100)
+        edges.append((tail, head, weight))
+
+    graph = rl.Graph.from_edges(edges, num_nodes=num_nodes)
+    return GeometricGraph(graph, xs, ys, cost_per_distance)
+
+
+def grid_environment(
+    side: int, *, spacing: float = 100.0, diagonal: bool = True
+) -> rl.Environment:
+    """A `side` x `side` grid as a labelled environment, with coordinates.
+
+    Every edge costs exactly the distance it covers, so the Euclidean bound is
+    tight along a straight line. `diagonal` decides how much that is worth: with
+    diagonal moves a straight-line path exists and the bound is nearly exact;
+    without them, movement is L1 while the estimate is L2, so the bound is off by
+    up to sqrt(2) everywhere and guidance buys almost nothing.
+    """
+    cost_per_distance = 1.0
+    steps = [(0, 1), (1, 0)] + ([(1, 1), (1, -1)] if diagonal else [])
+    edges = []
+    positions = {}
+    for row in range(side):
+        for col in range(side):
+            positions[(row, col)] = (col * spacing, row * spacing)
+            for row_step, col_step in steps:
+                neighbor = (row + row_step, col + col_step)
+                if 0 <= neighbor[0] < side and 0 <= neighbor[1] < side:
+                    weight = math.ceil(math.hypot(row_step, col_step) * spacing)
+                    edges.append(((row, col), neighbor, weight))
+                    edges.append((neighbor, (row, col), weight))
+
+    return rl.Environment(
+        rl.ScalarEdges(edges, cost_per_distance=cost_per_distance),
+        rl.Positions(positions),
+    )
 
 
 def bellman_ford(

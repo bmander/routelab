@@ -12,8 +12,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 
 use routelab_core::{
-    bfs as core_bfs, dijkstra as core_dijkstra, EdgeId, Graph as CoreGraph, NodeId, SearchOptions,
-    SearchResult as CoreResult, Weight,
+    astar as core_astar, bfs as core_bfs, dijkstra as core_dijkstra, EdgeId, Graph as CoreGraph,
+    Heuristic as _, NodeId, SearchOptions, SearchResult as CoreResult, StandardHeuristic, Weight,
 };
 
 /// Core errors describe themselves; Python only needs the sentence.
@@ -194,6 +194,64 @@ impl PySearchResult {
     }
 }
 
+/// An estimate of the cost remaining to a target, for goal-directed search.
+///
+/// Built from data the environment gathered — never a Python callable: a callback
+/// per settled node would cost more than the search it is meant to accelerate.
+#[pyclass(name = "Heuristic", module = "routelab._routelab", frozen)]
+pub struct PyHeuristic {
+    inner: Arc<StandardHeuristic>,
+}
+
+#[pymethods]
+impl PyHeuristic {
+    /// Estimates nothing, which makes A* into Dijkstra.
+    #[staticmethod]
+    fn zero() -> Self {
+        PyHeuristic {
+            inner: Arc::new(StandardHeuristic::Zero),
+        }
+    }
+
+    /// Straight-line distance between per-node coordinates, priced at
+    /// `cost_per_distance` — which must be the cheapest rate any layer charges,
+    /// or the estimate stops being a lower bound.
+    #[staticmethod]
+    fn euclidean(xs: Vec<f64>, ys: Vec<f64>, cost_per_distance: f64) -> PyResult<Self> {
+        let heuristic =
+            StandardHeuristic::euclidean(xs, ys, cost_per_distance).map_err(value_err)?;
+        Ok(PyHeuristic {
+            inner: Arc::new(heuristic),
+        })
+    }
+
+    /// How many nodes this heuristic holds data for, or `None` if it needs none.
+    #[getter]
+    fn coverage(&self) -> Option<usize> {
+        self.inner.coverage()
+    }
+
+    /// The estimated cost from `node` to `target`. Exposed so a test can check
+    /// admissibility directly, rather than only through its consequences.
+    fn estimate(&self, node: NodeId, target: NodeId) -> Weight {
+        self.inner.estimate(node, target)
+    }
+
+    fn __repr__(&self) -> String {
+        match self.inner.as_ref() {
+            StandardHeuristic::Zero => "Heuristic.zero()".to_string(),
+            StandardHeuristic::Euclidean {
+                xs,
+                cost_per_distance,
+                ..
+            } => format!(
+                "Heuristic.euclidean({} nodes, cost_per_distance={cost_per_distance})",
+                xs.len()
+            ),
+        }
+    }
+}
+
 fn options(targets: Option<Vec<NodeId>>, max_cost: Option<Weight>) -> SearchOptions {
     SearchOptions { targets, max_cost }
 }
@@ -234,11 +292,33 @@ fn bfs(
     Ok(PySearchResult { inner: result })
 }
 
+/// A* from `sources` to `target`, ordered by cost-so-far plus estimate.
+#[pyfunction]
+#[pyo3(signature = (graph, sources, target, heuristic, *, max_cost=None))]
+fn astar(
+    py: Python<'_>,
+    graph: &PyGraph,
+    sources: Vec<(NodeId, Weight)>,
+    target: NodeId,
+    heuristic: &PyHeuristic,
+    max_cost: Option<Weight>,
+) -> PyResult<PySearchResult> {
+    let graph = Arc::clone(&graph.inner);
+    let heuristic = Arc::clone(&heuristic.inner);
+    let options = options(None, max_cost);
+    let result = py
+        .detach(|| core_astar(&graph, &sources, target, heuristic.as_ref(), &options))
+        .map_err(value_err)?;
+    Ok(PySearchResult { inner: result })
+}
+
 #[pymodule]
 fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<PyGraph>()?;
+    m.add_class::<PyHeuristic>()?;
     m.add_class::<PySearchResult>()?;
+    m.add_function(wrap_pyfunction!(astar, m)?)?;
     m.add_function(wrap_pyfunction!(dijkstra, m)?)?;
     m.add_function(wrap_pyfunction!(bfs, m)?)?;
     Ok(())

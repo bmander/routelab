@@ -26,31 +26,45 @@ benchmark an algorithm.
 
 from __future__ import annotations
 
-from . import _routelab, reference
+from . import _routelab, heuristics, reference
 from ._args import Nodes, Sources
-from .environment import CompiledEnvironment, EdgeSource, Environment, ScalarEdges
+from .environment import (
+    CompiledEnvironment,
+    EdgeSource,
+    Environment,
+    Positions,
+    ScalarEdges,
+)
 from .graph import Graph
+from .heuristics import Euclidean, Heuristic, Zero
 from .journey import Journey, Leg
-from .planners import BFS, PLANNERS, Dijkstra, Planner, route
-from .search import SearchResult, bfs, dijkstra
+from .planners import BFS, PLANNERS, AStar, Dijkstra, Planner, route
+from .search import SearchResult, astar, bfs, dijkstra
 
 __all__ = [
+    "AStar",
     "BFS",
     "CompiledEnvironment",
     "Dijkstra",
     "EdgeSource",
     "Environment",
+    "Euclidean",
     "Graph",
+    "Heuristic",
     "Journey",
     "Leg",
     "Nodes",
     "PLANNERS",
     "Planner",
+    "Positions",
     "ScalarEdges",
     "SearchResult",
     "Sources",
+    "Zero",
+    "astar",
     "bfs",
     "dijkstra",
+    "heuristics",
     "reference",
     "route",
 ]

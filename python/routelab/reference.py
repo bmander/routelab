@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import heapq
 from collections import deque
-from typing import Any, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence
 
 from ._args import Nodes, Sources, normalize_nodes, normalize_sources
 
-__all__ = ["ReferenceResult", "bfs", "dijkstra"]
+__all__ = ["ReferenceResult", "astar", "bfs", "dijkstra"]
 
 
 class ReferenceResult:
@@ -125,6 +125,64 @@ def dijkstra(
                 result._parents[head] = node
                 result._parent_edges[head] = edge
                 heapq.heappush(queue, (next_cost, head))
+
+    return result
+
+
+def astar(
+    graph: Any,
+    sources: Sources,
+    target: int,
+    estimate: Callable[[int], int],
+    *,
+    max_cost: Optional[int] = None,
+) -> ReferenceResult:
+    """Textbook A*: Dijkstra with the queue keyed on cost-so-far plus estimate.
+
+    ``estimate`` is a plain Python callable here, taking a node and returning a
+    lower bound on the cost from it to ``target``. That is the right shape for a
+    reference and the wrong shape for a kernel — one Python call per node touched
+    would cost more than the guidance saves — so the fast path takes a compiled
+    heuristic instead. Being able to pass a deliberately broken estimate is what
+    makes this the place to demonstrate what inadmissibility does.
+    """
+    seeds = normalize_sources(sources)
+    _check_sources(graph, seeds)
+    if not 0 <= target < graph.num_nodes:
+        raise ValueError(
+            f"target node {target} is out of range for a graph with "
+            f"{graph.num_nodes} nodes"
+        )
+    result = ReferenceResult(graph.num_nodes)
+
+    queue: List[Any] = []
+    for node, cost in seeds:
+        if max_cost is not None and cost > max_cost:
+            continue
+        known = result._costs[node]
+        if known is None or cost < known:
+            result._costs[node] = cost
+            heapq.heappush(queue, (cost + estimate(node), node))
+
+    while queue:
+        priority, node = heapq.heappop(queue)
+        cost = result._costs[node]
+        if priority > cost + estimate(node):  # a stale heap entry
+            continue
+        result.order.append(node)
+        if node == target:
+            break
+
+        for head, weight, edge in graph.neighbors(node):
+            next_cost = cost + weight
+            if max_cost is not None and next_cost > max_cost:
+                continue
+            known = result._costs[head]
+            if known is None or next_cost < known:
+                result._costs[head] = next_cost
+                result._parents[head] = node
+                result._parent_edges[head] = edge
+                heapq.heappush(queue, (next_cost + estimate(head), head))
 
     return result
 

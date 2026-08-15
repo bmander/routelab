@@ -13,7 +13,39 @@ from . import _routelab
 from ._args import Nodes, Sources, normalize_nodes, normalize_sources
 from ._routelab import SearchResult
 
-__all__ = ["SearchResult", "bfs", "dijkstra"]
+__all__ = ["SearchResult", "astar", "bfs", "dijkstra"]
+
+
+def astar(
+    graph: _routelab.Graph,
+    sources: Sources,
+    target: int,
+    heuristic: "_routelab.Heuristic",
+    *,
+    max_cost: Optional[int] = None,
+) -> SearchResult:
+    """Cheapest paths to ``target``, guided by ``heuristic``.
+
+    Dijkstra ordered by cost-so-far plus estimated-cost-remaining. The result
+    records real costs, not the estimates the queue was sorted by.
+
+    Args:
+        graph: The graph to search.
+        sources: Node ids, or ``(node, initial_cost)`` pairs.
+        target: The node to search toward. A* needs exactly one.
+        heuristic: A kernel heuristic, from
+            :meth:`routelab.heuristics.Heuristic.bind`. It must be admissible —
+            never estimating more than the true remaining cost — or the paths
+            returned will not be the cheapest, quietly.
+        max_cost: Bounds the real cost, exactly as for :func:`dijkstra`.
+    """
+    return _routelab.astar(
+        graph,
+        normalize_sources(sources),
+        target,
+        heuristic,
+        max_cost=max_cost,
+    )
 
 
 def dijkstra(

@@ -20,7 +20,7 @@ import pytest
 
 import routelab as rl
 
-from conftest import bellman_ford, random_graph
+from conftest import bellman_ford, random_geometric_graph, random_graph
 
 SEEDS = range(12)
 
@@ -141,6 +141,81 @@ def test_bounded_bfs_matches_reference(seed):
         rl.reference.bfs(graph, 0, max_depth=2),
         graph.num_nodes,
     )
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_astar_with_a_zero_heuristic_is_dijkstra(seed):
+    """Not merely the same costs — the same search, node for node."""
+    graph, _ = random_graph(seed)
+    target = graph.num_nodes - 1
+    zero = rl._routelab.Heuristic.zero()
+
+    guided = rl.astar(graph, 0, target, zero)
+    plain = rl.dijkstra(graph, 0, targets=[target])
+    assert guided.costs == plain.costs
+    assert guided.order == plain.order
+    assert [guided.parent(n) for n in range(graph.num_nodes)] == [
+        plain.parent(n) for n in range(graph.num_nodes)
+    ]
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_astar_finds_the_cost_dijkstra_finds(seed):
+    """The optimality invariant. An inadmissible heuristic fails here first."""
+    instance = random_geometric_graph(seed)
+    heuristic = instance.heuristic()
+    for target in (instance.graph.num_nodes - 1, instance.graph.num_nodes // 3):
+        guided = rl.astar(instance.graph, 0, target, heuristic)
+        plain = rl.dijkstra(instance.graph, 0)
+        assert guided.cost(target) == plain.cost(target)
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_astar_matches_reference(seed):
+    instance = random_geometric_graph(seed)
+    graph = instance.graph
+    heuristic = instance.heuristic()
+    target = graph.num_nodes - 1
+    sources = [(0, 0), (graph.num_nodes // 2, 7)]
+
+    result = rl.astar(graph, sources, target, heuristic)
+    expected = rl.reference.astar(
+        graph, sources, target, lambda node: heuristic.estimate(node, target)
+    )
+    assert_same_result(result, expected, graph.num_nodes)
+    assert_paths_are_walkable(graph, result, sources)
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_the_euclidean_estimate_never_overshoots(seed):
+    """Admissibility checked directly, not just through what it causes.
+
+    True remaining cost comes from a Dijkstra on the reversed graph, which gives
+    the real distance from every node *to* the target in one pass.
+    """
+    instance = random_geometric_graph(seed)
+    heuristic = instance.heuristic()
+    target = instance.graph.num_nodes - 1
+
+    reversed_graph = rl.Graph.from_edges(
+        [(head, tail, weight) for tail, head, weight in instance.graph.edges()],
+        num_nodes=instance.graph.num_nodes,
+    )
+    true_cost = rl.dijkstra(reversed_graph, target)
+
+    for node in range(instance.graph.num_nodes):
+        remaining = true_cost.cost(node)
+        if remaining is not None:
+            assert heuristic.estimate(node, target) <= remaining
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_guidance_never_costs_extra_expansions(seed):
+    instance = random_geometric_graph(seed)
+    target = instance.graph.num_nodes - 1
+    guided = rl.astar(instance.graph, 0, target, instance.heuristic())
+    plain = rl.dijkstra(instance.graph, 0, targets=[target])
+    assert len(guided.order) <= len(plain.order)
 
 
 @pytest.mark.parametrize("seed", SEEDS)

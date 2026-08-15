@@ -11,6 +11,14 @@ pub enum SearchError {
     /// A source whose initial cost is [`UNREACHABLE`], which would mean "start
     /// from a place you cannot be".
     InfiniteSourceCost { node: NodeId },
+    /// A goal node id that does not exist in the graph. Distinct from a bad
+    /// source: only a goal-directed search has one to get wrong.
+    TargetOutOfRange { node: NodeId, num_nodes: usize },
+    /// A heuristic holding data for a different graph than the one being searched.
+    HeuristicCoverage {
+        heuristic_nodes: usize,
+        num_nodes: usize,
+    },
 }
 
 impl fmt::Display for SearchError {
@@ -25,6 +33,19 @@ impl fmt::Display for SearchError {
             SearchError::InfiniteSourceCost { node } => {
                 write!(f, "source node {node} has infinite initial cost")
             }
+            SearchError::TargetOutOfRange { node, num_nodes } => {
+                write!(
+                    f,
+                    "target node {node} is out of range for a graph with {num_nodes} nodes"
+                )
+            }
+            SearchError::HeuristicCoverage {
+                heuristic_nodes,
+                num_nodes,
+            } => write!(
+                f,
+                "heuristic covers {heuristic_nodes} nodes but the graph has {num_nodes}"
+            ),
         }
     }
 }
@@ -113,6 +134,13 @@ impl SearchResult {
             Some(tracker) => tracker.settle(node),
             None => false,
         }
+    }
+
+    /// The same bookkeeping for a search with exactly one goal, which needs no
+    /// tracker to know when it is done.
+    pub(crate) fn settle_toward(&mut self, node: NodeId, target: NodeId) -> bool {
+        self.order.push(node);
+        node == target
     }
 
     /// The nodes on the tree path to `node`, root first. `None` if unreached.

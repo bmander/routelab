@@ -72,6 +72,53 @@ whole thing in one call when you only have one question to ask — but building 
 planner and keeping it is what makes preprocessing worth doing, which is the
 whole game for the algorithms this project is heading toward.
 
+### Guided search
+
+A* takes a heuristic — an estimate of the cost still to go — and settles fewer
+nodes for the same answer. Layers supply what the estimate is built from:
+
+```python
+env = rl.Environment(
+    rl.ScalarEdges(streets, cost_per_distance=0.71),   # walking, ~1.4 m/s
+    rl.ScalarEdges(transit, cost_per_distance=0.04),   # fastest mode, ~25 m/s
+    rl.Positions({"home": (0, 0), "stop_a": (300, 40)}),
+)
+
+rl.AStar(env, rl.Euclidean()).route("home", "stop_b")
+```
+
+`cost_per_distance` is the least a layer can charge to cover one unit of ground.
+The environment takes the **minimum** across layers, because a path may ride the
+fastest one the whole way — add a train to a walking network and a bound priced
+at walking speed starts overestimating, which turns an admissible heuristic into
+one that quietly returns paths that are not the cheapest. A layer that declares
+no rate disables the heuristic rather than being assumed slow; a heuristic that
+cannot be built says so instead of falling back:
+
+```python
+rl.AStar(env, rl.Euclidean())
+# ValueError: Euclidean needs a position for every node; 2 have none ...
+```
+
+There is no default heuristic. A* whose guidance silently became zero is Dijkstra
+wearing its name — the one failure a benchmark cannot see — so `rl.Zero()` has to
+be asked for out loud.
+
+Whether guidance pays depends on how tight the bound is, which is a thing to
+measure rather than assume. On a 200×200 grid, corner to corner
+(`benchmarks/bench_astar.py`):
+
+| | settled | of graph | ms |
+|---|---:|---:|---:|
+| Dijkstra | 40,000 | 100% | 3.3 |
+| A* (zero) | 40,000 | 100% | 3.3 |
+| A* (euclidean), 8-connected | 794 | 2% | 0.3 |
+| A* (euclidean), 4-connected | 40,000 | 100% | 3.9 |
+
+Same code, same heuristic, same answers. The last row moves in L1 while the
+estimate measures L2, so the bound is loose by up to √2 everywhere and the
+guidance buys exactly nothing.
+
 ### Underneath
 
 The kernels are also callable directly, on dense integer ids, as the papers
@@ -90,7 +137,15 @@ rl.dijkstra(graph, {0: 0, 2: 45})     # many sources, each with an initial cost
 rl.dijkstra(graph, 0, targets=[3])    # stop as soon as these are settled
 rl.dijkstra(graph, 0, max_cost=90)    # or bound the search: an isochrone
 rl.bfs(graph, 0, max_depth=2)         # hop counts, ignoring weights
+
+# A* wants a compiled heuristic, which is what Heuristic.bind produces — bound
+# to the same environment the graph came from, since it is indexed by node id.
+compiled = env.compile()
+rl.astar(compiled.graph, 0, compiled.node_id("stop_b"), rl.Euclidean().bind(compiled))
 ```
+
+Every search records the order it settled nodes in (`result.order`), which is how
+you compare algorithms by work done rather than by wall-clock alone.
 
 ## The contract
 

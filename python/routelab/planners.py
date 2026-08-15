@@ -19,10 +19,11 @@ from __future__ import annotations
 from typing import Any, Dict, Hashable, Iterable, Mapping, Optional, Type, Union
 
 from .environment import CompiledEnvironment, Environment
+from .heuristics import Heuristic
 from .journey import Journey
-from .search import SearchResult, bfs, dijkstra
+from .search import SearchResult, astar, bfs, dijkstra
 
-__all__ = ["BFS", "Dijkstra", "PLANNERS", "Planner", "route"]
+__all__ = ["AStar", "BFS", "Dijkstra", "PLANNERS", "Planner", "route"]
 
 #: How a caller names where to start: one label, a list of labels, or a mapping
 #: of labels to the cost of already being there. Tuples and strings are single
@@ -137,7 +138,55 @@ class BFS(Planner):
         return bfs(self.compiled.graph, list(starts), **options)
 
 
-#: Planners by name, so a benchmark can loop over algorithms instead of naming them.
+class AStar(Planner):
+    """Cheapest-cost routing, guided toward the destination by a heuristic.
+
+        AStar(env, Euclidean()).route("a", "b")
+
+    Returns exactly what :class:`Dijkstra` returns, by settling fewer nodes — how
+    many fewer is the whole question, and ``len(result.order)`` is how you answer
+    it.
+
+    The heuristic is required. A* whose heuristic quietly fell back to zero is
+    Dijkstra wearing its name, which is the one thing a benchmark must never be
+    unable to detect — so :class:`~routelab.heuristics.Zero` has to be asked for
+    out loud.
+    """
+
+    def __init__(self, environment: Environment, heuristic: Heuristic):
+        self.heuristic_spec = heuristic
+        super().__init__(environment)
+
+    def preprocess(self) -> None:
+        """Bind the heuristic to this environment, once, before any query."""
+        self.heuristic = self.heuristic_spec.bind(self.compiled)
+
+    def search(self, origins: Origins, **options: Any) -> SearchResult:
+        """Run the guided search. Requires exactly one target.
+
+        A* is goal-directed: the estimate is an estimate *to somewhere*. Without
+        a target there is nothing to aim at, and with several there is no single
+        thing the heuristic could be a bound on.
+        """
+        targets = options.pop("targets", None)
+        if targets is None or len(targets) != 1:
+            count = "no target" if not targets else f"{len(targets)} targets"
+            raise ValueError(
+                f"A* searches toward a single target, and got {count}. Use "
+                f"route(origin, destination), or pass targets=[node]."
+            )
+        return astar(
+            self.compiled.graph, self._origin_ids(origins), targets[0], self.heuristic, **options
+        )
+
+    def __repr__(self) -> str:
+        return f"AStar({self.environment!r}, {self.heuristic_spec!r})"
+
+
+#: Planners by name, so a benchmark can loop over algorithms instead of naming
+#: them. :class:`AStar` is deliberately absent: it needs a heuristic, and a
+#: registry entry would have to invent one. Compare configured planners by
+#: building them — ``[Dijkstra(env), AStar(env, Euclidean())]``.
 PLANNERS: "Dict[str, Type[Planner]]" = {"dijkstra": Dijkstra, "bfs": BFS}
 
 
