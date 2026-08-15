@@ -1,0 +1,10 @@
+[package]
+name = "routelab-core"
+description = "Graph kernels for routing research: CSR graphs, Dijkstra, BFS."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]

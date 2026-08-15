@@ -1,0 +1,34 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "routelab"
+description = "Reference implementations of routing algorithms: Python veneer, Rust kernels."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "maturin>=1.7,<2.0"]
+
+[project.urls]
+Repository = "https://github.com/bmander/routelab"
+
+[tool.maturin]
+manifest-path = "crates/routelab-py/Cargo.toml"
+module-name = "routelab._routelab"
+python-source = "python"
+features = ["extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
