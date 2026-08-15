@@ -18,6 +18,10 @@ use routelab_core::contraction::{
     ContractionHierarchy as CoreHierarchy, MeetingSearch as CoreMeetingSearch,
     Ordering as CoreOrdering, Policy,
 };
+use routelab_core::timedep::{
+    time_dependent_dijkstra as core_timedep, Calendar as CoreCalendar, Departure as CoreDeparture,
+    Waiting as CoreWaiting, Window as CoreWindow,
+};
 use routelab_core::{
     astar as core_astar, bfs as core_bfs, dijkstra as core_dijkstra, EdgeId, Graph as CoreGraph,
     Heuristic as _, Landmarks as CoreLandmarks, Magnitude, NodeId, SearchOptions,
@@ -580,6 +584,21 @@ impl PyOsmNetwork {
             .collect()
     }
 
+    /// When each restricted edge may be travelled, as `(edge, [(start, end)])`
+    /// on the weekly clock. Sparse: unlisted edges are always open.
+    ///
+    /// Keyed by position in this network's own edge list — the order `edges()`
+    /// yields them — not by graph edge id, since a `Graph` permutes.
+    fn windows(&self) -> Vec<(u32, Vec<(u32, u32)>)> {
+        self.inner.edge_windows.clone()
+    }
+
+    /// Conditional tags the reader could not understand, and so ignored.
+    #[getter]
+    fn unreadable_schedules(&self) -> usize {
+        self.inner.unreadable_schedules
+    }
+
     /// Node coordinates projected into local metres, as `(xs, ys)`.
     fn projected(&self) -> (Vec<f64>, Vec<f64>) {
         self.inner.projected()
@@ -623,19 +642,79 @@ impl PyOsmNetwork {
 /// `speeds` maps a `highway` value to metres per second; a class left out is not
 /// routable for this profile.
 #[pyfunction]
-#[pyo3(signature = (path, speeds, *, respect_oneway=true, use_maxspeed=true))]
+#[pyo3(signature = (path, speeds, *, respect_oneway=true, use_maxspeed=true, access_keys=vec![]))]
 fn load_osm(
     py: Python<'_>,
     path: PathBuf,
     speeds: Vec<(String, f64)>,
     respect_oneway: bool,
     use_maxspeed: bool,
+    access_keys: Vec<String>,
 ) -> PyResult<PyOsmNetwork> {
-    let profile = OsmProfile::new(speeds, respect_oneway, use_maxspeed);
+    let profile = OsmProfile::new(speeds, respect_oneway, use_maxspeed).reading_access(access_keys);
     let network = py.detach(|| osm_load(&path, &profile)).map_err(value_err)?;
     Ok(PyOsmNetwork {
         inner: Arc::new(network),
     })
+}
+
+/// When each edge may be travelled, on a weekly clock.
+///
+/// `frozen`, like every other preprocessed structure here, so a search can read
+/// it with the GIL released.
+#[pyclass(name = "Calendar", module = "routelab._routelab", frozen)]
+pub struct PyCalendar {
+    inner: Arc<CoreCalendar>,
+}
+
+#[pymethods]
+impl PyCalendar {
+    /// Build from windows keyed by **position in the graph's input edge list**.
+    ///
+    /// Not by edge id: `Graph` permutes its edges into CSR order, and a calendar
+    /// keyed the wrong way shuts the wrong streets without failing. Everything
+    /// that produces edges holds input positions, so that is what this takes.
+    #[staticmethod]
+    #[pyo3(signature = (graph, windows))]
+    fn from_windows(graph: &PyGraph, windows: Vec<(u32, Vec<(u32, u32)>)>) -> Self {
+        let entries = windows.into_iter().map(|(input, windows)| {
+            let windows = windows
+                .into_iter()
+                .map(|(start, end)| CoreWindow::new(start, end))
+                .collect::<Vec<_>>();
+            (input, windows)
+        });
+        PyCalendar {
+            inner: Arc::new(CoreCalendar::from_input_windows(&graph.inner, entries)),
+        }
+    }
+
+    /// A calendar in which nothing is ever shut.
+    #[staticmethod]
+    fn unrestricted() -> Self {
+        PyCalendar {
+            inner: Arc::new(CoreCalendar::unrestricted()),
+        }
+    }
+
+    /// How many edges carry a restriction.
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    #[getter]
+    fn footprint(&self) -> usize {
+        self.inner.footprint()
+    }
+
+    /// Is `edge` open at `at` seconds past Monday midnight?
+    fn is_open(&self, edge: EdgeId, at: u32) -> bool {
+        self.inner.is_open(edge, at)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Calendar({} edges restricted)", self.inner.len())
+    }
 }
 
 /// An estimate of the cost remaining to a target, for goal-directed search.
@@ -748,6 +827,43 @@ fn dijkstra(
     Ok(PySearchResult { inner: result })
 }
 
+/// Earliest arrival from `sources`, leaving at `departing` on a weekly clock.
+///
+/// Dreyfus (1969). `waiting` is `"unrestricted"` — wait for a shut edge to open,
+/// and pay the wait as travel time — or `"forbidden"`, which treats a shut edge
+/// as absent. Costs come back as elapsed seconds, waiting included.
+#[pyfunction]
+#[pyo3(signature = (graph, calendar, sources, departing, *, waiting="unrestricted", targets=None, max_cost=None))]
+#[allow(clippy::too_many_arguments)] // a query with a clock has one more knob
+fn time_dependent_dijkstra(
+    py: Python<'_>,
+    graph: &PyGraph,
+    calendar: &PyCalendar,
+    sources: Vec<(NodeId, Weight)>,
+    departing: u32,
+    waiting: &str,
+    targets: Option<Vec<NodeId>>,
+    max_cost: Option<Weight>,
+) -> PyResult<PySearchResult> {
+    let waiting = match waiting {
+        "unrestricted" => CoreWaiting::Unrestricted,
+        "forbidden" => CoreWaiting::Forbidden,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown waiting policy {other:?}; expected 'unrestricted' or 'forbidden'"
+            )))
+        }
+    };
+    let departure = CoreDeparture::at(departing).waiting(waiting);
+    let graph = Arc::clone(&graph.inner);
+    let calendar = Arc::clone(&calendar.inner);
+    let options = options(targets, max_cost);
+    let result = py
+        .detach(|| core_timedep(&graph, &calendar, &sources, &departure, &options))
+        .map_err(value_err)?;
+    Ok(PySearchResult { inner: result })
+}
+
 /// Breadth-first search from `sources`, which all start at depth 0.
 #[pyfunction]
 #[pyo3(signature = (graph, sources, *, targets=None, max_depth=None))]
@@ -789,6 +905,7 @@ fn astar(
 #[pymodule]
 fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add_class::<PyCalendar>()?;
     m.add_class::<PyContractionHierarchy>()?;
     m.add_class::<PyGraph>()?;
     m.add_class::<PyHeuristic>()?;
@@ -797,6 +914,7 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySearchResult>()?;
     m.add_class::<PySearchTree>()?;
     m.add_function(wrap_pyfunction!(astar, m)?)?;
+    m.add_function(wrap_pyfunction!(time_dependent_dijkstra, m)?)?;
     m.add_function(wrap_pyfunction!(load_osm, m)?)?;
     m.add_function(wrap_pyfunction!(dijkstra, m)?)?;
     m.add_function(wrap_pyfunction!(bfs, m)?)?;

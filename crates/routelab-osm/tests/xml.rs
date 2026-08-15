@@ -156,3 +156,106 @@ fn an_unrecognised_extension_says_so() {
         "{error}"
     );
 }
+
+// --- Conditional restrictions ------------------------------------------------
+
+const HOUR: u32 = 3600;
+
+fn walking_with_access() -> Profile {
+    walking().reading_access(["foot".to_string(), "access".to_string()])
+}
+
+/// The edge from `tail` to `head`, by OSM node id, and its windows if any.
+fn scheduled(
+    network: &routelab_osm::OsmNetwork,
+    tail: i64,
+    head: i64,
+) -> (usize, Option<Vec<(u32, u32)>>) {
+    let edge = (0..network.num_edges())
+        .find(|&e| {
+            network.node_ids[network.edge_tails[e] as usize] == tail
+                && network.node_ids[network.edge_heads[e] as usize] == head
+        })
+        .unwrap_or_else(|| panic!("no edge {tail} -> {head}"));
+    let windows = network
+        .edge_windows
+        .iter()
+        .find(|(index, _)| *index as usize == edge)
+        .map(|(_, windows)| windows.clone());
+    (edge, windows)
+}
+
+fn open_at(windows: &[(u32, u32)], moment: u32) -> bool {
+    windows.iter().any(|&(start, end)| {
+        if end <= start {
+            moment >= start || moment < end
+        } else {
+            moment >= start && moment < end
+        }
+    })
+}
+
+#[test]
+fn a_gate_carries_its_hours_onto_both_of_its_edges() {
+    let network = load(&fixture("conditional.osm"), &walking_with_access()).unwrap();
+    for (tail, head) in [(2, 3), (3, 2)] {
+        let (_, windows) = scheduled(&network, tail, head);
+        let windows = windows.unwrap_or_else(|| panic!("{tail} -> {head} should be scheduled"));
+        assert_eq!(windows.len(), 7, "one window a day");
+        assert!(open_at(&windows, 12 * HOUR), "noon");
+        assert!(!open_at(&windows, 3 * HOUR), "3am");
+    }
+}
+
+#[test]
+fn the_way_round_the_gate_carries_no_schedule_at_all() {
+    let network = load(&fixture("conditional.osm"), &walking_with_access()).unwrap();
+    // Node 4 is touched by one way only, so it is shape rather than a junction
+    // and the detour is a single 1 -> 3 edge running through it.
+    assert_eq!(scheduled(&network, 1, 3).1, None);
+    assert_eq!(scheduled(&network, 3, 1).1, None);
+    assert_eq!(
+        scheduled(&network, 1, 2).1,
+        None,
+        "the approach is not gated"
+    );
+}
+
+#[test]
+fn a_nightly_closure_reads_as_open_the_rest_of_the_time() {
+    let network = load(&fixture("conditional.osm"), &walking_with_access()).unwrap();
+    let (_, windows) = scheduled(&network, 7, 8);
+    let windows = windows.expect("the overnight trail is scheduled");
+    assert!(open_at(&windows, 12 * HOUR), "open at noon by default");
+    assert!(!open_at(&windows, 2 * HOUR), "shut at 2am");
+}
+
+#[test]
+fn a_profile_that_reads_no_access_keys_sees_no_schedules() {
+    // The old behaviour, still available: a profile that was never told which
+    // access tags speak for it ignores them rather than guessing.
+    let network = load(&fixture("conditional.osm"), &walking()).unwrap();
+    assert!(network.edge_windows.is_empty());
+}
+
+#[test]
+fn a_reversible_lane_runs_each_way_at_its_own_hours() {
+    let network = load(&fixture("conditional.osm"), &driving()).unwrap();
+    // Drawn 5 -> 6, so `yes @` afternoons is forward and `-1 @` mornings is back.
+    let (_, forward) = scheduled(&network, 5, 6);
+    let forward = forward.expect("the forward lane is scheduled");
+    assert!(
+        open_at(&forward, 14 * HOUR),
+        "Monday afternoon, with the arrow"
+    );
+    assert!(!open_at(&forward, 8 * HOUR), "not on a Monday morning");
+
+    let (_, backward) = scheduled(&network, 6, 5);
+    let backward = backward.expect("the reverse lane is scheduled");
+    assert!(open_at(&backward, 8 * HOUR), "Monday morning, against it");
+    assert!(!open_at(&backward, 14 * HOUR), "not in the afternoon");
+
+    // And neither runs at the weekend, which the schedule never mentions.
+    let saturday = 5 * 24 * HOUR + 8 * HOUR;
+    assert!(!open_at(&forward, saturday) && !open_at(&backward, saturday));
+}

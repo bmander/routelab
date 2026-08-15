@@ -40,12 +40,22 @@ PROFILES = {"walking": rl.Walking, "cycling": rl.Cycling, "driving": rl.Driving}
 #: environment when someone first asks for one. Adding an algorithm to the demo
 #: is adding a line here; everything downstream asks the planner what it found
 #: and what it explored, and neither answer depends on which one it is.
-ALGORITHMS = {
+ALGORITHMS: "dict[str, rl.Planner]" = {
     "dijkstra": rl.Dijkstra(),
     "astar": rl.AStar(rl.Euclidean()),
     "landmarks": rl.AStar(rl.Landmarks(16)),
     "ch": rl.ContractionHierarchy(),
+    "timedep": rl.TimeDependentDijkstra(),
 }
+
+def wants_time(technique: rl.Planner) -> bool:
+    """Does this technique want a departure time?
+
+    Asked of the technique rather than hardcoded here: a planner that needs a
+    schedule declares it, and that is the same declaration `missing_from` uses
+    to say a dataset cannot support it.
+    """
+    return "schedule" in getattr(technique, "requires", frozenset())
 
 
 class Router:
@@ -118,6 +128,7 @@ class Router:
         destination,
         branches: "int | None" = None,
         explore: bool = True,
+        departing: int = 0,
     ) -> dict:
         """Route between two `(lat, lon)` points, and report the search too.
 
@@ -139,14 +150,19 @@ class Router:
         # spends routing, and the same quarter-second for all of them, which
         # would flatten the difference this demo exists to show. Paying it on
         # the rare failure keeps a drag answering at the speed of the search.
+        #
+        # Only the time-dependent technique understands a departure, and the
+        # others rightly refuse one, so it is passed to whoever asked for it.
+        when = {"departing": departing} if wants_time(ALGORITHMS[algorithm]) else {}
+
         began = time.perf_counter()
-        result = planner.search(start, targets=[planner.node_id(end)])
+        result = planner.search(start, targets=[planner.node_id(end)], **when)
         elapsed = (time.perf_counter() - began) * 1000
 
         if result.cost(planner.node_id(end)) is None:
             end = layer.nearest(*destination, within=self._reachable(profile, start))
             began = time.perf_counter()
-            result = planner.search(start, targets=[planner.node_id(end)])
+            result = planner.search(start, targets=[planner.node_id(end)], **when)
             elapsed = (time.perf_counter() - began) * 1000
 
         target = planner.node_id(end)
@@ -208,6 +224,7 @@ class Handler(BaseHTTPRequestHandler):
                 point("to"),
                 int(branches) if branches else None,
                 explore=query.get("explore", ["1"])[0] != "0",
+                departing=int(query.get("departing", ["0"])[0]),
             )
         except (KeyError, ValueError) as error:
             payload = {"error": str(error)}
@@ -252,6 +269,10 @@ PAGE = """<!doctype html>
   .pin { border-radius: 50%; background: #fff; border: 2px solid #1d3557;
          box-sizing: border-box; cursor: grab; }
   .leaflet-drag-target .pin { cursor: grabbing; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .row select { width: auto; }
+  #clock { font-variant-numeric: tabular-nums; font-size: 15px; }
+  #minute { width: 100%; margin: 6px 0 0; }
 </style>
 <div id="panel">
   <h1>routelab</h1>
@@ -265,7 +286,21 @@ PAGE = """<!doctype html>
     <option value="landmarks">A* (16 landmarks)</option>
     <option value="dijkstra">Dijkstra</option>
     <option value="ch">Contraction hierarchy</option>
+    <option value="timedep">Time-dependent Dijkstra</option>
   </select>
+  <div id="when" hidden>
+    <label for="day">departing</label>
+    <div class="row">
+      <select id="day">
+        <option value="0">Mon</option><option value="1">Tue</option>
+        <option value="2">Wed</option><option value="3">Thu</option>
+        <option value="4">Fri</option><option value="5">Sat</option>
+        <option value="6">Sun</option>
+      </select>
+      <b id="clock">08:00</b>
+    </div>
+    <input id="minute" type="range" min="0" max="1435" step="5" value="480">
+  </div>
   <div id="status" class="hint">Click the map to set an origin.</div>
   <div id="note" class="hint" style="margin-top:6px">Drag either endpoint to re-route.</div>
 </div>
@@ -314,11 +349,47 @@ map.on('click', event => {
   }
 });
 
-for (const id of ['profile', 'algorithm']) {
+const when = document.getElementById('when');
+const day = document.getElementById('day');
+const minute = document.getElementById('minute');
+const clock = document.getElementById('clock');
+
+// Seconds since Monday 00:00 — the weekly clock the schedules are written on.
+function departing() {
+  return day.value * 86400 + minute.value * 60;
+}
+
+function showClock() {
+  const total = Number(minute.value);
+  const pad = n => String(n).padStart(2, '0');
+  clock.textContent = `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
+}
+showClock();
+
+// Only the time-dependent technique reads a departure, so the control appears
+// when it is chosen and not before — an input that changes nothing is worse
+// than no input at all.
+function showWhen() {
+  when.hidden = document.getElementById('algorithm').value !== 'timedep';
+}
+showWhen();
+
+for (const id of ['profile', 'algorithm', 'day']) {
   document.getElementById(id).addEventListener('change', () => {
+    showWhen();
     if (pins.length === 2) { request(true); }
   });
 }
+
+// Dragging the slider re-routes live, exactly as dragging a pin does, and for
+// the same reason: the route is cheap and the search space is not.
+minute.addEventListener('input', () => {
+  showClock();
+  if (pins.length === 2) { space.clearLayers(); trace(); }
+});
+minute.addEventListener('change', () => {
+  if (pins.length === 2) { request(true); }
+});
 
 // One request in flight at a time, with the last drag position remembered.
 // Leaflet fires `drag` on every mousemove, and queueing sixty of those a second
@@ -346,7 +417,8 @@ async function request(explore) {
 
   const at = pin => { const p = pin.getLatLng(); return `${p.lat},${p.lng}`; };
   const query = new URLSearchParams({
-    from: at(pins[0]), to: at(pins[1]), profile, algorithm});
+    from: at(pins[0]), to: at(pins[1]), profile, algorithm,
+    departing: departing()});
   if (!explore) { query.set('explore', '0'); }
 
   const answer = await (await fetch('/route?' + query)).json();

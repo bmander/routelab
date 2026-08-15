@@ -33,6 +33,7 @@ import copy
 from typing import Any, Dict, Hashable, Iterable, Mapping, Optional, Union
 
 from . import _routelab
+from .clock import weekly_seconds
 from .environment import CompiledEnvironment, Environment
 from .heuristics import Heuristic
 from .journey import Journey
@@ -40,7 +41,15 @@ from .orderings import EdgeDifference, Ordering
 from .search import Result, SearchResult, astar, bfs, dijkstra
 from .searchspace import MeetingTrees, SearchSpace, ShortestPathTree
 
-__all__ = ["AStar", "BFS", "ContractionHierarchy", "Dijkstra", "Planner", "route"]
+__all__ = [
+    "AStar",
+    "BFS",
+    "ContractionHierarchy",
+    "Dijkstra",
+    "Planner",
+    "TimeDependentDijkstra",
+    "route",
+]
 
 #: How a caller names where to start: one label, a list of labels, or a mapping
 #: of labels to the cost of already being there. Tuples and strings are single
@@ -379,6 +388,75 @@ class ContractionHierarchy(Planner):
 
     def __repr__(self) -> str:
         return self._describe(repr(self.ordering))
+
+
+class TimeDependentDijkstra(Planner):
+    """Cheapest arrival when the network is not always open.
+
+        TimeDependentDijkstra().bind(env).route("a", "b", departing=time(8, 30))
+
+    Dreyfus, *An Appraisal of Some Shortest-Path Algorithms* (1969): Dijkstra's
+    algorithm generalises to a time-dependent network unchanged, provided
+    arrival is non-decreasing in departure. Here it is, because travel times are
+    constant and only availability varies — a gate is shut, a lane runs the
+    other way — so leaving later cannot arrive earlier.
+
+    This is a *different technique*, not :class:`Dijkstra` with an extra
+    argument, which is what keeps a schedule from being ignored by accident.
+    Ask for `Dijkstra` and you get the always-open network, honestly and
+    knowingly; ask for this one and you get the clock.
+
+    Args:
+        waiting: ``"unrestricted"`` waits at a shut edge and pays the wait as
+            travel time — arriving five minutes early beats an hour's detour,
+            and a ten-hour wait loses to one, without anyone deciding which.
+            ``"forbidden"`` treats a shut edge as absent, which is the control
+            that shows waiting is doing real work.
+    """
+
+    #: A schedule to read. Without one this is Dijkstra with extra steps, and
+    #: `missing_from` says so before anything is built.
+    requires: "frozenset[str]" = frozenset({"schedule"})
+
+    WAITING = ("unrestricted", "forbidden")
+
+    def __init__(self, waiting: str = "unrestricted"):
+        if waiting not in self.WAITING:
+            raise ValueError(
+                f"unknown waiting policy {waiting!r}; expected "
+                f"{' or '.join(repr(name) for name in self.WAITING)}"
+            )
+        self.waiting = waiting
+
+    def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
+        return super().missing_from(compiled) | (self.requires - compiled.provides)
+
+    def search(self, origins: Origins, **options: Any) -> Result:
+        """Run the search from a departure time. There is no default for it.
+
+        A time-dependent query without a time is not a query with a sensible
+        fallback — it is a different question. Asking for one loudly is the same
+        rule that makes :class:`~routelab.Zero` something you have to name.
+        """
+        departing = options.pop("departing", None)
+        if departing is None:
+            raise ValueError(
+                "a time-dependent search needs a departure time: pass "
+                "departing=datetime(...) or departing=time(8, 30). Use "
+                "Dijkstra() to route the network as if it were always open."
+            )
+        compiled = self._bound()
+        return _routelab.time_dependent_dijkstra(
+            compiled.graph,
+            compiled.calendar,
+            list(self._origin_ids(origins).items()),
+            weekly_seconds(departing),
+            waiting=self.waiting,
+            **options,
+        )
+
+    def __repr__(self) -> str:
+        return self._describe(repr(self.waiting) if self.waiting != "unrestricted" else "")
 
 
 def route(

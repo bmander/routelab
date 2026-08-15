@@ -225,6 +225,59 @@ pub fn open_windows(base: Option<&str>, conditional: &str) -> Option<Vec<Window>
     })
 }
 
+/// Whether a plain access value permits travel; `None` if it is not a value
+/// this module recognises.
+pub fn permits(value: &str) -> Option<bool> {
+    verdict(value).map(|verdict| verdict == Verdict::Allow)
+}
+
+/// When each direction of a reversible way may be travelled.
+///
+/// `oneway:conditional=-1 @ (Mo-Fr 05:00-11:00); yes @ (Mo-Fr 11:15-23:00)` is
+/// the Seattle express lanes: running against the way's drawn direction in the
+/// morning and with it in the afternoon. Returns `(forward, backward)` windows,
+/// or `None` if the schedule could not be read — in which case the caller is
+/// left with `oneway=reversible`, which opens nothing.
+pub fn oneway_windows(conditional: &str) -> Option<(Vec<Window>, Vec<Window>)> {
+    let (mut forward, mut backward) = (Vec::new(), Vec::new());
+    for clause in split_clauses(conditional) {
+        let (value, condition) = clause.split_once('@')?;
+        let condition = condition.trim();
+        let condition = condition
+            .strip_prefix('(')
+            .and_then(|rest| rest.strip_suffix(')'))
+            .unwrap_or(condition);
+        let windows = schedule(condition)?;
+        // The value is a `oneway` value, not an access one: which way traffic
+        // runs during those hours.
+        match value.trim() {
+            "yes" | "true" | "1" => forward.extend(windows),
+            "-1" | "reverse" => backward.extend(windows),
+            "no" | "false" | "0" => {
+                forward.extend(windows.iter().copied());
+                backward.extend(windows);
+            }
+            _ => return None,
+        }
+    }
+    (!forward.is_empty() || !backward.is_empty()).then(|| (merge(&forward), merge(&backward)))
+}
+
+/// The windows both sets cover — a way open only when two restrictions agree.
+pub fn intersect(left: &[Window], right: &[Window]) -> Vec<Window> {
+    let (left, right) = (merge(left), merge(right));
+    let mut both = Vec::new();
+    for &(start, end) in &left {
+        for &(other_start, other_end) in &right {
+            let (from, to) = (start.max(other_start), end.min(other_end));
+            if from < to {
+                both.push((from, to));
+            }
+        }
+    }
+    merge(&both)
+}
+
 /// Break windows into non-wrapping pieces, sort them, and fuse any that touch.
 fn merge(windows: &[Window]) -> Vec<Window> {
     let mut pieces: Vec<Window> = Vec::with_capacity(windows.len() + 1);

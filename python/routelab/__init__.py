@@ -39,7 +39,16 @@ from .graph import Graph
 from .heuristics import Euclidean, Heuristic, Landmarks, Zero
 from .journey import Journey, Leg
 from .orderings import EdgeDifference, Ordering, RandomOrder
-from .planners import BFS, AStar, ContractionHierarchy, Dijkstra, Planner, route
+from .clock import WEEK, weekly_seconds
+from .planners import (
+    BFS,
+    AStar,
+    ContractionHierarchy,
+    Dijkstra,
+    Planner,
+    TimeDependentDijkstra,
+    route,
+)
 from .search import Result, SearchResult, astar, bfs, dijkstra
 from .searchspace import Branch, MeetingTrees, SearchSpace, ShortestPathTree
 from .sources import OSM, Cycling, Driving, Profile, Walking
@@ -75,7 +84,9 @@ __all__ = [
     "SearchResult",
     "SearchSpace",
     "ShortestPathTree",
+    "TimeDependentDijkstra",
     "Sources",
+    "WEEK",
     "Walking",
     "Zero",
     "astar",
@@ -86,6 +97,7 @@ __all__ = [
     "reference",
     "route",
     "sources",
+    "weekly_seconds",
 ]
 
 __version__ = _routelab.__version__

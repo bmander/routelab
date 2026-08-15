@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A gate with a way round it, in the shape of the Ballard Locks.
+
+      1 ---- 2 ==GATE== 3          way 10, then way 20 (footway, 07:00-21:00)
+      |                 |
+      +------ 4 --------+          way 30 (footway, always open, much longer)
+
+  Node 4 is touched by one way only, so it survives as shape and the detour is
+  a single 1 -> 3 edge rather than two.
+
+  Nodes are 0.001 deg apart, which is about 111 m near the equator. The gated
+  route is short and the way round is long, so which one a search takes says
+  plainly whether it read the schedule.
+
+  Way 40 is the reversible-lane shape: drawn 5 -> 6, running backwards on
+  weekday mornings and forwards on weekday afternoons.
+
+  Way 50 is a trail shut overnight, the other tag form: `no @` rather than
+  `yes @`, meaning open by default.
+-->
+<osm version="0.6" generator="hand">
+  <node id="1" lat="0.000" lon="0.000"/>
+  <node id="2" lat="0.000" lon="0.001"/>
+  <node id="3" lat="0.000" lon="0.002"/>
+  <node id="4" lat="0.004" lon="0.001"/>
+  <node id="5" lat="0.010" lon="0.000"/>
+  <node id="6" lat="0.010" lon="0.001"/>
+  <node id="7" lat="0.020" lon="0.000"/>
+  <node id="8" lat="0.020" lon="0.001"/>
+
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <tag k="highway" v="footway"/>
+  </way>
+
+  <!-- The gate. Open only during its hours, and note the missing space after
+       the @, which is how it is actually written on the map. -->
+  <way id="20">
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <tag k="highway" v="footway"/>
+    <tag k="access:conditional" v="yes @(07:00-21:00)"/>
+  </way>
+
+  <!-- The long way round, through node 4. -->
+  <way id="30">
+    <nd ref="1"/>
+    <nd ref="4"/>
+    <nd ref="3"/>
+    <tag k="highway" v="footway"/>
+  </way>
+
+  <!-- A reversible lane: against its drawn direction on weekday mornings. -->
+  <way id="40">
+    <nd ref="5"/>
+    <nd ref="6"/>
+    <tag k="highway" v="motorway"/>
+    <tag k="oneway" v="reversible"/>
+    <tag k="oneway:conditional" v="-1 @ (Mo-Fr 05:00-11:00); yes @ (Mo-Fr 11:15-23:00)"/>
+  </way>
+
+  <!-- Open by default, shut overnight. -->
+  <way id="50">
+    <nd ref="7"/>
+    <nd ref="8"/>
+    <tag k="highway" v="footway"/>
+    <tag k="access:conditional" v="no @ (23:00-05:00)"/>
+  </way>
+</osm>

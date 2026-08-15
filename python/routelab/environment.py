@@ -31,6 +31,7 @@ from __future__ import annotations
 import bisect
 from typing import Any, Dict, Hashable, Iterable, Iterator, List, Mapping, Optional, Tuple
 
+from . import _routelab
 from .graph import Graph
 
 __all__ = [
@@ -48,6 +49,17 @@ LabelledEdge = Tuple[Hashable, Hashable, int]
 #: layer does not, and compiling one as if it did would quietly throw away the
 #: thing that makes it time-dependent — so :class:`CompiledEnvironment` refuses.
 COMPILABLE_COST_MODELS = frozenset({"scalar"})
+
+
+def windows_of(source: "EdgeSource", index: int) -> "Optional[List[Tuple[int, int]]]":
+    """When a layer's ``index``-th edge may be travelled, or ``None`` for always.
+
+    The sibling of :func:`shape_of`, and optional in the same way: a layer that
+    knows nothing about time simply has no hook, and everything it contributes
+    is open at every hour.
+    """
+    getter = getattr(source, "windows", None)
+    return None if getter is None else getter(index)
 
 
 def shape_of(source: "EdgeSource", index: int) -> "Optional[List[Tuple[float, float]]]":
@@ -296,6 +308,12 @@ class CompiledEnvironment:
         self._spans: "Tuple[Tuple[int, int, EdgeSource], ...]" = tuple(spans)
         self._span_starts: "Tuple[int, ...]" = tuple(start for start, _, _ in spans)
 
+        #: When each edge may be travelled, for the techniques that ask. Built
+        #: from the layers' own ``windows`` hooks and keyed by *input* position,
+        #: which the kernel translates — an edge id is a CSR position and the
+        #: two are not the same. ``None`` when no layer schedules anything.
+        self.calendar = self._gather_calendar(spans)
+
         #: Coordinates per node id, ``None`` where a node has none.
         self.positions: "Tuple[Optional[Tuple[float, float]], ...]" = self._gather_positions(
             sources, index
@@ -306,6 +324,25 @@ class CompiledEnvironment:
         self.cost_per_distance = self._gather_cost_per_distance(
             [source for _, _, source in spans]
         )
+
+    def _gather_calendar(
+        self, spans: "List[Tuple[int, int, EdgeSource]]"
+    ) -> "Optional[_routelab.Calendar]":
+        """Collect every layer's schedules into one calendar, or ``None``.
+
+        Walks the input edge list rather than the graph, because that is the
+        numbering a layer speaks: ``locate`` runs the other way and would need
+        the answer to ask the question.
+        """
+        windows = []
+        for start, stop, source in spans:
+            for position in range(stop - start):
+                schedule = windows_of(source, position)
+                if schedule:
+                    windows.append((start + position, schedule))
+        if not windows:
+            return None
+        return _routelab.Calendar.from_windows(self.graph, windows)
 
     @staticmethod
     def _gather_positions(
@@ -368,6 +405,8 @@ class CompiledEnvironment:
             provided.add("cost_per_distance")
         if any(source.geometry(0) is not None for _, _, source in self._spans):
             provided.add("geometry")
+        if self.calendar is not None:
+            provided.add("schedule")
         return frozenset(provided)
 
     def node_id(self, label: Hashable) -> int:

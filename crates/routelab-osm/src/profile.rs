@@ -7,6 +7,8 @@
 
 use std::collections::HashMap;
 
+use crate::conditional;
+
 /// Metres per second, for a way whose class is priced but whose speed is unknown.
 const FALLBACK_SPEED: f64 = 1.0;
 
@@ -20,6 +22,11 @@ pub struct Profile {
     respect_oneway: bool,
     /// Whether a way's own `maxspeed` tag overrides its class speed.
     use_maxspeed: bool,
+    /// Which access keys speak for this traveller, most specific first — a
+    /// pedestrian reads `foot` then `access`, a driver `motor_vehicle` then
+    /// `vehicle` then `access`. Empty means access tags are ignored entirely,
+    /// which is what a profile built before this existed gets.
+    access_keys: Vec<String>,
 }
 
 impl Profile {
@@ -32,7 +39,14 @@ impl Profile {
             speeds: speeds.into_iter().collect(),
             respect_oneway,
             use_maxspeed,
+            access_keys: Vec::new(),
         }
+    }
+
+    /// The same profile, reading these access keys — most specific first.
+    pub fn reading_access(mut self, keys: impl IntoIterator<Item = String>) -> Self {
+        self.access_keys = keys.into_iter().collect();
+        self
     }
 
     /// The fastest anything travels under this profile, which is what makes a
@@ -54,34 +68,128 @@ impl Profile {
             .map(|posted| posted.min(self.max_speed()))
             .unwrap_or(class_speed);
 
+        // When the way may be used at all, from whichever access key speaks for
+        // this traveller. `None` is no restriction; an empty list is never.
+        let access = self.access_windows(tags);
+        if access.as_ref().is_some_and(Vec::is_empty) {
+            return None; // shut at every hour there is, so not a way at all
+        }
+
+        // Which directions, and — for a reversible lane — when each of them.
+        // `oneway=reversible` opens neither direction on its own; the schedule
+        // is what reopens it, one way at a time.
         let (forward, backward) = if self.respect_oneway {
             oneway_directions(tags)
         } else {
             (true, true)
         };
+        let reversal = self
+            .respect_oneway
+            .then_some(tags.oneway_conditional.as_deref())
+            .flatten()
+            .and_then(conditional::oneway_windows);
+
+        // Both restrictions have to hold at once, so they intersect. Either may
+        // be absent, and usually is.
+        let combine = |direction: Option<Vec<conditional::Window>>| match (&access, direction) {
+            (Some(access), Some(direction)) => Some(conditional::intersect(access, &direction)),
+            (Some(access), None) => Some(access.clone()),
+            (None, direction) => direction,
+        };
+        let (ahead, behind) = match reversal {
+            Some((ahead, behind)) => (combine(Some(ahead)), combine(Some(behind))),
+            None => (combine(None), combine(None)),
+        };
+
+        // A direction is usable if it was open to begin with, or if a schedule
+        // opens it at some hour.
+        let usable = |plain: bool, windows: &Option<Vec<conditional::Window>>| {
+            plain || windows.as_ref().is_some_and(|w| !w.is_empty())
+        };
+        let (forward, backward) = (usable(forward, &ahead), usable(backward, &behind));
+        if !forward && !backward {
+            return None;
+        }
+
         Some(Travel {
             speed,
             forward,
             backward,
+            forward_open: ahead,
+            backward_open: behind,
         })
+    }
+
+    /// The windows during which this traveller may use the way at all.
+    ///
+    /// The first access key the way carries wins, so `foot=no` beats a permissive
+    /// `access` on a footpath. A schedule that cannot be read leaves the way
+    /// unrestricted rather than guessed at.
+    fn access_windows(&self, tags: &WayTags) -> Option<Vec<conditional::Window>> {
+        for key in &self.access_keys {
+            let (base, schedule) = tags.access_for(key);
+            if let Some(schedule) = schedule {
+                if let Some(windows) = conditional::open_windows(base, schedule) {
+                    return Some(windows);
+                }
+                // Unreadable: fall through to the plain tag below.
+            }
+            if let Some(base) = base {
+                return match conditional::permits(base) {
+                    Some(true) => None,              // allowed, and always
+                    Some(false) => Some(Vec::new()), // never allowed
+                    None => None,                    // unreadable value, so no opinion
+                };
+            }
+        }
+        None
     }
 }
 
 /// How a particular way is traversed by a particular profile.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Travel {
     pub speed: f64,
     pub forward: bool,
     pub backward: bool,
+    /// When the forward edge may be used; `None` is always. An empty list means
+    /// never, which only arises for a direction a schedule closes entirely.
+    pub forward_open: Option<Vec<conditional::Window>>,
+    pub backward_open: Option<Vec<conditional::Window>>,
 }
 
+/// Access keys, most specific first. A profile names the ones that speak for
+/// it, and the first one a way carries is the one that decides.
+///
+/// `access` is the catch-all every profile falls back to, so it belongs last in
+/// every list rather than in this constant.
+pub const ACCESS_KEYS: [&str; 6] = [
+    "foot",
+    "bicycle",
+    "motor_vehicle",
+    "vehicle",
+    "bus",
+    "access",
+];
+
 /// The handful of tags that decide whether and how a way can be travelled.
+///
+/// Access tags are kept as `(key, value)` pairs rather than named fields
+/// because which of them applies is the profile's business, not this struct's:
+/// a pedestrian reads `foot` and falls back to `access`, a driver reads
+/// `motor_vehicle` first. Each is stored twice over — plain and `:conditional` —
+/// since the plain one is the default the conditional is an exception to.
 #[derive(Debug, Default, Clone)]
 pub struct WayTags {
     pub highway: Option<String>,
     pub maxspeed: Option<String>,
     pub oneway: Option<String>,
+    pub oneway_conditional: Option<String>,
     pub junction: Option<String>,
+    /// `(key, plain value)` for each access key the way carries.
+    pub access: Vec<(String, String)>,
+    /// `(key, conditional value)`, keyed by the same names.
+    pub access_conditional: Vec<(String, String)>,
 }
 
 impl WayTags {
@@ -91,11 +199,36 @@ impl WayTags {
             "highway" => &mut self.highway,
             "maxspeed" => &mut self.maxspeed,
             "oneway" => &mut self.oneway,
+            "oneway:conditional" => &mut self.oneway_conditional,
             "junction" => &mut self.junction,
-            _ => return false,
+            other => {
+                let (list, name) = match other.strip_suffix(":conditional") {
+                    Some(base) => (&mut self.access_conditional, base),
+                    None => (&mut self.access, other),
+                };
+                if !ACCESS_KEYS.contains(&name) {
+                    return false;
+                }
+                list.push((name.to_string(), value.to_string()));
+                return true;
+            }
         };
         *field = Some(value.to_string());
         true
+    }
+
+    fn lookup<'a>(list: &'a [(String, String)], key: &str) -> Option<&'a str> {
+        list.iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// The plain and conditional access values for `key`.
+    pub fn access_for(&self, key: &str) -> (Option<&str>, Option<&str>) {
+        (
+            Self::lookup(&self.access, key),
+            Self::lookup(&self.access_conditional, key),
+        )
     }
 }
 
@@ -105,6 +238,11 @@ fn oneway_directions(tags: &WayTags) -> (bool, bool) {
         Some("yes") | Some("true") | Some("1") => (true, false),
         Some("-1") | Some("reverse") => (false, true),
         Some("no") | Some("false") | Some("0") => (true, true),
+        // A reversible lane runs one way at a time, and which way is a matter
+        // of the clock — `oneway:conditional` says when. Without a schedule to
+        // read, the honest reading is that it is not freely traversable in
+        // either direction, which is what `travel` turns into a closed edge.
+        Some("reversible") | Some("alternating") => (false, false),
         // Roundabouts are one-way by convention, without saying so.
         _ => match tags.junction.as_deref() {
             Some("roundabout") | Some("circular") => (true, false),

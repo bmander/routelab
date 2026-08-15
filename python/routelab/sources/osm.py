@@ -86,6 +86,12 @@ class Profile:
             routable at all for this profile.
         respect_oneway: Whether `oneway` tags bind. They do for vehicles; a
             pedestrian walks up a one-way street without breaking anything.
+        access_keys: Which access tags speak for this traveller, most specific
+            first — a walker reads `foot` then `access`, a driver
+            `motor_vehicle` then `vehicle` then `access`. This is also what
+            decides whose `:conditional` schedules are read: a gate tagged
+            `foot:conditional` shuts a footpath and says nothing to a car.
+            Empty means access tags are ignored entirely.
         use_maxspeed: Whether a way's own `maxspeed` overrides its class speed.
             A posted limit above :attr:`max_speed` is capped there — see below.
     """
@@ -94,6 +100,7 @@ class Profile:
     speeds: Mapping[str, float] = field(default_factory=dict)
     respect_oneway: bool = True
     use_maxspeed: bool = True
+    access_keys: "Tuple[str, ...]" = ()
 
     @property
     def max_speed(self) -> float:
@@ -118,17 +125,29 @@ class Profile:
 
 def Walking() -> Profile:  # noqa: N802 - reads as a constructor at the call site
     """On foot: paths and streets alike, no one-way restrictions, 1.4 m/s."""
-    return Profile("Walking", WALKING_SPEEDS, respect_oneway=False)
+    return Profile(
+        "Walking", WALKING_SPEEDS, respect_oneway=False, access_keys=("foot", "access")
+    )
 
 
 def Cycling() -> Profile:  # noqa: N802
     """By bicycle: cycleways and most streets, one-way restrictions respected."""
-    return Profile("Cycling", CYCLING_SPEEDS, respect_oneway=True)
+    return Profile(
+        "Cycling",
+        CYCLING_SPEEDS,
+        respect_oneway=True,
+        access_keys=("bicycle", "vehicle", "access"),
+    )
 
 
 def Driving() -> Profile:  # noqa: N802
     """By car: the road hierarchy at class speeds, posted limits honoured."""
-    return Profile("Driving", DRIVING_SPEEDS, respect_oneway=True)
+    return Profile(
+        "Driving",
+        DRIVING_SPEEDS,
+        respect_oneway=True,
+        access_keys=("motor_vehicle", "vehicle", "access"),
+    )
 
 
 class OSM(EdgeSource):
@@ -155,6 +174,7 @@ class OSM(EdgeSource):
             raise FileNotFoundError(f"no OSM extract at {self.path!r}")
         self._network: "Optional[_routelab.OsmNetwork]" = None
         self._coordinates: "Optional[Mapping[int, Tuple[float, float]]]" = None
+        self._windows: "Optional[Mapping[int, List[Tuple[int, int]]]]" = None
 
     @property
     def cost_per_distance(self) -> float:
@@ -171,6 +191,7 @@ class OSM(EdgeSource):
                 list(self.profile.speeds.items()),
                 respect_oneway=self.profile.respect_oneway,
                 use_maxspeed=self.profile.use_maxspeed,
+                access_keys=list(self.profile.access_keys),
             )
         return self._network
 
@@ -203,6 +224,31 @@ class OSM(EdgeSource):
             lats, lons = network.coordinates()
             self._coordinates = dict(zip(network.node_ids, zip(lats, lons)))
         return self._coordinates
+
+    def windows(self, index: int) -> "Optional[List[Tuple[int, int]]]":
+        """When this layer's ``index``-th edge may be travelled, if not always.
+
+        Weekly-clock ``(start, end)`` seconds since Monday 00:00. ``None`` is the
+        overwhelmingly common answer — a couple of hundred edges out of six
+        hundred thousand carry a schedule — and it means no restriction. An
+        empty list would mean never, which the reader drops rather than emits.
+
+        The hook mirrors :meth:`geometry`: indices are this layer's own, and
+        :class:`~routelab.CompiledEnvironment` does the translation.
+        """
+        if self._windows is None:
+            self._windows = dict(self.network.windows())
+        return self._windows.get(index)
+
+    @property
+    def unreadable_schedules(self) -> int:
+        """Conditional tags the reader could not understand, and so ignored.
+
+        Reported rather than hidden: `opening_hours` is a large specification
+        and this reads a corner of it, so a schedule quietly dropped should be a
+        number someone can look at.
+        """
+        return self.network.unreadable_schedules
 
     def geometry(self, index: int) -> "List[Tuple[float, float]]":
         """The `(lat, lon)` points along the edge this layer emitted at ``index``.

@@ -7,6 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::conditional::Window;
 use crate::profile::{Profile, Travel, WayTags};
 
 /// Metres. The polar radius — the smallest — so distances computed with it are
@@ -38,6 +39,16 @@ pub struct OsmNetwork {
     /// Traversal time in seconds, rounded up.
     pub edge_weights: Vec<u32>,
     pub edge_geometry: Vec<GeometrySpan>,
+
+    /// When each restricted edge may be travelled, as `(edge, windows)` on the
+    /// weekly clock. Sparse — a couple of hundred entries out of six hundred
+    /// thousand edges on a city, so a dense column would be almost all "always".
+    /// Keyed by position in `edge_tails`, which is the order the edges are
+    /// handed to the graph builder.
+    pub edge_windows: Vec<(u32, Vec<Window>)>,
+    /// Schedules that could not be read, and so were ignored. Counted rather
+    /// than guessed at: a dropped restriction should be a visible number.
+    pub unreadable_schedules: usize,
 
     /// Interleaved lat/lon of every shape point, shared between edges.
     pub geometry_points: Vec<f64>,
@@ -204,7 +215,7 @@ impl<'a> NetworkBuilder<'a> {
                         &mut network,
                         &mut node_index,
                         &way.nodes[segment_start..=position],
-                        way.travel,
+                        &way.travel,
                     );
                     segment_start = position;
                 }
@@ -221,7 +232,7 @@ impl<'a> NetworkBuilder<'a> {
         network: &mut OsmNetwork,
         node_index: &mut HashMap<i64, u32>,
         nodes: &[i64],
-        travel: Travel,
+        travel: &Travel,
     ) {
         // A node outside the extract has no coordinates, so the segment through
         // it has no length and no shape. Extracts are cut somewhere; this is
@@ -257,25 +268,27 @@ impl<'a> NetworkBuilder<'a> {
 
         let tail_id = self.intern(network, node_index, tail);
         let head_id = self.intern(network, node_index, head);
-        if travel.forward {
-            network.edge_tails.push(tail_id);
-            network.edge_heads.push(head_id);
+        // One way splits into many edges, and each of them inherits the way's
+        // schedule — a gate part-way along a path shuts the whole path.
+        let mut emit = |from, to, reversed, open: &Option<Vec<Window>>| {
+            if let Some(windows) = open {
+                let edge = network.edge_tails.len() as u32;
+                network.edge_windows.push((edge, windows.clone()));
+            }
+            network.edge_tails.push(from);
+            network.edge_heads.push(to);
             network.edge_weights.push(seconds);
             network.edge_geometry.push(GeometrySpan {
                 start,
                 end,
-                reversed: false,
+                reversed,
             });
+        };
+        if travel.forward {
+            emit(tail_id, head_id, false, &travel.forward_open);
         }
         if travel.backward {
-            network.edge_tails.push(head_id);
-            network.edge_heads.push(tail_id);
-            network.edge_weights.push(seconds);
-            network.edge_geometry.push(GeometrySpan {
-                start,
-                end,
-                reversed: true,
-            });
+            emit(head_id, tail_id, true, &travel.backward_open);
         }
     }
 
