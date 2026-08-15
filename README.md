@@ -215,14 +215,40 @@ search drawn underneath it.
 
 ```bash
 python demos/serve.py data/Seattle.osm.pbf     # then open http://localhost:8000
+python demos/serve.py data/Seattle.osm.pbf --gtfs data/kcm.zip --date 2026-08-17
 ```
 
-The extract is read once at startup and the planners are built once, so a click
-costs a query and not a load — Seattle is 258,029 nodes and 590,671 edges from a
-65 MB extract, read in about five seconds, and a cross-town route answers in
-four milliseconds. Switching the algorithm dropdown re-runs the same query the
-other way: 19,530 nodes settled under A*, 44,557 under Dijkstra, for the same
-12.9-minute answer.
+Under the map is a **node board**, and it is these three steps drawn as a graph:
+layers feed an `Environment`, a technique binds to one and becomes a planner, a
+`Query` asks it something. Drag the nodes, pull the wires out, plug them in
+somewhere else. There is no second representation of what the controls mean —
+the board *is* the query, so unplugging a wire really does remove an argument
+and the page says which one.
+
+Which is what makes the refusals worth causing on purpose. Wire a GTFS layer
+into `Dijkstra` and the node turns red with the library's own sentence:
+
+```
+Dijkstra cannot route over timetable layers; it accepts scalar
+```
+
+Rewiring is cheap because everything is cached by a canonical spelling of the
+node and everything upstream of it, so going back to a shape you had before is
+free. That matters because the expensive things are exactly the ones worth
+comparing. Seattle is 258,029 nodes and 590,671 edges from a 65 MB extract, read
+in about five seconds; swapping the technique node re-runs the same query the
+other way:
+
+| wired up as | settled | query |
+|---|---:|---:|
+| `Dijkstra` | 16,250 | 3.3 ms |
+| `AStar` ← `Euclidean` | 5,941 | 1.5 ms |
+| `AStar` ← `Landmarks(16)` | 2,496 | 0.9 ms |
+| `ContractionHierarchy` ← `EdgeDifference` | 221 | 0.6 ms |
+| `TimeDependent` ← GTFS | 217 stops | 1.7 ms |
+| `TimeExpanded` ← GTFS | 893 events | 5.0 ms |
+
+Same two pins throughout; the first four return the same route.
 
 Country extracts come from [Geofabrik](https://download.geofabrik.de), city ones
 from [BBBike](https://download.bbbike.org/osm/bbbike/). Neither is committed —

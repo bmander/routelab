@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>routelab</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="/static/board.css">
+
+<div id="stage">
+  <div id="map"></div>
+  <div id="readout">Click the map to set an origin.</div>
+</div>
+
+<div id="grip" title="drag to resize"></div>
+
+<div id="board">
+  <div id="toolbar">
+    <b>node board</b>
+    <span class="hint">drag a port to a port &middot; click a wire to cut it &middot;
+      drag the background to pan &middot; scroll to zoom</span>
+    <span class="grow"></span>
+    <button id="add">+ add node</button>
+    <button id="reset">reset</button>
+  </div>
+  <div id="viewport">
+    <svg id="wires"><g id="wiregroup"></g></svg>
+    <div id="nodes"></div>
+  </div>
+  <div id="menu" hidden></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>const SETUP = __SETUP__;</script>
+<script src="/static/board.js"></script>
+<script src="/static/demo.js"></script>

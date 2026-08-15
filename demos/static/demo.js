@@ -1,0 +1,361 @@
+// The map, the pins, and the board that decides what happens between them.
+//
+// Everything here is glue. The interesting parts are `board.js`, which is the
+// graph, and the server, which evaluates it — this file only carries a query
+// from one to the other and draws what comes back.
+
+// Zoom buttons move aside: the readout wants the top-left corner. Canvas, not
+// SVG: a search tree is thousands of lines, and thousands of DOM nodes is where
+// a map stops being interactive.
+const map = L.map('map', {zoomControl: false, preferCanvas: true})
+  .setView(SETUP.center, 12);
+L.control.zoom({position: 'topright'}).addTo(map);
+// A grey basemap, not the standard one: standard OSM tiles draw roads in the
+// same oranges and yellows the search tree needs, and the tree disappears into
+// the streets it is drawn over.
+L.tileLayer('https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  {maxZoom: 19, attribution: '© OpenStreetMap, © CARTO'}).addTo(map);
+
+const readout = document.getElementById('readout');
+// Two groups, because a drag invalidates them at different rates. The route
+// follows the cursor; the search space behind it is stale the moment the
+// endpoint moves, so it is cleared for the duration and drawn again at the end.
+const space = L.layerGroup().addTo(map);
+const route = L.layerGroup().addTo(map);
+const PIN = L.divIcon({className: 'pin', iconSize: [14, 14], iconAnchor: [7, 7]});
+let pins = [];
+
+// A pin's position as the query string spells it. Shared, because both the
+// request and the URL it is recorded in have to agree about the wording.
+function at(pin) {
+  const point = pin.getLatLng();
+  return `${point.lat},${point.lng}`;
+}
+
+function dropPin(latlng) {
+  const pin = L.marker(latlng, {icon: PIN, draggable: true}).addTo(map);
+  // Live while moving, and the whole picture once it stops.
+  pin.on('dragstart', () => space.clearLayers());
+  pin.on('drag', () => trace());
+  pin.on('dragend', () => request(true));
+  pins.push(pin);
+  return pin;
+}
+
+map.on('click', event => {
+  if (pins.length === 2) {
+    pins.forEach(pin => pin.remove());
+    pins = [];
+    space.clearLayers();
+    route.clearLayers();
+  }
+  dropPin(event.latlng);
+
+  if (pins.length === 1) {
+    readout.className = 'hint';
+    readout.textContent = 'Now click a destination.';
+  } else {
+    request(true);
+  }
+});
+
+// --- the board ---------------------------------------------------------
+
+const board = new Board(document.getElementById('board'), explore => {
+  syncUrl();
+  if (pins.length === 2) {
+    // A slider still moving asks for the route alone; anything else — a wire,
+    // a dropdown, a node let go of — asks for the whole picture.
+    if (explore === false) { space.clearLayers(); trace(); } else { request(true); }
+  }
+});
+
+/** The graph the demo opens with: the three lines of the README, wired up. */
+function defaultGraph() {
+  board.nodes = new Map();
+  board.links = [];
+  board.next = 1;
+  const osm = board.add('OSM', 20, 10);
+  const env = board.add('Environment', 250, 10);
+  const heuristic = board.add('Landmarks', 20, 135);
+  const technique = board.add('AStar', 480, 10);
+  const query = board.add('Query', 720, 10);
+  board.links = [
+    {from: osm, to: env, port: 'layers'},
+    {from: env, to: technique, port: 'environment'},
+    {from: heuristic, to: technique, port: 'heuristic'},
+    {from: technique, to: query, port: 'planner'},
+  ];
+  board.draw();
+}
+
+// --- add-node menu -----------------------------------------------------
+
+const menu = document.getElementById('menu');
+// Cascades new nodes so a second one does not land on the first.
+let dropped = 0;
+document.getElementById('add').addEventListener('click', event => {
+  event.stopPropagation();
+  menu.textContent = '';
+  const groups = {};
+  for (const [type, spec] of Object.entries(TYPES)) {
+    (groups[spec.group] ||= []).push([type, spec]);
+  }
+  for (const [group, entries] of Object.entries(groups)) {
+    const heading = document.createElement('div');
+    heading.className = 'group';
+    heading.textContent = group;
+    menu.append(heading);
+    for (const [type, spec] of entries) {
+      const button = document.createElement('button');
+      button.textContent = spec.title;
+      if (spec.available && !spec.available()) {
+        button.disabled = true;
+        button.title = 'start the demo with --gtfs to offer this';
+      }
+      button.addEventListener('click', () => {
+        menu.hidden = true;
+        // Into the middle of whatever is in view, cascaded so that adding two
+        // in a row does not stack the second exactly on the first.
+        const box = board.viewport.getBoundingClientRect();
+        board.add(type,
+          (box.width / 2 - board.pan.x) / board.zoom - 88 + dropped * 26,
+          (box.height / 2 - board.pan.y) / board.zoom - 40 + dropped * 22);
+        dropped = (dropped + 1) % 5;
+        syncUrl();
+      });
+      menu.append(button);
+    }
+  }
+  const anchor = event.target.getBoundingClientRect();
+  const board_box = document.getElementById('board').getBoundingClientRect();
+  menu.style.left = (anchor.left - board_box.left - 60) + 'px';
+  menu.style.top = (anchor.bottom - board_box.top + 4) + 'px';
+  menu.hidden = false;
+});
+document.addEventListener('mousedown', event => {
+  if (!menu.hidden && !menu.contains(event.target)) { menu.hidden = true; }
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  defaultGraph();
+  syncUrl();
+  if (pins.length === 2) { request(true); }
+});
+
+// A node is deleted with the keyboard, the way it is in every editor that has
+// nodes. Selection is the last node whose header was pressed.
+let selected = null;
+document.getElementById('nodes').addEventListener('mousedown', event => {
+  const node = event.target.closest('.node');
+  document.querySelectorAll('.node.selected').forEach(n => n.classList.remove('selected'));
+  selected = node ? node.dataset.id : null;
+  if (node) { node.classList.add('selected'); }
+});
+window.addEventListener('keydown', event => {
+  if ((event.key === 'Delete' || event.key === 'Backspace') && selected
+      && !['INPUT', 'SELECT'].includes(document.activeElement.tagName)) {
+    board.remove(selected);
+    selected = null;
+  }
+});
+
+// --- resizing the board ------------------------------------------------
+
+const grip = document.getElementById('grip');
+grip.addEventListener('mousedown', event => {
+  event.preventDefault();
+  const panel = document.getElementById('board');
+  const start = event.clientY, height = panel.getBoundingClientRect().height;
+  const move = move_event => {
+    panel.style.flexBasis =
+      Math.max(60, Math.min(window.innerHeight - 120, height - (move_event.clientY - start)))
+      + 'px';
+    map.invalidateSize();
+  };
+  const stop = () => {
+    window.removeEventListener('mousemove', move);
+    window.removeEventListener('mouseup', stop);
+  };
+  window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', stop);
+});
+
+// --- URL state ---------------------------------------------------------
+
+// Everything that decides a query lives in the URL, so a result can be copied
+// and handed to someone else — the graph included, which is what makes "here is
+// the wiring that reproduces it" a link rather than a paragraph.
+// `replaceState`, not `pushState`: dragging a pin would otherwise fill the back
+// button with a hundred near-identical steps.
+function syncUrl() {
+  const query = new URLSearchParams({board: JSON.stringify(board.serialise())});
+  if (pins.length === 2) {
+    query.set('from', at(pins[0]));
+    query.set('to', at(pins[1]));
+  }
+  history.replaceState(null, '', '?' + query);
+}
+
+function restoreFromUrl() {
+  const query = new URLSearchParams(location.search);
+  const spec = query.get('board');
+  let loaded = false;
+  if (spec) {
+    try { board.load(JSON.parse(spec)); loaded = board.nodes.size > 0; }
+    catch (error) { console.warn('could not read the board from the URL', error); }
+  }
+  if (!loaded) { defaultGraph(); }
+
+  const points = ['from', 'to']
+    .map(name => query.get(name))
+    .filter(Boolean)
+    .map(pair => L.latLng(...pair.split(',').map(Number)));
+  points.forEach(dropPin);
+  if (points.length) {
+    map.setView(points[0], points.length === 2 ? 14 : 16);
+  }
+  if (pins.length === 2) { request(true); }
+}
+
+// --- asking ------------------------------------------------------------
+
+// One request in flight at a time, with the last drag position remembered.
+// Leaflet fires `drag` on every mousemove, and queueing sixty of those a second
+// would make the route lag further behind the cursor the longer you dragged.
+// This instead runs as fast as the server can answer and no faster.
+let busy = false, missed = false;
+async function trace() {
+  if (busy) { missed = true; return; }
+  busy = true;
+  try {
+    await request(false);
+  } finally {
+    busy = false;
+    if (missed) { missed = false; trace(); }
+  }
+}
+
+async function request(explore) {
+  if (pins.length !== 2) { return; }
+  if (explore) {
+    readout.className = 'hint';
+    readout.textContent = 'routing…';
+  }
+
+  const query = new URLSearchParams({
+    from: at(pins[0]), to: at(pins[1]),
+    board: JSON.stringify(board.serialise()),
+  });
+  if (!explore) { query.set('explore', '0'); }
+
+  syncUrl();
+  const answer = await (await fetch('/route?' + query)).json();
+  board.blame(answer.node);
+  if (answer.error) {
+    readout.className = 'hint';
+    readout.textContent = answer.error;
+    route.clearLayers();
+    // Where it snapped, even though it found nothing: "no journey from this
+    // stop at this hour" is only useful if you can see which stop it means.
+    (answer.snapped || []).forEach(p => L.circleMarker(p, {radius: 4, stroke: false,
+      fillOpacity: 1, fillColor: '#1d3557'}).addTo(route));
+    return;
+  }
+
+  // The search space first, so the route draws over it. Widths follow the
+  // square root of each branch's share of the peak: the trunk carries the whole
+  // search and the twigs almost none of it, and a linear scale would render
+  // everything but the trunk invisible.
+  //
+  // `direction` is only present on spaces made of more than one search — a
+  // hierarchy's two halves, climbing away from either end — and colouring by it
+  // is what makes them tell apart. One colour when it is absent.
+  const halves = {forward: '#1d6fa5', backward: '#7a3b9c'};
+  if (answer.tree) {
+    space.clearLayers();
+    L.geoJSON(answer.tree, {
+      style: feature => ({
+        color: halves[feature.properties.direction] || '#1d6fa5',
+        weight: 0.6 + 9 * Math.sqrt(feature.properties.share),
+        opacity: 0.8,
+      }),
+    }).addTo(space);
+  }
+
+  route.clearLayers();
+  L.polyline(answer.route, {color: '#d1495b', weight: 4}).addTo(route);
+  answer.snapped.forEach(p => L.circleMarker(p, {radius: 4, stroke: false,
+    fillOpacity: 1, fillColor: '#1d3557'}).addTo(route));
+
+  const minutes = ((answer.seconds - answer.waiting) / 60).toFixed(1);
+  const share = (100 * answer.settled_count / answer.graph_nodes).toFixed(1);
+  // A ten-hour wait for a gate is not a ten-hour walk, and reporting one total
+  // makes it look like one.
+  const waited = answer.waiting > 0
+    ? ` + <b>${humanise(answer.waiting)}</b> waiting`
+    : '';
+  // What the first line says depends on what was actually asked. A transit
+  // answer's headline is when you get there and how many times you change; a
+  // street answer's is how long it takes. The second line is the same question
+  // for both — how much of the graph the search had to settle — which is the
+  // number the two timetable models exist to be compared on.
+  const headline = answer.transit
+    ? `arrive <b>${hhmm(answer.arrives)}</b>, <b>${minutes}</b> min riding${waited}<br>` +
+      `<b>${answer.transfers}</b> transfer${answer.transfers === 1 ? '' : 's'} ` +
+      `over <b>${answer.legs}</b> stops`
+    : `<b>${minutes}</b> min moving${waited} over <b>${answer.legs}</b> legs`;
+
+  readout.className = '';
+  readout.innerHTML =
+    `${headline}<br>` +
+    `settled <b>${answer.settled_count.toLocaleString()}</b> ${answer.nodes_are || 'nodes'} ` +
+    `(${share}% of ${answer.graph_nodes.toLocaleString()}) in <b>${answer.ms}</b> ms` +
+    (answer.transit
+      ? `<br><span class="hint">a timetable query answers with an itinerary, ` +
+        `so there is no search space to draw</span>`
+      : answer.tree
+      ? `<br><span class="hint">tree: ${answer.branch_count.toLocaleString()} branches, ` +
+        `${answer.tree.features.length.toLocaleString()} drawn</span>`
+      : `<br><span class="hint">drop the pin to draw the search</span>`) +
+    scheduleNote(answer);
+}
+
+function humanise(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.round((seconds % 3600) / 60);
+  return hours ? `${hours}h ${minutes}m` : `${minutes} min`;
+}
+
+// A service-day clock, which runs past 24:00 rather than wrapping: a bus that
+// leaves at 23:50 and arrives at 24:10 made one trip, not one that landed
+// before it left.
+function hhmm(seconds) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor(seconds % 3600 / 60))}`;
+}
+
+// Say when this layer has a schedule that the wired-up technique is not
+// reading. Otherwise the map looks the same at every hour and there is nothing
+// to tell you the clock was never consulted.
+function scheduleNote(answer) {
+  if (answer.transit || !answer.scheduled_edges) { return ''; }
+  if (!answer.reads_clock) {
+    return `<br><span class="hint">${answer.scheduled_edges} edges here are ` +
+           `scheduled; this technique ignores them — wire in ` +
+           `<b>TimeDependentDijkstra</b> to route with the clock</span>`;
+  }
+  // Reading the clock and still seeing no change is the confusing case, and it
+  // has an ordinary cause: this particular route never touches a scheduled
+  // edge, so there is nothing for the hour to change.
+  if (!answer.scheduled_legs) {
+    return `<br><span class="hint">none of this route is scheduled, so the ` +
+           `hour cannot change it (${answer.scheduled_edges} edges in this ` +
+           `layer are)</span>`;
+  }
+  return `<br><span class="hint"><b>${answer.scheduled_legs}</b> of ` +
+         `${answer.legs} legs are scheduled</span>`;
+}
+
+// Last, because it drives everything above it.
+restoreFromUrl();
