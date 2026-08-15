@@ -30,6 +30,25 @@ _MAX_REPORTED = 5
 class Heuristic:
     """A specification for an estimate, not yet attached to an environment."""
 
+    #: What this heuristic needs an environment to supply, by name. Declared
+    #: rather than discovered: :meth:`bind` raises a good error when something
+    #: is missing, but that only answers the question after you have committed
+    #: to asking it. This answers "which of these can I even run here?" — which
+    #: is the question worth asking when a dozen techniques are on the shelf.
+    #:
+    #: The mirror of :attr:`routelab.Planner.accepts`, which does the same for
+    #: cost models.
+    requires: "frozenset[str]" = frozenset()
+
+    @classmethod
+    def missing_from(cls, compiled: CompiledEnvironment) -> "frozenset[str]":
+        """What this heuristic needs that ``compiled`` does not provide.
+
+        Empty means it can be bound. Cheap, and it touches nothing — no
+        preprocessing runs to find out.
+        """
+        return cls.requires - compiled.provides
+
     def bind(self, compiled: CompiledEnvironment) -> "_routelab.Heuristic":
         """Build the kernel heuristic for ``compiled``, or explain what is missing.
 
@@ -74,6 +93,8 @@ class Euclidean(Heuristic):
             higher than some layer actually charges, the bound stops being
             admissible and A* stops returning cheapest paths.
     """
+
+    requires = frozenset({"positions", "cost_per_distance"})
 
     def __init__(self, cost_per_distance: Optional[float] = None):
         self.cost_per_distance = cost_per_distance
@@ -153,6 +174,10 @@ class Landmarks(Heuristic):
             landmark set that cannot beat random is not earning its memory.
         seed: Fixes the choice, so a benchmark can be repeated.
     """
+
+    #: Nothing: a landmark bound is measured from the graph itself. What it
+    #: wants instead is time and memory, which no environment can supply.
+    requires = frozenset()
 
     def __init__(self, count: int = 16, selection: str = "farthest", seed: int = 0):
         self.count = count

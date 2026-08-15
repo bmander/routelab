@@ -197,10 +197,7 @@ def test_the_euclidean_estimate_never_overshoots(seed):
     heuristic = instance.heuristic()
     target = instance.graph.num_nodes - 1
 
-    reversed_graph = rl.Graph.from_edges(
-        [(head, tail, weight) for tail, head, weight in instance.graph.edges()],
-        num_nodes=instance.graph.num_nodes,
-    )
+    reversed_graph = instance.graph.reversed()
     true_cost = rl.dijkstra(reversed_graph, target)
 
     for node in range(instance.graph.num_nodes):

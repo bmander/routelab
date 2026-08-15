@@ -32,6 +32,14 @@ pub trait Heuristic {
     fn coverage(&self) -> Option<usize> {
         None
     }
+
+    /// Bytes of precomputed table this heuristic holds.
+    ///
+    /// Zero for one that computes rather than remembers. What a caller weighs
+    /// against how much the bound sharpens.
+    fn footprint(&self) -> usize {
+        0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -140,6 +148,41 @@ impl Heuristic for StandardHeuristic {
             StandardHeuristic::Zero => None,
             StandardHeuristic::Euclidean { xs, .. } => Some(xs.len()),
             StandardHeuristic::Landmarks(landmarks) => landmarks.coverage(),
+        }
+    }
+
+    fn footprint(&self) -> usize {
+        match self {
+            StandardHeuristic::Zero => 0,
+            StandardHeuristic::Euclidean { xs, ys, .. } => {
+                (xs.len() + ys.len()) * std::mem::size_of::<f64>()
+            }
+            StandardHeuristic::Landmarks(landmarks) => landmarks.footprint(),
+        }
+    }
+}
+
+impl fmt::Display for StandardHeuristic {
+    /// How a heuristic describes itself, so that callers — including the Python
+    /// bindings — do not each grow a match arm per variant.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StandardHeuristic::Zero => write!(f, "zero"),
+            StandardHeuristic::Euclidean {
+                xs,
+                cost_per_distance,
+                ..
+            } => write!(
+                f,
+                "euclidean({} nodes, cost_per_distance={cost_per_distance})",
+                xs.len()
+            ),
+            StandardHeuristic::Landmarks(landmarks) => write!(
+                f,
+                "landmarks({} over {} nodes)",
+                landmarks.len(),
+                landmarks.num_nodes()
+            ),
         }
     }
 }

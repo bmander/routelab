@@ -116,6 +116,17 @@ impl PyGraph {
         self.inner.iter_edges().collect()
     }
 
+    /// The same graph with every edge turned around.
+    ///
+    /// Searching it answers what a forward search cannot: the cost of *reaching*
+    /// each node rather than leaving it. Edge ids do not survive — CSR order
+    /// follows the tails, and the tails have changed.
+    fn reversed(&self) -> PyGraph {
+        PyGraph {
+            inner: Arc::new(self.inner.reversed()),
+        }
+    }
+
     /// Follow `edges` from `start`; return `(end_node, total_weight)`, or raise
     /// if the sequence is not a walk. The independent check on a returned path.
     fn walk(&self, start: NodeId, edges: Vec<EdgeId>) -> PyResult<(NodeId, Weight)> {
@@ -447,10 +458,7 @@ impl PyHeuristic {
     /// Bytes of precomputed table this heuristic holds, if it holds any.
     #[getter]
     fn footprint(&self) -> usize {
-        match self.inner.as_ref() {
-            StandardHeuristic::Landmarks(landmarks) => landmarks.footprint(),
-            _ => 0,
-        }
+        self.inner.footprint()
     }
 
     /// The estimated cost from `node` to `target`. Exposed so a test can check
@@ -459,23 +467,10 @@ impl PyHeuristic {
         self.inner.estimate(node, target)
     }
 
+    /// Heuristics describe themselves in core, so this stays a conversion
+    /// rather than growing an arm per kind.
     fn __repr__(&self) -> String {
-        match self.inner.as_ref() {
-            StandardHeuristic::Zero => "Heuristic.zero()".to_string(),
-            StandardHeuristic::Euclidean {
-                xs,
-                cost_per_distance,
-                ..
-            } => format!(
-                "Heuristic.euclidean({} nodes, cost_per_distance={cost_per_distance})",
-                xs.len()
-            ),
-            StandardHeuristic::Landmarks(landmarks) => format!(
-                "Heuristic.landmarks({} landmarks over {} nodes)",
-                landmarks.len(),
-                landmarks.num_nodes()
-            ),
-        }
+        format!("Heuristic.{}", self.inner)
     }
 }
 

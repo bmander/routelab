@@ -50,9 +50,14 @@ pub enum Selection {
 pub struct Landmarks {
     nodes: Vec<NodeId>,
     num_nodes: usize,
-    /// `from[i * num_nodes + v]` is `d(landmark_i, v)`.
+    /// `from[v * landmarks + i]` is `d(landmark_i, v)`.
+    ///
+    /// Node-major, not landmark-major: an estimate reads every landmark's entry
+    /// for one node, and laid out the other way those sit a megabyte apart —
+    /// sixteen cache lines where one would do. The searches that fill it run
+    /// per landmark, so filling costs a strided write instead of a memcpy, once.
     from: Vec<Weight>,
-    /// `to[i * num_nodes + v]` is `d(v, landmark_i)`.
+    /// `to[v * landmarks + i]` is `d(v, landmark_i)`.
     to: Vec<Weight>,
 }
 
@@ -64,24 +69,23 @@ impl Landmarks {
     pub fn build(graph: &Graph, count: usize, selection: Selection, seed: u64) -> Landmarks {
         let num_nodes = graph.num_nodes();
         let count = count.min(num_nodes);
+
+        // Choosing and measuring are the same work: spreading landmarks out
+        // means asking how far every node is from the ones chosen so far, which
+        // is the outward table. So selection hands its searches back rather than
+        // throwing them away for `build` to repeat.
+        let (nodes, outward) = choose(graph, count, selection, seed);
+
+        let landmarks = nodes.len();
         let reversed = graph.reversed();
-
-        let nodes = match selection {
-            Selection::Random => random_nodes(count, num_nodes, seed),
-            Selection::Farthest => farthest_nodes(graph, count, seed),
-        };
-
-        let mut from = vec![UNREACHABLE; count * num_nodes];
-        let mut to = vec![UNREACHABLE; count * num_nodes];
+        let mut from = vec![UNREACHABLE; landmarks * num_nodes];
+        let mut to = vec![UNREACHABLE; landmarks * num_nodes];
         for (index, &landmark) in nodes.iter().enumerate() {
-            let offset = index * num_nodes;
-            let outward = dijkstra(graph, &[(landmark, 0)], &SearchOptions::default())
-                .expect("a landmark is a node of the graph it was chosen from");
-            from[offset..offset + num_nodes].copy_from_slice(&outward.costs);
-
-            let inward = dijkstra(&reversed, &[(landmark, 0)], &SearchOptions::default())
-                .expect("the reversed graph has the same nodes");
-            to[offset..offset + num_nodes].copy_from_slice(&inward.costs);
+            let inward = distances_from(&reversed, landmark);
+            for node in 0..num_nodes {
+                from[node * landmarks + index] = outward[index][node];
+                to[node * landmarks + index] = inward[node];
+            }
         }
 
         Landmarks {
@@ -117,19 +121,23 @@ impl Landmarks {
 
 impl Heuristic for Landmarks {
     fn estimate(&self, node: NodeId, target: NodeId) -> Weight {
-        let (node, target) = (node as usize, target as usize);
+        let landmarks = self.nodes.len();
+        // Four contiguous runs, one per (table, node) pair: every landmark's
+        // entry for a node sits next to its neighbours.
+        let at_node = node as usize * landmarks;
+        let at_target = target as usize * landmarks;
         let mut best = 0;
-        for index in 0..self.nodes.len() {
-            let offset = index * self.num_nodes;
+        for index in 0..landmarks {
             // Each landmark offers two bounds; a landmark the search cannot
             // reach, or that cannot reach the target, offers neither. Skipping
             // it costs sharpness, never correctness — the maximum over fewer
             // valid bounds is still a lower bound.
-            let (from_node, from_target) = (self.from[offset + node], self.from[offset + target]);
+            let (from_node, from_target) =
+                (self.from[at_node + index], self.from[at_target + index]);
             if from_node != UNREACHABLE && from_target != UNREACHABLE {
                 best = best.max(from_target.saturating_sub(from_node));
             }
-            let (to_node, to_target) = (self.to[offset + node], self.to[offset + target]);
+            let (to_node, to_target) = (self.to[at_node + index], self.to[at_target + index]);
             if to_node != UNREACHABLE && to_target != UNREACHABLE {
                 best = best.max(to_node.saturating_sub(to_target));
             }
@@ -142,25 +150,49 @@ impl Heuristic for Landmarks {
     }
 }
 
+/// The landmarks, and the distance from each of them to everywhere.
+///
+/// Returned together because measuring is how spreading them out is decided —
+/// running those searches twice would double the preprocessing for nothing.
+fn choose(
+    graph: &Graph,
+    count: usize,
+    selection: Selection,
+    seed: u64,
+) -> (Vec<NodeId>, Vec<Vec<Weight>>) {
+    let num_nodes = graph.num_nodes();
+    if count == 0 || num_nodes == 0 {
+        return (Vec::new(), Vec::new());
+    }
+    match selection {
+        Selection::Farthest => farthest_nodes(graph, count, seed),
+        Selection::Random => {
+            let nodes = random_nodes(count, num_nodes, seed);
+            let outward = nodes
+                .iter()
+                .map(|&node| distances_from(graph, node))
+                .collect();
+            (nodes, outward)
+        }
+    }
+}
+
 /// Landmarks spread as far apart as the network allows.
 ///
 /// Start somewhere, walk to the farthest node from it, and make that the first
 /// landmark; from then on each new landmark is whichever node is farthest from
-/// all the ones already chosen. The searches doing the measuring are the same
-/// ones that would have to run anyway to fill the tables.
-fn farthest_nodes(graph: &Graph, count: usize, seed: u64) -> Vec<NodeId> {
-    let num_nodes = graph.num_nodes();
-    if count == 0 || num_nodes == 0 {
-        return Vec::new();
-    }
-
+/// all the ones already chosen.
+fn farthest_nodes(graph: &Graph, count: usize, seed: u64) -> (Vec<NodeId>, Vec<Vec<Weight>>) {
     let mut rng = Rng::new(seed);
-    let start = (rng.next() % num_nodes as u64) as NodeId;
+    let start = (rng.next() % graph.num_nodes() as u64) as NodeId;
     let mut nearest = distances_from(graph, start);
     let mut chosen = Vec::with_capacity(count);
+    let mut measured = Vec::with_capacity(count);
 
     while chosen.len() < count {
-        let next = argmax_reachable(&nearest).unwrap_or(start);
+        // `nearest` was seeded from `start`, whose own distance is zero, so
+        // something is always reachable and there is always a farthest node.
+        let next = argmax_reachable(&nearest).expect("a node is reachable from itself");
         if chosen.contains(&next) {
             // Everything reachable is already a landmark; the rest of the graph
             // cannot be measured from here, so stop rather than repeat.
@@ -168,17 +200,20 @@ fn farthest_nodes(graph: &Graph, count: usize, seed: u64) -> Vec<NodeId> {
         }
         chosen.push(next);
 
-        let measured = distances_from(graph, next);
-        for (node, distance) in measured.iter().enumerate() {
+        let distances = distances_from(graph, next);
+        for (node, distance) in distances.iter().enumerate() {
             nearest[node] = nearest[node].min(*distance);
         }
+        measured.push(distances);
     }
-    chosen
+    (chosen, measured)
 }
 
 fn random_nodes(count: usize, num_nodes: usize, seed: u64) -> Vec<NodeId> {
     let mut rng = Rng::new(seed);
     let mut chosen: Vec<NodeId> = Vec::with_capacity(count);
+    // `count` is clamped to the node count before this runs, so the rejection
+    // loop always has something left to find.
     while chosen.len() < count {
         let candidate = (rng.next() % num_nodes as u64) as NodeId;
         if !chosen.contains(&candidate) {
@@ -242,11 +277,11 @@ mod tests {
         let landmarks = Landmarks::build(&ring(), 1, Selection::Random, 7);
         let landmark = landmarks.nodes()[0] as usize;
         // On a one-way ring, going out and coming back are different distances
-        // for every node but the landmark itself.
-        let offset = 0;
+        // for every node but the landmark itself. One landmark, so its entry for
+        // each node is simply that node's slot.
         for node in 0..5 {
-            let out = landmarks.from[offset + node];
-            let back = landmarks.to[offset + node];
+            let out = landmarks.from[node];
+            let back = landmarks.to[node];
             assert_eq!(out + back, if node == landmark { 0 } else { 50 });
         }
     }

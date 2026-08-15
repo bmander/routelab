@@ -328,6 +328,28 @@ class CompiledEnvironment:
             rates.append(source.cost_per_distance)
         return min(rates) if rates else None
 
+    @property
+    def provides(self) -> "frozenset[str]":
+        """What this environment can supply beyond a graph, by name.
+
+        The counterpart to :attr:`routelab.Heuristic.requires`: between them a
+        caller can ask which techniques a given dataset can support without
+        building any of them and reading the errors. An OSM extract provides all
+        three; a hand-written edge list usually provides none.
+
+        - ``"positions"`` — every node has coordinates
+        - ``"cost_per_distance"`` — every edge-contributing layer declared a rate
+        - ``"geometry"`` — at least one layer knows the shape of its edges
+        """
+        provided = set()
+        if self.positions and all(point is not None for point in self.positions):
+            provided.add("positions")
+        if self.cost_per_distance is not None:
+            provided.add("cost_per_distance")
+        if any(source.geometry(0) is not None for _, _, source in self._spans):
+            provided.add("geometry")
+        return frozenset(provided)
+
     def node_id(self, label: Hashable) -> int:
         """The dense id of ``label``."""
         try:

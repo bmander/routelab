@@ -171,9 +171,9 @@ Seattle, driving, corner to corner (258,029 nodes):
 
 | | settled | of graph | query | preprocessing |
 |---|---:|---:|---:|---|
-| Dijkstra | 41,162 | 16.0% | 6.5 ms | — |
-| A* (euclidean) | 12,173 | 4.7% | 2.9 ms | — |
-| A* (16 landmarks) | 1,749 | 0.7% | 1.7 ms | 1.6 s, 33 MB |
+| Dijkstra | 41,162 | 16.0% | 5.0 ms | — |
+| A* (euclidean) | 12,173 | 4.7% | 2.7 ms | — |
+| A* (16 landmarks) | 1,749 | 0.7% | 0.7 ms | 1.0 s, 33 MB |
 
 Same 11.2-minute route from all three. The landmark count is the dial: 2
 landmarks (4 MB) already beat Euclidean, 32 (66 MB) settle 443 nodes. Spreading

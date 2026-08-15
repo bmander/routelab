@@ -42,6 +42,40 @@ def test_guidance_skips_what_leads_away(corridor):
     assert len(guided_order) < len(plain_order)
 
 
+def test_an_environment_says_what_it_provides(corridor):
+    assert corridor.compile().provides == frozenset(
+        {"positions", "cost_per_distance"}
+    )
+    bare = rl.Environment(rl.ScalarEdges(("a", "b", 1))).compile()
+    assert bare.provides == frozenset()
+
+
+def test_a_heuristic_says_what_it_needs_before_you_build_it(corridor):
+    # The question worth asking with a shelf full of techniques: which of these
+    # can this dataset support? Answered without preprocessing anything.
+    compiled = corridor.compile()
+    assert rl.Euclidean.missing_from(compiled) == frozenset()
+    assert rl.Landmarks.missing_from(compiled) == frozenset()
+
+    bare = rl.Environment(rl.ScalarEdges(("a", "b", 1))).compile()
+    assert rl.Euclidean.missing_from(bare) == {"positions", "cost_per_distance"}
+    assert rl.Landmarks.missing_from(bare) == frozenset(), "measures the graph itself"
+    assert rl.Zero.missing_from(bare) == frozenset()
+
+
+@pytest.mark.parametrize("heuristic", [rl.Zero, rl.Euclidean, rl.Landmarks])
+def test_declared_requirements_agree_with_what_binding_actually_does(corridor, heuristic):
+    """The invariant that keeps the declaration honest: if nothing is missing,
+    binding works; if something is, it does not."""
+    for environment in (corridor, rl.Environment(rl.ScalarEdges(("a", "b", 1)))):
+        compiled = environment.compile()
+        if heuristic.missing_from(compiled):
+            with pytest.raises(ValueError):
+                heuristic().bind(compiled)
+        else:
+            assert heuristic().bind(compiled) is not None
+
+
 def test_the_heuristic_is_required(corridor):
     with pytest.raises(TypeError):
         rl.AStar(corridor)  # type: ignore[call-arg]

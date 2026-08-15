@@ -54,10 +54,7 @@ def test_the_estimate_never_overshoots(seed):
     graph = instance.graph
     heuristic = rl._routelab.Heuristic.landmarks(graph, 4, "farthest", seed)
 
-    reversed_graph = rl.Graph.from_edges(
-        [(head, tail, weight) for tail, head, weight in graph.edges()],
-        num_nodes=graph.num_nodes,
-    )
+    reversed_graph = graph.reversed()
     target = graph.num_nodes - 1
     true_cost = rl.dijkstra(reversed_graph, target)
     for node in range(graph.num_nodes):
