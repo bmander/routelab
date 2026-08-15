@@ -62,21 +62,19 @@ impl SearchResult {
     /// has no final cost and no place in the tree — it was a guess the search
     /// had not yet confirmed or abandoned.
     pub fn tree(&self, graph: &Graph, magnitude: Magnitude) -> SearchTree {
-        // Each node starts holding only its own contribution.
+        // Settle order is topological for the tree — a node is always settled
+        // after the node it was reached from — so walking it backwards reaches
+        // every child before its parent. By the time a node comes up, its whole
+        // subtree has already poured into it; it adds its own contribution and
+        // pours the lot into its parent.
         let mut totals = vec![0u64; self.costs.len()];
-        for &node in &self.order {
-            totals[node as usize] = match magnitude {
+        for &node in self.order.iter().rev() {
+            totals[node as usize] += match magnitude {
                 Magnitude::Nodes => 1,
                 Magnitude::Weight => self
                     .parent_edge(node)
                     .map_or(0, |edge| u64::from(graph.weight(edge))),
             };
-        }
-
-        // Settle order is topological for the tree — a node is always settled
-        // after the node it was reached from — so walking it backwards pours
-        // every subtree into its parent before that parent is itself poured on.
-        for &node in self.order.iter().rev() {
             if let Some(parent) = self.parent(node) {
                 totals[parent as usize] += totals[node as usize];
             }

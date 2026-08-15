@@ -7,14 +7,12 @@ what an environment makes of the result.
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
 import pytest
 
 import routelab as rl
 
-FIXTURES = Path(__file__).resolve().parent.parent / "crates/routelab-osm/tests/data"
-JUNCTION = FIXTURES / "junction.osm"
+from conftest import FIXTURES, JUNCTION
 
 
 def haversine(a, b):

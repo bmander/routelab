@@ -117,7 +117,7 @@ class Router:
         tree = planner.explored(result)
         return {
             "route": [point for leg in journey.legs for point in compiled.geometry(leg.edge)],
-            "tree": tree.geojson(limit=branches)["features"],
+            "tree": tree.geojson(limit=branches),
             "peak": tree.peak,
             "branch_count": len(tree),
             "snapped": [coordinates[start], coordinates[end]],
@@ -158,7 +158,9 @@ class Handler(BaseHTTPRequestHandler):
             )
         except (KeyError, ValueError) as error:
             payload = {"error": str(error)}
-        return json.dumps(payload).encode("utf-8")
+        # Compact separators: the payload is mostly numbers, and the default
+        # ", " / ": " padding is about a tenth of ten megabytes.
+        return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
     def page(self) -> str:
         return PAGE.replace("__CENTER__", json.dumps(list(self.center)))
@@ -268,7 +270,7 @@ async function request() {
   // square root of each branch's share of the peak: the trunk carries the whole
   // search and the twigs almost none of it, and a linear scale would render
   // everything but the trunk invisible.
-  L.geoJSON({type: 'FeatureCollection', features: answer.tree}, {
+  L.geoJSON(answer.tree, {
     style: feature => ({
       color: '#1d6fa5',
       weight: 0.4 + 6 * Math.sqrt(feature.properties.share),
@@ -287,7 +289,7 @@ async function request() {
     `settled <b>${answer.settled_count.toLocaleString()}</b> nodes ` +
     `(${share}% of ${answer.graph_nodes.toLocaleString()}) in <b>${answer.ms}</b> ms<br>` +
     `<span class="hint">tree: ${answer.branch_count.toLocaleString()} branches, ` +
-    `${answer.tree.length.toLocaleString()} drawn</span>`;
+    `${answer.tree.features.length.toLocaleString()} drawn</span>`;
 }
 </script>
 """

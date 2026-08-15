@@ -21,7 +21,8 @@ search flowed, thinning to capillaries at the frontier.
 
 from __future__ import annotations
 
-from typing import Any, Hashable, Iterator, List, NamedTuple, Optional
+import heapq
+from typing import Hashable, Iterator, List, NamedTuple, Optional
 
 __all__ = ["Branch", "SearchSpace", "ShortestPathTree"]
 
@@ -32,12 +33,13 @@ class SearchSpace:
     #: What shape this space is, for a renderer that handles more than one.
     kind = "unknown"
 
-    def geojson(self, **options: Any) -> dict:
+    def geojson(self) -> dict:
         """The space as a GeoJSON ``FeatureCollection``.
 
         GeoJSON because it is the one format every map tool already reads —
         Leaflet, QGIS, geojson.io — so a search can be looked at without writing
-        a renderer first.
+        a renderer first. Implementations may add keyword options of their own;
+        what they cannot do is quietly accept ones they do not understand.
         """
         raise NotImplementedError
 
@@ -106,13 +108,15 @@ class ShortestPathTree(SearchSpace):
         """The `(lat, lon)` shape of a branch, if its layer keeps one."""
         return self._compiled.geometry(branch.edge)
 
-    def geojson(
-        self, *, min_magnitude: int = 0, limit: Optional[int] = None, **_: Any
-    ) -> dict:
+    def geojson(self, *, min_magnitude: int = 0, limit: Optional[int] = None) -> dict:
         """The tree as GeoJSON, one ``LineString`` per branch.
 
         Each feature carries its ``magnitude`` and a ``share`` of the peak, which
         is what a renderer needs to pick a width without knowing the units.
+
+        Features come back heaviest-first when ``limit`` is given, and in tree
+        order otherwise — a collection is unordered, and sorting tens of
+        thousands of branches nobody is going to drop is work for nothing.
 
         Args:
             min_magnitude: Drop branches carrying less than this.
@@ -120,18 +124,22 @@ class ShortestPathTree(SearchSpace):
                 is hundreds of thousands of them and a map cannot show that; the
                 heaviest are the ones that carry the shape.
         """
-        selected = sorted(
-            self.branches(min_magnitude=min_magnitude),
-            key=lambda branch: branch.magnitude,
-            reverse=True,
-        )
-        if limit is not None:
-            selected = selected[:limit]
+        # Straight down the arrays rather than through `branches()`: that
+        # resolves both endpoint labels per branch, and a feature needs neither.
+        selected = [
+            (edge, magnitude)
+            for edge, magnitude in zip(self._edges, self._magnitudes)
+            if magnitude >= min_magnitude
+        ]
+        if limit is not None and limit < len(selected):
+            # `nlargest`, not sort-then-slice: a limit worth setting is far
+            # smaller than the tree it is cutting down.
+            selected = heapq.nlargest(limit, selected, key=lambda branch: branch[1])
 
         peak = self.peak or 1
         features = []
-        for branch in selected:
-            shape = self.geometry(branch)
+        for edge, magnitude in selected:
+            shape = self._compiled.geometry(edge)
             if shape is None:
                 continue  # a layer without geometry has nothing to draw
             features.append(
@@ -144,10 +152,7 @@ class ShortestPathTree(SearchSpace):
                         "type": "LineString",
                         "coordinates": [[lon, lat] for lat, lon in shape],
                     },
-                    "properties": {
-                        "magnitude": branch.magnitude,
-                        "share": branch.magnitude / peak,
-                    },
+                    "properties": {"magnitude": magnitude, "share": magnitude / peak},
                 }
             )
         return {"type": "FeatureCollection", "features": features}

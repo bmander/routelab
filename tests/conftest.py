@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import math
 import random
+from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import pytest
 
 import routelab as rl
+
+#: Hand-written OSM extracts, shared with the Rust crate's own tests so both
+#: languages read the same fixture rather than each keeping a copy.
+FIXTURES = Path(__file__).resolve().parent.parent / "crates/routelab-osm/tests/data"
+JUNCTION = FIXTURES / "junction.osm"
 
 
 @pytest.fixture
