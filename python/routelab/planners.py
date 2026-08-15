@@ -32,13 +32,15 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, Hashable, Iterable, Mapping, Optional, Union
 
+from . import _routelab
 from .environment import CompiledEnvironment, Environment
 from .heuristics import Heuristic
 from .journey import Journey
-from .search import SearchResult, astar, bfs, dijkstra
-from .searchspace import SearchSpace, ShortestPathTree
+from .orderings import EdgeDifference, Ordering
+from .search import Result, SearchResult, astar, bfs, dijkstra
+from .searchspace import MeetingTrees, SearchSpace, ShortestPathTree
 
-__all__ = ["AStar", "BFS", "Dijkstra", "Planner", "route"]
+__all__ = ["AStar", "BFS", "ContractionHierarchy", "Dijkstra", "Planner", "route"]
 
 #: How a caller names where to start: one label, a list of labels, or a mapping
 #: of labels to the cost of already being there. Tuples and strings are single
@@ -99,6 +101,21 @@ class Planner:
         set of shortcuts gets built.
         """
 
+    @property
+    def footprint(self) -> int:
+        """Bytes of preprocessed data this planner is holding.
+
+        Zero for a plain search, which is the honest answer rather than a
+        missing one: preprocessing is a trade, and a table comparing techniques
+        has to be able to print the cost side of it for every row.
+        """
+        self._bound()          # an unbound technique holds nothing, and says so
+        return self._footprint()
+
+    def _footprint(self) -> int:
+        """The size of whatever :meth:`preprocess` built."""
+        return 0
+
     def _bound(self) -> CompiledEnvironment:
         """The compiled environment, or an error naming what is missing."""
         if self.compiled is None:
@@ -108,8 +125,8 @@ class Planner:
             )
         return self.compiled
 
-    def search(self, origins: Origins, **options: Any) -> SearchResult:
-        """Run the one-to-all search and return the raw, id-keyed result.
+    def search(self, origins: Origins, **options: Any) -> Result:
+        """Run the search and return the raw, id-keyed result.
 
         The escape hatch: everything the kernel computed, without the journey
         packaging. Node ids here are dense, so use :meth:`node_id`/:meth:`label`
@@ -139,13 +156,18 @@ class Planner:
             return None
         return Journey.from_result(self._bound(), result, destination)
 
-    def explored(self, result: SearchResult, magnitude: str = "weight") -> SearchSpace:
+    def explored(self, result: Result, **options: Any) -> SearchSpace:
         """What the search looked at, in a form something can draw.
 
         Dijkstra and A* — and BFS — explore by growing a shortest-path tree, so
         that is what they report. An algorithm that explores differently returns
         a different :class:`~routelab.SearchSpace`; the promise is only that
         whatever it explored can be rendered.
+
+        Options belong to the shape of the space, so they differ by algorithm and
+        an algorithm that does not understand one says so — the same rule
+        :meth:`SearchSpace.geojson` states, and the reason ``magnitude`` is not
+        on this signature: it means something only to a tree.
 
         Args:
             result: A result from :meth:`search`, or from :meth:`route` if you
@@ -154,7 +176,34 @@ class Planner:
             magnitude: What each branch should carry from the subtree beyond it:
                 ``"weight"`` for travel time, ``"nodes"`` for a count.
         """
+        magnitude = options.pop("magnitude", "weight")
+        self._no_other(options, "a shortest-path tree")
         return ShortestPathTree(self._bound(), result, magnitude)
+
+    @staticmethod
+    def _no_other(options: "Dict[str, Any]", what: str) -> None:
+        """Reject leftover options rather than silently ignoring them."""
+        if options:
+            raise ValueError(
+                f"{what} has no {', '.join(sorted(options))}; that option belongs "
+                f"to a different kind of search."
+            )
+
+    def _single_target(self, options: "Dict[str, Any]", searches: str) -> int:
+        """Pop the one target a goal-directed search needs, or explain.
+
+        Shared because more than one technique here is goal-directed: A* aims a
+        heuristic at somewhere, a hierarchy climbs toward somewhere, and neither
+        has anything to estimate or climb toward without exactly one somewhere.
+        """
+        targets = options.pop("targets", None)
+        if targets is None or len(targets) != 1:
+            count = "no target" if not targets else f"{len(targets)} targets"
+            raise ValueError(
+                f"{searches} searches toward a single target, and got {count}. Use "
+                f"route(origin, destination), or pass targets=[node]."
+            )
+        return targets[0]
 
     def node_id(self, label: Hashable) -> int:
         """The dense id this environment gave ``label``."""
@@ -244,6 +293,9 @@ class AStar(Planner):
         and any preprocessing after it, gets built."""
         self.heuristic = self.heuristic_spec.bind(self._bound())
 
+    def _footprint(self) -> int:
+        return self.heuristic.footprint
+
     def search(self, origins: Origins, **options: Any) -> SearchResult:
         """Run the guided search. Requires exactly one target.
 
@@ -251,19 +303,82 @@ class AStar(Planner):
         a target there is nothing to aim at, and with several there is no single
         thing the heuristic could be a bound on.
         """
-        targets = options.pop("targets", None)
-        if targets is None or len(targets) != 1:
-            count = "no target" if not targets else f"{len(targets)} targets"
-            raise ValueError(
-                f"A* searches toward a single target, and got {count}. Use "
-                f"route(origin, destination), or pass targets=[node]."
-            )
+        target = self._single_target(options, "A*")
         return astar(
-            self._bound().graph, self._origin_ids(origins), targets[0], self.heuristic, **options
+            self._bound().graph, self._origin_ids(origins), target, self.heuristic, **options
         )
 
     def __repr__(self) -> str:
         return self._describe(repr(self.heuristic_spec))
+
+
+class ContractionHierarchy(Planner):
+    """Exact routing by rewriting the graph, then only ever climbing it.
+
+        ContractionHierarchy().bind(env).route("a", "b")
+
+    Geisberger, Sanders, Schultes and Delling. Preprocessing contracts nodes one
+    at a time, least important first, inserting a **shortcut** wherever removing a
+    node would otherwise have lengthened a shortest path. What comes out is the
+    original graph plus shortcuts and a rank per node — and a query that searches
+    upward from the source and upward from the target and meets above the trip,
+    never looking sideways at the thousands of streets in between.
+
+    The answers are exact. Not approximately exact: the tests hold every distance
+    to Dijkstra's on every instance, because a routing technique that is usually
+    right is not a routing technique.
+
+    Unlike every other technique here, this one searches a graph the environment
+    has never seen. Its answers are unpacked back into the environment's own
+    edges before anyone sees them, so journeys, geometry and provenance work
+    exactly as they do for Dijkstra — a technique may search whatever it likes,
+    but it answers in the caller's terms.
+
+    Args:
+        ordering: Which node to contract next; see :mod:`routelab.orderings`.
+            A policy, never a correctness choice — every ordering gives the same
+            distances, and a bad one just builds a bigger hierarchy.
+    """
+
+    def __init__(self, ordering: Optional[Ordering] = None):
+        self.ordering = ordering if ordering is not None else EdgeDifference()
+
+    def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
+        """Whatever the ordering needs, on top of what any planner needs."""
+        return super().missing_from(compiled) | self.ordering.missing_from(compiled)
+
+    def preprocess(self) -> None:
+        """Contract the graph. The expensive step, and the whole technique."""
+        self.hierarchy = self.ordering.bind(self._bound())
+
+    def _footprint(self) -> int:
+        return self.hierarchy.footprint
+
+    def search(self, origins: Origins, **options: Any) -> Result:
+        """Run the bidirectional query. Requires exactly one target.
+
+        Returns a :class:`~routelab._routelab.MeetingSearch` rather than a
+        `SearchResult`: two searches met in the middle, and neither half alone
+        is the answer. It reports costs and paths in the environment's own edges,
+        which is all :class:`~routelab.Journey` ever asked of a result.
+        """
+        target = self._single_target(options, "A hierarchy")
+        if options:
+            unsupported = ", ".join(sorted(options))
+            raise ValueError(
+                f"a hierarchy query takes no bounds; got {unsupported}. Its search "
+                f"is over the contracted graph, where a cost bound would cut off "
+                f"paths that are still cheap in the original."
+            )
+        return self.hierarchy.query(list(self._origin_ids(origins).items()), target)
+
+    def explored(self, result: Result, **options: Any) -> SearchSpace:
+        """The two halves of the search, and where they met."""
+        self._no_other(options, "meeting trees")
+        return MeetingTrees(self._bound(), result)
+
+    def __repr__(self) -> str:
+        return self._describe(repr(self.ordering))
 
 
 def route(

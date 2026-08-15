@@ -7,13 +7,45 @@ road built on top.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional, Protocol, runtime_checkable
 
 from . import _routelab
 from ._args import Nodes, Sources, normalize_nodes, normalize_sources
 from ._routelab import SearchResult
 
-__all__ = ["SearchResult", "astar", "bfs", "dijkstra"]
+__all__ = ["Result", "SearchResult", "astar", "bfs", "dijkstra"]
+
+
+@runtime_checkable
+class Result(Protocol):
+    """What anything downstream of a search actually needs from it.
+
+    :class:`~routelab.SearchResult` is one implementation and the common one,
+    but it is not the only shape a search comes in: a bidirectional search
+    produces two trees and a meeting point, and no amount of widening
+    `SearchResult` would make that one. What :class:`~routelab.Journey` and the
+    planners consume is this much and no more — a cost, a path, the edges of it,
+    and how much work it took — so this is the contract, and a technique is free
+    to satisfy it however its algorithm demands.
+
+    Note what is *not* here: `order`. A search that settles in more than one
+    direction has no single settle sequence, which is exactly why the count
+    worth comparing across algorithms is :attr:`settled` rather than the length
+    of a list.
+    """
+
+    def cost(self, node: int) -> Optional[int]:
+        """The cheapest cost to ``node``, or ``None`` if it has none."""
+
+    def path(self, node: int) -> "Optional[List[int]]":
+        """Node ids from the source to ``node``, source first."""
+
+    def edge_path(self, node: int) -> "Optional[List[int]]":
+        """Edge ids from the source to ``node`` — in the *caller's* graph."""
+
+    @property
+    def settled(self) -> int:
+        """How many nodes the search settled: the work it did."""
 
 
 def astar(

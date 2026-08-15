@@ -38,6 +38,7 @@ ALGORITHMS = {
     "dijkstra": rl.Dijkstra(),
     "astar": rl.AStar(rl.Euclidean()),
     "landmarks": rl.AStar(rl.Landmarks(16)),
+    "ch": rl.ContractionHierarchy(),
 }
 
 
@@ -138,7 +139,7 @@ class Router:
             "snapped": [coordinates[start], coordinates[end]],
             "seconds": journey.cost,
             "legs": len(journey.legs),
-            "settled_count": len(result.order),
+            "settled_count": result.settled,
             "graph_nodes": compiled.graph.num_nodes,
             "ms": round(elapsed, 1),
         }
@@ -220,6 +221,7 @@ PAGE = """<!doctype html>
     <option value="astar">A* (euclidean)</option>
     <option value="landmarks">A* (16 landmarks)</option>
     <option value="dijkstra">Dijkstra</option>
+    <option value="ch">Contraction hierarchy</option>
   </select>
   <div id="status" class="hint">Click the map to set an origin.</div>
 </div>
@@ -282,13 +284,18 @@ async function request() {
     return;
   }
 
-  // The search tree first, so the route draws over it. Widths follow the
+  // The search space first, so the route draws over it. Widths follow the
   // square root of each branch's share of the peak: the trunk carries the whole
   // search and the twigs almost none of it, and a linear scale would render
   // everything but the trunk invisible.
+  //
+  // `direction` is only present on spaces made of more than one search — a
+  // hierarchy's two halves, climbing away from either end — and colouring by it
+  // is what makes them tell apart. One colour when it is absent.
+  const halves = {forward: '#1d6fa5', backward: '#7a3b9c'};
   L.geoJSON(answer.tree, {
     style: feature => ({
-      color: '#1d6fa5',
+      color: halves[feature.properties.direction] || '#1d6fa5',
       weight: 0.6 + 9 * Math.sqrt(feature.properties.share),
       opacity: 0.8,
     }),

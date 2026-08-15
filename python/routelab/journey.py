@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Hashable, List, NamedTuple, Tuple
 
 from .environment import CompiledEnvironment, EdgeSource
-from .search import SearchResult
+from .search import Result
 
 __all__ = ["Journey", "Leg"]
 
@@ -45,7 +45,7 @@ class Journey(NamedTuple):
     def from_result(
         cls,
         compiled: CompiledEnvironment,
-        result: SearchResult,
+        result: Result,
         destination: Hashable,
     ) -> "Journey":
         """Rebuild a journey from a search result. Assumes the target was reached."""

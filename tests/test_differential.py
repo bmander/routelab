@@ -215,6 +215,94 @@ def test_guidance_never_costs_extra_expansions(seed):
     assert len(guided.order) <= len(plain.order)
 
 
+def contract(graph, **options):
+    return rl._routelab.ContractionHierarchy.edge_difference(graph, **options)
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_contraction_answers_every_distance_dijkstra_answers(seed):
+    """The exactness claim, all pairs, on graphs nobody designed to be easy."""
+    graph, _ = random_graph(seed, num_nodes=45)
+    hierarchy = contract(graph)
+
+    for source in range(graph.num_nodes):
+        truth = rl.dijkstra(graph, source)
+        for target in range(graph.num_nodes):
+            found = hierarchy.query([(source, 0)], target).cost(target)
+            assert found == truth.cost(target), f"{source} -> {target}"
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_the_unpacked_path_is_a_walk_in_the_original_graph(seed):
+    """A shortcut stands for real edges, or it stands for a wrong answer.
+
+    Matching distances alone would pass if unpacking were broken, so the check
+    is the one that cannot be faked: walk the reported edges on the graph the
+    hierarchy was built from, and land on the target having spent the cost.
+    """
+    instance = random_geometric_graph(seed, num_nodes=60)
+    graph = instance.graph
+    hierarchy = contract(graph)
+
+    for source in range(0, graph.num_nodes, 7):
+        for target in range(0, graph.num_nodes, 5):
+            search = hierarchy.query([(source, 0)], target)
+            cost = search.cost(target)
+            if cost is None:
+                continue
+            assert graph.walk(source, search.edge_path(target)) == (target, cost)
+            assert search.path(target)[0] == source
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_every_ordering_gives_the_same_distances(seed):
+    """Ordering is a performance choice. If it were ever a correctness one, here.
+
+    The random ordering also has to be *worse* — an ordering heuristic that
+    matched darts would be decoration rather than work.
+    """
+    graph, _ = random_graph(seed, num_nodes=45)
+    careful = contract(graph)
+    arbitrary = rl._routelab.ContractionHierarchy.random(graph, seed=seed)
+
+    for source in range(0, graph.num_nodes, 4):
+        for target in range(graph.num_nodes):
+            assert careful.query([(source, 0)], target).cost(target) == arbitrary.query(
+                [(source, 0)], target
+            ).cost(target)
+    assert careful.num_shortcuts <= arbitrary.num_shortcuts
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_witness_limits_cost_shortcuts_and_never_answers(seed):
+    """Giving up early is safe, which is the reason those limits can be knobs.
+
+    A witness search that stops before finding an existing path adds a shortcut
+    that was not needed. The hierarchy gets bigger; no distance moves.
+    """
+    graph, _ = random_graph(seed, num_nodes=45)
+    thorough = contract(graph, max_settled=500, max_hops=5)
+    hasty = contract(graph, max_settled=1, max_hops=1)
+
+    assert hasty.num_shortcuts >= thorough.num_shortcuts
+    for source in range(0, graph.num_nodes, 4):
+        truth = rl.dijkstra(graph, source)
+        for target in range(graph.num_nodes):
+            assert hasty.query([(source, 0)], target).cost(target) == truth.cost(target)
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_several_origins_reach_the_same_answer_as_dijkstra(seed):
+    """Multiple sources with access costs, which the forward half seeds with."""
+    graph, _ = random_graph(seed, num_nodes=45)
+    sources = [(0, 0), (graph.num_nodes // 2, 3), (graph.num_nodes - 1, 11)]
+    hierarchy = contract(graph)
+    truth = rl.dijkstra(graph, sources)
+
+    for target in range(graph.num_nodes):
+        assert hierarchy.query(sources, target).cost(target) == truth.cost(target)
+
+
 @pytest.mark.parametrize("seed", SEEDS)
 def test_dense_and_sparse_instances_agree(seed):
     for density in (0.5, 8.0):

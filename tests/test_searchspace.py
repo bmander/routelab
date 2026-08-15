@@ -37,7 +37,7 @@ def test_a_branch_carries_everything_beyond_it(forked):
 
 def test_counting_nodes_is_the_other_measure(forked):
     planner = rl.Dijkstra().bind(forked)
-    tree = planner.explored(planner.search("a"), "nodes")
+    tree = planner.explored(planner.search("a"), magnitude="nodes")
     assert magnitudes(tree) == {
         ("a", "b"): 4,
         ("b", "c"): 1,
@@ -71,7 +71,7 @@ def test_capillaries_can_be_filtered_out(forked):
 def test_an_unknown_measure_says_what_it_expected(forked):
     planner = rl.Dijkstra().bind(forked)
     with pytest.raises(ValueError, match="expected 'nodes' or 'weight'"):
-        planner.explored(planner.search("a"), "vibes")
+        planner.explored(planner.search("a"), magnitude="vibes")
 
 
 def test_every_planner_reports_a_space(forked):

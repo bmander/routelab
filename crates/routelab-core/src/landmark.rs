@@ -29,6 +29,7 @@
 use crate::dijkstra::dijkstra;
 use crate::graph::{Graph, NodeId, Weight, UNREACHABLE};
 use crate::heuristic::Heuristic;
+use crate::rng::Rng;
 use crate::search::SearchOptions;
 
 /// How to choose which nodes become landmarks.
@@ -184,7 +185,7 @@ fn choose(
 /// all the ones already chosen.
 fn farthest_nodes(graph: &Graph, count: usize, seed: u64) -> (Vec<NodeId>, Vec<Vec<Weight>>) {
     let mut rng = Rng::new(seed);
-    let start = (rng.next() % graph.num_nodes() as u64) as NodeId;
+    let start = rng.below(graph.num_nodes() as u64) as NodeId;
     let mut nearest = distances_from(graph, start);
     let mut chosen = Vec::with_capacity(count);
     let mut measured = Vec::with_capacity(count);
@@ -215,7 +216,7 @@ fn random_nodes(count: usize, num_nodes: usize, seed: u64) -> Vec<NodeId> {
     // `count` is clamped to the node count before this runs, so the rejection
     // loop always has something left to find.
     while chosen.len() < count {
-        let candidate = (rng.next() % num_nodes as u64) as NodeId;
+        let candidate = rng.below(num_nodes as u64) as NodeId;
         if !chosen.contains(&candidate) {
             chosen.push(candidate);
         }
@@ -237,24 +238,6 @@ fn argmax_reachable(distances: &[Weight]) -> Option<NodeId> {
         .filter(|(_, &distance)| distance != UNREACHABLE)
         .max_by_key(|(_, &distance)| distance)
         .map(|(node, _)| node as NodeId)
-}
-
-/// A small deterministic generator, so landmark choice is reproducible without
-/// the crate taking on a dependency for it.
-struct Rng(u64);
-
-impl Rng {
-    fn new(seed: u64) -> Self {
-        // Any nonzero state will do; xorshift stays stuck at zero.
-        Rng(seed.wrapping_mul(2_685_821_657_736_338_717).max(1))
-    }
-
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0
-    }
 }
 
 #[cfg(test)]

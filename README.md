@@ -16,9 +16,10 @@ that their constant factors mean something, behind an API shared across
 implementations, checked against a reference implementation that is obviously
 correct.
 
-**Status: early.** Today it has a static graph and the two searches everything
-else builds on. The path from here runs through time-dependent and schedule-based
-search: RAPTOR, CSA, then the multimodal and multicriteria layers above them.
+**Status: early.** Today it has a static graph, the searches everything else
+builds on (Dijkstra, BFS, A*), two heuristics, and contraction hierarchies. The
+path from here runs through time-dependent and schedule-based search: RAPTOR,
+CSA, then the multimodal and multicriteria layers above them.
 
 ## Install
 
@@ -258,6 +259,77 @@ heuristic buys: the same 11.2-minute Seattle route settles 41,161 branches under
 Dijkstra, reaching across Lake Washington to Bellevue, and 12,172 under A*, which
 never leaves the corridor.
 
+### Not searching the city at all
+
+Everything above narrows the search. A contraction hierarchy (Geisberger,
+Sanders, Schultes and Delling, *Exact Routing in Large Road Networks Using
+Contraction Hierarchies*) stops doing one. Preprocessing removes nodes one at a
+time, least important first, adding a **shortcut** wherever removing a node
+would otherwise have lengthened a shortest path. What comes out is the original
+graph plus shortcuts and a rank per node — and a query that climbs from the
+source, climbs from the target, and meets above the trip:
+
+```python
+planner = rl.ContractionHierarchy().bind(env)    # ~6 s on Seattle, 19 MB
+planner.route(origin, destination)               # a fifth of a millisecond
+```
+
+Seattle, driving, 25 random trips (`benchmarks/bench_contraction.py`):
+
+| | preprocessing | memory | settled | query |
+|---|---|---:|---:|---:|
+| Dijkstra | — | — | 129,992 | 16.920 ms |
+| A* (euclidean) | — | 4 MB | 65,523 | 12.751 ms |
+| A* (16 landmarks) | 1.3 s | 33 MB | 10,509 | 2.769 ms |
+| Contraction hierarchy | 6.0 s | 19 MB | **251** | **0.152 ms** |
+
+Identical costs on every trip — the benchmark fails if any row disagrees. Not
+necessarily the identical *path*: where two routes tie, a search climbing from
+both ends cannot honour the `(cost, node)` tie-break a one-directional search
+does, so it may return a different equally-cheap way. The claim is exact
+distances, and that is what the tests hold it to.
+Preprocessing adds 504,022 shortcuts to Seattle's 590,671 edges, an 85% larger
+graph in exchange for touching 0.1% of it per query.
+
+This is the first technique here that searches a graph the environment has never
+seen, which is the constraint worth stating out loud: **a technique may search
+whatever graph it likes, but it answers in the caller's terms.** Every shortcut
+is unpacked back into the original edges it stands for before anything leaves
+the planner, so journeys, legs, geometry and provenance work exactly as they do
+under Dijkstra.
+
+It is also the first search that is not one tree, so `explored()` reports a
+different `SearchSpace`:
+
+```python
+space = planner.explored(result)         # MeetingTrees(..., longest span=289)
+for direction, tail, head, level, edges in space.branches(min_span=50):
+    ...                                  # 'forward' or 'backward', and what it leapt
+```
+
+Branches are drawn with their unpacked geometry, so every line is real road
+rather than a straight cut through the buildings a shortcut jumped over. The
+hierarchy shows up in two properties instead: `span`, how many original edges a
+branch stands for, and `level`, the rank of its higher end. The longest branch
+of a cross-town Seattle query stands for a couple of hundred edges: that is the
+query crossing the city in one step, which is the whole trick. The demo colours
+the two halves differently, which makes the shape
+plain — two small fans climbing away from either end of the trip, joined by a
+few enormous arcs, and nothing in between.
+
+Ordering is a policy and never a correctness choice:
+
+```python
+rl.ContractionHierarchy(rl.EdgeDifference())      # the paper's recipe (default)
+rl.ContractionHierarchy(rl.RandomOrder(seed=0))   # the control
+```
+
+Both answer identical distances; the random one just builds a far bigger
+hierarchy to do it. The same holds for the witness-search limits — a witness
+search that gives up early adds a shortcut that was not needed, costing space
+and query time and never accuracy, which is why `max_settled` and `max_hops` are
+tuning knobs rather than correctness ones.
+
 ### Underneath
 
 The kernels are also callable directly, on dense integer ids, as the papers
@@ -312,7 +384,7 @@ that rather than trusting the search's own bookkeeping.
 ## Layout
 
 ```
-crates/routelab-core/   Rust: CSR graph, Dijkstra, BFS. No Python.
+crates/routelab-core/   Rust: CSR graph, searches, heuristics, contraction. No Python.
 crates/routelab-py/     PyO3 bindings. Conversion and GIL release, nothing else.
 python/routelab/        The veneer: constructors, argument sugar, reference implementations.
 tests/                  Behaviour tests and differential tests against the reference.
@@ -332,11 +404,17 @@ for the Pareto dominance checks the multicriteria algorithms are built on.
 which is what lets searches run with the GIL released. Edges are permuted into CSR
 order, so edge ids are not positions in your input list — `Graph.input_index`
 maps back, which is how per-edge attributes (mode, trip, route) stay attached.
+Preprocessing that needs to *grow* a graph — contraction inserting shortcuts —
+builds its own mutable adjacency and hands back finished CSR graphs, rather than
+making every search pay for an edge list that might change underneath it.
 
 **Deterministic tie-breaking.** Nodes settle in order of `(cost, node)`, and
 out-edges relax in CSR order. Equal-cost paths are common in transit networks, and
 without a rule for them two correct implementations disagree constantly and
-usefully diffing them becomes impossible.
+usefully diffing them becomes impossible. Every search is deterministic; not all
+of them agree with each other, because a rule about settle order says nothing
+across algorithms that do not settle in one order — a bidirectional search picks
+its own equally-cheap winner among ties.
 
 **Multi-source with initial costs.** The one-to-all search takes
 `(node, initial_cost)` pairs rather than a single origin. Every multimodal

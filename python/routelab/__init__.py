@@ -26,7 +26,7 @@ benchmark an algorithm.
 
 from __future__ import annotations
 
-from . import _routelab, heuristics, reference, sources
+from . import _routelab, heuristics, orderings, reference, sources
 from ._args import Nodes, Sources
 from .environment import (
     CompiledEnvironment,
@@ -38,9 +38,10 @@ from .environment import (
 from .graph import Graph
 from .heuristics import Euclidean, Heuristic, Landmarks, Zero
 from .journey import Journey, Leg
-from .planners import BFS, AStar, Dijkstra, Planner, route
-from .search import SearchResult, astar, bfs, dijkstra
-from .searchspace import Branch, SearchSpace, ShortestPathTree
+from .orderings import EdgeDifference, Ordering, RandomOrder
+from .planners import BFS, AStar, ContractionHierarchy, Dijkstra, Planner, route
+from .search import Result, SearchResult, astar, bfs, dijkstra
+from .searchspace import Branch, MeetingTrees, SearchSpace, ShortestPathTree
 from .sources import OSM, Cycling, Driving, Profile, Walking
 
 __all__ = [
@@ -48,10 +49,12 @@ __all__ = [
     "BFS",
     "Branch",
     "CompiledEnvironment",
+    "ContractionHierarchy",
     "Cycling",
     "Dijkstra",
     "Driving",
     "EdgeSource",
+    "EdgeDifference",
     "Environment",
     "Euclidean",
     "Graph",
@@ -59,11 +62,15 @@ __all__ = [
     "Journey",
     "Landmarks",
     "Leg",
+    "MeetingTrees",
     "Nodes",
     "OSM",
+    "Ordering",
     "Planner",
     "Positions",
     "Profile",
+    "RandomOrder",
+    "Result",
     "ScalarEdges",
     "SearchResult",
     "SearchSpace",
@@ -75,6 +82,7 @@ __all__ = [
     "bfs",
     "dijkstra",
     "heuristics",
+    "orderings",
     "reference",
     "route",
     "sources",
