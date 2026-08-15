@@ -10,6 +10,13 @@ That is a real limit and worth knowing rather than discovering. A departure is
 *a time of week*, so routing "next Tuesday at nine" and "this Tuesday at nine"
 are the same question here, and a holiday timetable cannot be expressed at all.
 What it buys is that the schedules which *can* be expressed are exact.
+
+A timetable is on a different clock, and :func:`service_seconds` is it: seconds
+since the service day's midnight, running past 86400 rather than wrapping,
+because GTFS writes ``25:30:00`` for a bus that leaves before midnight and
+arrives after. Kept apart from the weekly clock on purpose — the two are both
+``int`` and converting between them needs a date, which is exactly the thing
+that must not happen implicitly.
 """
 
 from __future__ import annotations
@@ -17,7 +24,7 @@ from __future__ import annotations
 import datetime as _datetime
 from typing import Union
 
-__all__ = ["WEEK", "Departure", "weekly_seconds"]
+__all__ = ["WEEK", "Departure", "service_seconds", "weekly_seconds"]
 
 #: Seconds in a week — the whole domain of a schedule.
 WEEK = 7 * 24 * 60 * 60
@@ -59,3 +66,41 @@ def weekly_seconds(departing: Departure) -> int:
         )
     seconds = clock.hour * 3600 + clock.minute * 60 + clock.second
     return (day * 24 * 3600 + seconds) % WEEK
+
+
+def service_seconds(departing: Departure) -> int:
+    """Seconds since the service day's midnight, from whatever reads naturally.
+
+        >>> from datetime import time
+        >>> service_seconds(time(8, 30))
+        30600
+        >>> service_seconds(25 * 3600 + 30 * 60)     # after midnight, honestly
+        91800
+
+    Unlike :func:`weekly_seconds` this does not wrap, because a service day does
+    not: a trip that leaves at 23:50 and arrives at 24:10 is one trip, and
+    folding its arrival back to 00:10 would put it before its own departure.
+
+    A `datetime` is read for its time of day only — the *date* selects the
+    service day when the feed is loaded (:class:`~routelab.sources.gtfs.GTFS`),
+    not when a query is asked, so it has nothing to say here.
+    """
+    if isinstance(departing, bool):
+        raise TypeError(f"a departure time cannot be {departing!r}")
+    if isinstance(departing, int):
+        if departing < 0:
+            raise ValueError(
+                f"a service day starts at its own midnight, so {departing} is "
+                f"before the timetable begins"
+            )
+        return departing
+    if isinstance(departing, _datetime.datetime):
+        clock = departing.time()
+    elif isinstance(departing, _datetime.time):
+        clock = departing
+    else:
+        raise TypeError(
+            f"a departure time is a datetime, a time, or seconds since the "
+            f"service day's midnight — not {type(departing).__name__}"
+        )
+    return clock.hour * 3600 + clock.minute * 60 + clock.second

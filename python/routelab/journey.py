@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Hashable, Iterator, List, NamedTuple, Optional, Tuple
 
+from . import _routelab
 from .environment import CompiledEnvironment, EdgeSource, shape_of
 from .search import Result
 
@@ -28,6 +29,17 @@ class Leg(NamedTuple):
     #: layer already computed it, and because it is what makes a leg able to
     #: answer for itself. Not `index`, which is a method every tuple already has.
     position: int
+    #: When this leg leaves and lands, in the clock its planner reads — seconds
+    #: since the service day's midnight for a timetable. ``None`` from a search
+    #: with no clock, which is most of them: a static edge has a duration and no
+    #: hour, and inventing one would make a journey look scheduled when it is
+    #: only priced.
+    departs: Optional[int] = None
+    arrives: Optional[int] = None
+    #: The vehicle run this leg rides, for a leg that rides one. Two consecutive
+    #: legs sharing a trip are one bus, and the difference is a transfer — which
+    #: is the thing a transit answer is actually judged on.
+    trip: Optional[int] = None
 
     @property
     def geometry(self) -> "Optional[List[Point]]":
@@ -62,6 +74,13 @@ class Journey:
     destination: Hashable
     cost: int
     legs: "Tuple[Leg, ...]"
+    #: Nodes the search settled finding this, when the planner reports it.
+    #:
+    #: ``None`` from a static search, and not because the number is unknown —
+    #: :meth:`Planner.explored` answers it from the result, in a form something
+    #: can draw. A timetable query has no result to hand back, so the one number
+    #: worth comparing the two models on travels with the answer instead.
+    settled: Optional[int] = None
 
     @property
     def nodes(self) -> "List[Hashable]":
@@ -107,6 +126,74 @@ class Journey:
             points.extend(shape[1:] if points else shape)
         return points
 
+    @property
+    def departs(self) -> Optional[int]:
+        """When the journey leaves, if its legs are scheduled."""
+        return self.legs[0].departs if self.legs else None
+
+    @property
+    def arrives(self) -> Optional[int]:
+        """When the journey lands, if its legs are scheduled."""
+        return self.legs[-1].arrives if self.legs else None
+
+    @property
+    def transfers(self) -> int:
+        """How many times you change vehicles.
+
+        Zero for a journey you never get off and for one with no vehicles at
+        all. Counted from the legs rather than carried, because it is a fact
+        about them: a leg knows its trip, so nothing else has to be told.
+        """
+        return sum(
+            1
+            for here, then in zip(self.legs, self.legs[1:])
+            if here.trip is not None and then.trip is not None and here.trip != then.trip
+        )
+
+    @classmethod
+    def from_itinerary(
+        cls,
+        compiled: CompiledEnvironment,
+        itinerary: "_routelab.Itinerary",
+        origin: Hashable,
+        departing: int,
+    ) -> "Journey":
+        """Rebuild a journey from a timetable query's answer.
+
+        The counterpart to :meth:`from_result` for the searches that answer with
+        rides rather than with a cost per node. Legs carry the ride they
+        actually made, so :attr:`waiting` comes out as time spent at stops —
+        which for a transit journey is the number a rider cares about and the
+        static case can only ever report as a residual.
+        """
+        legs = []
+        for trip, tail, head, departs, arrives in itinerary.rides():
+            edge_id = _edge_between(compiled, tail, head)
+            source, position = compiled.locate(edge_id)
+            legs.append(
+                Leg(
+                    tail=compiled.label(tail),
+                    head=compiled.label(head),
+                    weight=arrives - departs,
+                    source=source,
+                    edge=edge_id,
+                    position=position,
+                    departs=departs,
+                    arrives=arrives,
+                    trip=trip,
+                )
+            )
+        return cls(
+            origin=origin,
+            destination=legs[-1].head if legs else origin,
+            # Elapsed time, so that `waiting` is the part of it spent standing
+            # at a stop rather than moving. An arrival time on its own would
+            # make the cost depend on when midnight was.
+            cost=itinerary.arrives - departing,
+            legs=tuple(legs),
+            settled=itinerary.settled,
+        )
+
     @classmethod
     def from_result(
         cls,
@@ -150,3 +237,21 @@ class Journey:
     def __repr__(self) -> str:
         arrow = " → ".join(repr(label) for label in self.nodes)
         return f"Journey({arrow}, cost={self.cost})"
+
+
+def _edge_between(compiled: CompiledEnvironment, tail: int, head: int) -> int:
+    """The graph edge from ``tail`` to ``head``.
+
+    A timetable query answers in stops, not in edges, and a leg needs an edge to
+    trace its own provenance. Scanned rather than indexed: an itinerary has
+    tens of legs and a stop has a handful of neighbours, so a table over the
+    whole graph would cost more to build than every query it ever served.
+    """
+    graph = compiled.graph
+    for edge_id in graph.out_edges(tail):
+        if graph.edge(edge_id)[1] == head:
+            return edge_id
+    raise KeyError(
+        f"{compiled.label(tail)!r} → {compiled.label(head)!r} is not an edge in "
+        f"this environment, so the itinerary did not come from it"
+    )

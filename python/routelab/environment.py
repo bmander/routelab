@@ -45,10 +45,16 @@ __all__ = [
 #: An edge as a layer emits it: labelled endpoints and an integer cost.
 LabelledEdge = Tuple[Hashable, Hashable, int]
 
-#: Cost models that flatten into a single fixed-cost graph. A time-dependent
-#: layer does not, and compiling one as if it did would quietly throw away the
-#: thing that makes it time-dependent — so :class:`CompiledEnvironment` refuses.
-COMPILABLE_COST_MODELS = frozenset({"scalar"})
+#: Cost models a :class:`CompiledEnvironment` knows how to carry.
+#:
+#: ``"scalar"`` flattens into the graph itself. ``"timetable"`` does not — its
+#: edges get a lower-bound weight and the schedule travels beside the graph, so
+#: what compiles is a graph a planner must not route as if the weights told the
+#: whole story. :attr:`Planner.accepts` is what enforces that.
+#:
+#: A cost model absent from here is one nothing could carry without lying about
+#: it, which is the seam a new schedule-based algorithm plugs into.
+COMPILABLE_COST_MODELS = frozenset({"scalar", "timetable"})
 
 
 def windows_of(source: "EdgeSource", index: int) -> "Optional[List[Tuple[int, int]]]":
@@ -59,6 +65,18 @@ def windows_of(source: "EdgeSource", index: int) -> "Optional[List[Tuple[int, in
     is open at every hour.
     """
     getter = getattr(source, "windows", None)
+    return None if getter is None else getter(index)
+
+
+def connections_of(source: "EdgeSource", index: int) -> "Optional[List[Tuple[int, int, int]]]":
+    """What runs along a layer's ``index``-th edge, or ``None`` for a layer with
+    no timetable.
+
+    The sibling of :func:`windows_of`, and the distinction between them is the
+    distinction between the two ways a network can depend on the clock: a window
+    says *when an edge is open*, a connection says *when a vehicle leaves*.
+    """
+    getter = getattr(source, "connections", None)
     return None if getter is None else getter(index)
 
 
@@ -314,6 +332,11 @@ class CompiledEnvironment:
         #: two are not the same. ``None`` when no layer schedules anything.
         self.calendar = self._gather_calendar(spans)
 
+        #: The departures along each edge, for the timetable techniques. Keyed
+        #: by *input* position and translated in the kernel, exactly as
+        #: :attr:`calendar` is, and ``None`` when no layer keeps a timetable.
+        self.timetable = self._gather_timetable(spans)
+
         #: Coordinates per node id, ``None`` where a node has none.
         self.positions: "Tuple[Optional[Tuple[float, float]], ...]" = self._gather_positions(
             sources, index
@@ -343,6 +366,26 @@ class CompiledEnvironment:
         if not windows:
             return None
         return _routelab.Calendar.from_windows(self.graph, windows)
+
+    def _gather_timetable(
+        self, spans: "List[Tuple[int, int, EdgeSource]]"
+    ) -> "Optional[_routelab.Timetable]":
+        """Collect every layer's departures into one timetable, or ``None``.
+
+        The same walk as :meth:`_gather_calendar` and for the same reason: the
+        input edge list is the numbering a layer speaks. A connection's pair of
+        stops comes from the edge it is filed under rather than from the layer,
+        so there is nothing here to pair up wrongly.
+        """
+        connections = []
+        for start, stop, source in spans:
+            for position in range(stop - start):
+                running = connections_of(source, position)
+                if running:
+                    connections.append((start + position, running))
+        if not connections:
+            return None
+        return _routelab.Timetable.from_connections(self.graph, connections)
 
     @staticmethod
     def _gather_positions(
@@ -397,6 +440,8 @@ class CompiledEnvironment:
         - ``"positions"`` — every node has coordinates
         - ``"cost_per_distance"`` — every edge-contributing layer declared a rate
         - ``"geometry"`` — at least one layer knows the shape of its edges
+        - ``"schedule"`` — some edge is open only at certain hours
+        - ``"timetable"`` — some edge is served by departures rather than open
         """
         provided = set()
         if self.positions and all(point is not None for point in self.positions):
@@ -407,6 +452,8 @@ class CompiledEnvironment:
             provided.add("geometry")
         if self.calendar is not None:
             provided.add("schedule")
+        if self.timetable is not None:
+            provided.add("timetable")
         return frozenset(provided)
 
     def node_id(self, label: Hashable) -> int:

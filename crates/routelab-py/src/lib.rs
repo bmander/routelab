@@ -12,6 +12,7 @@ use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
+use routelab_gtfs::{load as gtfs_load, Feed, Pairs};
 use routelab_osm::{load as osm_load, OsmNetwork, Profile as OsmProfile};
 
 use routelab_core::contraction::{
@@ -21,6 +22,10 @@ use routelab_core::contraction::{
 use routelab_core::timedep::{
     time_dependent_dijkstra as core_timedep, Calendar as CoreCalendar, Departure as CoreDeparture,
     Waiting as CoreWaiting, Window as CoreWindow,
+};
+use routelab_core::timetable::{
+    earliest_arrival as core_earliest_arrival, Itinerary as CoreItinerary,
+    TimeExpanded as CoreTimeExpanded, Timetable as CoreTimetable, Transfer,
 };
 use routelab_core::{
     astar as core_astar, bfs as core_bfs, dijkstra as core_dijkstra, EdgeId, Graph as CoreGraph,
@@ -723,6 +728,267 @@ impl PyCalendar {
     }
 }
 
+/// A GTFS feed's connections for one service day.
+#[pyclass(name = "Feed", module = "routelab._routelab", frozen)]
+pub struct PyFeed {
+    inner: Arc<Feed>,
+    /// Grouped once at load, because a layer asks for the edges and then for
+    /// each edge's connections, and regrouping between the two questions would
+    /// sort the whole day twice.
+    pairs: Pairs,
+}
+
+#[pymethods]
+impl PyFeed {
+    #[getter]
+    fn stop_ids(&self) -> Vec<String> {
+        self.inner.stop_ids.clone()
+    }
+
+    #[getter]
+    fn stop_names(&self) -> Vec<String> {
+        self.inner.stop_names.clone()
+    }
+
+    #[getter]
+    fn num_stops(&self) -> usize {
+        self.inner.num_stops()
+    }
+
+    #[getter]
+    fn num_connections(&self) -> usize {
+        self.inner.num_connections()
+    }
+
+    /// The stop pairs any connection runs along, as `(from, to, shortest_ride)`
+    /// — the edges a routable layer contributes, weighted by a lower bound.
+    fn edges(&self) -> Vec<(u32, u32, u32)> {
+        (0..self.pairs.len())
+            .map(|p| (self.pairs.from[p], self.pairs.to[p], self.pairs.shortest[p]))
+            .collect()
+    }
+
+    /// The `(trip, departs, arrives)` triples running along the `index`-th of
+    /// [`PyFeed::edges`], in departure order.
+    fn connections(&self, index: usize) -> Vec<(u32, u32, u32)> {
+        if index >= self.pairs.len() {
+            return Vec::new();
+        }
+        self.pairs.connections(index).collect()
+    }
+
+    /// `(lats, lons)` of every stop, in dense index order.
+    fn coordinates(&self) -> (Vec<f64>, Vec<f64>) {
+        (self.inner.lats.clone(), self.inner.lons.clone())
+    }
+
+    /// The GTFS `trip_id` and `route_id` of each dense trip index.
+    fn trips(&self) -> (Vec<String>, Vec<String>) {
+        (self.inner.trip_ids.clone(), self.inner.trip_routes.clone())
+    }
+
+    /// Service this reader could not represent, as a count of trips. See
+    /// `routelab_gtfs::Skipped` for what is deliberately excluded from it.
+    #[getter]
+    fn unimplemented(&self) -> usize {
+        self.inner.skipped.unimplemented()
+    }
+
+    /// Trips passed over because their service does not run on the date asked
+    /// for — the number that says the date filter did something.
+    #[getter]
+    fn trips_not_running(&self) -> usize {
+        self.inner.skipped.trips_not_running
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Feed({} stops, {} connections)",
+            self.inner.num_stops(),
+            self.inner.num_connections()
+        )
+    }
+}
+
+/// Departures along one edge, as `(trip, departs, arrives)`.
+type Departures = Vec<(u32, u32, u32)>;
+
+/// A day's connections, indexed for a search to read.
+///
+/// Stops are a graph's nodes, and each connection is filed under the edge it
+/// runs along, so nothing here has to pair up parallel columns by hand. See
+/// [`CoreTimetable::from_input_connections`].
+#[pyclass(name = "Timetable", module = "routelab._routelab", frozen)]
+pub struct PyTimetable {
+    inner: Arc<CoreTimetable>,
+}
+
+#[pymethods]
+impl PyTimetable {
+    /// Build from connections keyed by **position in the graph's input edge
+    /// list** — `{position: [(trip, departs, arrives), ...]}`.
+    ///
+    /// Not by edge id, for the reason [`PyCalendar::from_windows`] says.
+    #[staticmethod]
+    #[pyo3(signature = (graph, connections))]
+    fn from_connections(graph: &PyGraph, connections: Vec<(u32, Departures)>) -> Self {
+        PyTimetable {
+            inner: Arc::new(CoreTimetable::from_input_connections(
+                &graph.inner,
+                connections,
+            )),
+        }
+    }
+
+    #[getter]
+    fn num_stops(&self) -> usize {
+        self.inner.num_stops()
+    }
+
+    #[getter]
+    fn num_connections(&self) -> usize {
+        self.inner.num_connections()
+    }
+
+    /// Stop-to-stop pairs any connection runs along — the edge count of the
+    /// time-dependent model, whose node count is `num_stops`.
+    #[getter]
+    fn num_edges(&self) -> usize {
+        self.inner.num_edges()
+    }
+
+    #[getter]
+    fn footprint(&self) -> usize {
+        self.inner.footprint()
+    }
+
+    /// Earliest arrival at `to`, leaving `from` no earlier than `at`.
+    ///
+    /// The time-dependent model: a node per stop, and a search that asks each
+    /// edge what leaves next.
+    fn earliest_arrival(
+        &self,
+        py: Python<'_>,
+        from: NodeId,
+        at: u32,
+        to: NodeId,
+    ) -> Option<PyItinerary> {
+        let timetable = Arc::clone(&self.inner);
+        py.detach(|| core_earliest_arrival(&timetable, from, at, to, Transfer::instant()))
+            .map(PyItinerary::from)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Timetable({} stops, {} connections)",
+            self.inner.num_stops(),
+            self.inner.num_connections()
+        )
+    }
+}
+
+/// A timetable expanded into a graph with a node per event.
+#[pyclass(name = "TimeExpanded", module = "routelab._routelab", frozen)]
+pub struct PyTimeExpanded {
+    inner: Arc<CoreTimeExpanded>,
+}
+
+#[pymethods]
+impl PyTimeExpanded {
+    /// Expand a timetable. Seconds on a city, paid once.
+    #[staticmethod]
+    fn build(py: Python<'_>, timetable: &PyTimetable) -> Self {
+        let timetable = Arc::clone(&timetable.inner);
+        let expanded = py.detach(|| CoreTimeExpanded::build(&timetable, Transfer::instant()));
+        PyTimeExpanded {
+            inner: Arc::new(expanded),
+        }
+    }
+
+    #[getter]
+    fn num_events(&self) -> usize {
+        self.inner.num_events()
+    }
+
+    #[getter]
+    fn num_edges(&self) -> usize {
+        self.inner.num_edges()
+    }
+
+    #[getter]
+    fn footprint(&self) -> usize {
+        self.inner.footprint()
+    }
+
+    /// Earliest arrival at `to`, leaving `from` no earlier than `at`.
+    fn earliest_arrival(
+        &self,
+        py: Python<'_>,
+        from: NodeId,
+        at: u32,
+        to: NodeId,
+    ) -> Option<PyItinerary> {
+        let expanded = Arc::clone(&self.inner);
+        py.detach(|| expanded.earliest_arrival(from, at, to))
+            .map(PyItinerary::from)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("TimeExpanded({} events)", self.inner.num_events())
+    }
+}
+
+/// When you get there, what you rode, and what the search cost to find it.
+#[pyclass(name = "Itinerary", module = "routelab._routelab", frozen)]
+pub struct PyItinerary {
+    inner: CoreItinerary,
+}
+
+impl From<CoreItinerary> for PyItinerary {
+    fn from(inner: CoreItinerary) -> Self {
+        PyItinerary { inner }
+    }
+}
+
+#[pymethods]
+impl PyItinerary {
+    /// Absolute arrival time, in seconds since the service day's midnight.
+    #[getter]
+    fn arrives(&self) -> u32 {
+        self.inner.arrives
+    }
+
+    /// Nodes the search settled — stops for one model, events for the other.
+    /// The number the two models are actually compared on.
+    #[getter]
+    fn settled(&self) -> usize {
+        self.inner.settled
+    }
+
+    #[getter]
+    fn transfers(&self) -> usize {
+        self.inner.transfers()
+    }
+
+    /// Each vehicle ridden, as `(trip, from_stop, to_stop, departs, arrives)`.
+    fn rides(&self) -> Vec<(u32, NodeId, NodeId, u32, u32)> {
+        self.inner
+            .rides
+            .iter()
+            .map(|r| (r.trip, r.from, r.to, r.departs, r.arrives))
+            .collect()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Itinerary(arrives={}, {} rides, {} transfers)",
+            self.inner.arrives,
+            self.inner.rides.len(),
+            self.inner.transfers()
+        )
+    }
+}
+
 /// An estimate of the cost remaining to a target, for goal-directed search.
 ///
 /// Built from data the environment gathered — never a Python callable: a callback
@@ -874,6 +1140,30 @@ fn time_dependent_dijkstra(
     Ok(PySearchResult { inner: result })
 }
 
+/// Read a GTFS feed's connections for one service day.
+///
+/// `path` may be a `.zip` or a directory of `.txt` files. The date is passed as
+/// its parts rather than as a string, so there is no format to get wrong on
+/// either side of the boundary.
+#[pyfunction]
+#[pyo3(signature = (path, year, month, day))]
+fn load_gtfs(py: Python<'_>, path: PathBuf, year: i32, month: u32, day: u32) -> PyResult<PyFeed> {
+    let date = chrono::NaiveDate::from_ymd_opt(year, month, day)
+        .ok_or_else(|| PyValueError::new_err(format!("{year}-{month}-{day} is not a date")))?;
+    let (feed, pairs) = py
+        .detach(|| {
+            gtfs_load(&path, date).map(|feed| {
+                let pairs = feed.pairs();
+                (feed, pairs)
+            })
+        })
+        .map_err(value_err)?;
+    Ok(PyFeed {
+        inner: Arc::new(feed),
+        pairs,
+    })
+}
+
 /// Breadth-first search from `sources`, which all start at depth 0.
 #[pyfunction]
 #[pyo3(signature = (graph, sources, *, targets=None, max_depth=None))]
@@ -917,14 +1207,19 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<PyCalendar>()?;
     m.add_class::<PyContractionHierarchy>()?;
+    m.add_class::<PyFeed>()?;
     m.add_class::<PyGraph>()?;
     m.add_class::<PyHeuristic>()?;
     m.add_class::<PyMeetingSearch>()?;
     m.add_class::<PyOsmNetwork>()?;
     m.add_class::<PySearchResult>()?;
+    m.add_class::<PyItinerary>()?;
     m.add_class::<PySearchTree>()?;
+    m.add_class::<PyTimeExpanded>()?;
+    m.add_class::<PyTimetable>()?;
     m.add_function(wrap_pyfunction!(astar, m)?)?;
     m.add_function(wrap_pyfunction!(time_dependent_dijkstra, m)?)?;
+    m.add_function(wrap_pyfunction!(load_gtfs, m)?)?;
     m.add_function(wrap_pyfunction!(load_osm, m)?)?;
     m.add_function(wrap_pyfunction!(dijkstra, m)?)?;
     m.add_function(wrap_pyfunction!(bfs, m)?)?;

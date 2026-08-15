@@ -46,12 +46,14 @@ from .planners import (
     ContractionHierarchy,
     Dijkstra,
     Planner,
+    TimeDependent,
     TimeDependentDijkstra,
+    TimeExpanded,
     route,
 )
 from .search import Result, SearchResult, astar, bfs, dijkstra
 from .searchspace import Branch, MeetingTrees, SearchSpace, ShortestPathTree
-from .sources import OSM, Cycling, Driving, Profile, Walking
+from .sources import GTFS, OSM, Cycling, Driving, Profile, Walking
 
 __all__ = [
     "AStar",
@@ -73,6 +75,7 @@ __all__ = [
     "Leg",
     "MeetingTrees",
     "Nodes",
+    "GTFS",
     "OSM",
     "Ordering",
     "Planner",
@@ -84,7 +87,9 @@ __all__ = [
     "SearchResult",
     "SearchSpace",
     "ShortestPathTree",
+    "TimeDependent",
     "TimeDependentDijkstra",
+    "TimeExpanded",
     "Sources",
     "WEEK",
     "Walking",

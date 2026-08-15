@@ -49,7 +49,7 @@ mod tests;
 pub use dependent::earliest_arrival;
 pub use expanded::TimeExpanded;
 
-use crate::graph::NodeId;
+use crate::graph::{EdgeId, Graph, NodeId};
 
 /// A moment, in seconds since the service day's midnight.
 ///
@@ -187,6 +187,44 @@ impl Timetable {
             edge_start,
             best_from,
         }
+    }
+
+    /// Build from connections keyed by **position in a graph's input edge list**.
+    ///
+    /// The join between a feed and a graph, in one place. A timetable's stops
+    /// are that graph's nodes, and which pair of stops a connection runs
+    /// between comes from the edge it was filed under rather than from the
+    /// caller — so there is no pair of parallel arrays to zip up wrongly.
+    ///
+    /// Keyed by input position and not by edge id for the reason
+    /// [`crate::timedep::Calendar::from_input_windows`] is: `Graph` permutes its
+    /// edges into CSR order, and everything that produces edges holds input
+    /// positions. Getting it backwards would put every bus on the wrong street
+    /// without failing.
+    pub fn from_input_connections(
+        graph: &Graph,
+        entries: impl IntoIterator<Item = (u32, Vec<(u32, Time, Time)>)>,
+    ) -> Self {
+        let mut to_edge = vec![0u32; graph.num_edges()];
+        for edge in 0..graph.num_edges() as EdgeId {
+            to_edge[graph.input_index(edge) as usize] = edge;
+        }
+        let connections = entries
+            .into_iter()
+            .filter(|(input, _)| (*input as usize) < to_edge.len())
+            .flat_map(|(input, times)| {
+                let (from, to, _) = graph.edge(to_edge[input as usize]);
+                times
+                    .into_iter()
+                    .map(move |(trip, departs, arrives)| Connection {
+                        trip,
+                        from,
+                        to,
+                        departs,
+                        arrives,
+                    })
+            });
+        Timetable::new(graph.num_nodes(), connections)
     }
 
     pub fn num_stops(&self) -> usize {

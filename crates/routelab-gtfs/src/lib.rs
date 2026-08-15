@@ -102,6 +102,81 @@ impl Feed {
     pub fn num_connections(&self) -> usize {
         self.from_stop.len()
     }
+
+    /// The connections gathered onto the stop pairs they run along.
+    ///
+    /// What a routable layer contributes: a city's weekday is hundreds of
+    /// thousands of connections but only a few thousand pairs of adjacent
+    /// stops, and it is the pairs that are edges. Grouped here rather than
+    /// above the boundary because the loop is once per connection, and a loop
+    /// that long does not belong in Python.
+    pub fn pairs(&self) -> Pairs {
+        let mut order: Vec<u32> = (0..self.num_connections() as u32).collect();
+        order.sort_unstable_by_key(|&i| {
+            (
+                self.from_stop[i as usize],
+                self.to_stop[i as usize],
+                self.departs[i as usize],
+            )
+        });
+
+        let mut pairs = Pairs::default();
+        for &i in &order {
+            let i = i as usize;
+            let (from, to) = (self.from_stop[i], self.to_stop[i]);
+            let ride = self.arrives[i] - self.departs[i];
+            if pairs.from.last() != Some(&from) || pairs.to.last() != Some(&to) {
+                pairs.from.push(from);
+                pairs.to.push(to);
+                pairs.shortest.push(ride);
+                pairs.start.push(pairs.trip.len() as u32);
+            } else {
+                let last = pairs.shortest.len() - 1;
+                pairs.shortest[last] = pairs.shortest[last].min(ride);
+            }
+            pairs.trip.push(self.trip[i]);
+            pairs.departs.push(self.departs[i]);
+            pairs.arrives.push(self.arrives[i]);
+        }
+        pairs.start.push(pairs.trip.len() as u32);
+        pairs
+    }
+}
+
+/// A feed's connections, gathered onto the stop pairs they run along.
+#[derive(Debug, Default)]
+pub struct Pairs {
+    pub from: Vec<u32>,
+    pub to: Vec<u32>,
+    /// The shortest ride anyone makes along each pair.
+    ///
+    /// A genuine lower bound on traversing it, which is the only fixed cost a
+    /// timetable honestly has — enough to weight an edge for a distance bound
+    /// or a snapping query, and not enough to route on. Refusing to route a
+    /// `"timetable"` layer with `Dijkstra` is what keeps the difference from
+    /// being discovered rather than stated.
+    pub shortest: Vec<Time>,
+    /// `[start[p], start[p + 1])` is pair `p`'s run of connections.
+    start: Vec<u32>,
+    trip: Vec<u32>,
+    departs: Vec<Time>,
+    arrives: Vec<Time>,
+}
+
+impl Pairs {
+    pub fn len(&self) -> usize {
+        self.from.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.from.is_empty()
+    }
+
+    /// Pair `p`'s connections, in departure order, as `(trip, departs, arrives)`.
+    pub fn connections(&self, p: usize) -> impl Iterator<Item = (u32, Time, Time)> + '_ {
+        let range = self.start[p] as usize..self.start[p + 1] as usize;
+        range.map(move |i| (self.trip[i], self.departs[i], self.arrives[i]))
+    }
 }
 
 /// Read the connections that run on `date`.

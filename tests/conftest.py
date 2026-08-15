@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as _datetime
 import math
 import random
 from pathlib import Path
@@ -15,6 +16,14 @@ import routelab as rl
 #: languages read the same fixture rather than each keeping a copy.
 FIXTURES = Path(__file__).resolve().parent.parent / "crates/routelab-osm/tests/data"
 JUNCTION = FIXTURES / "junction.osm"
+
+#: A hand-written GTFS feed, shared the same way. See its README for the three
+#: stops and the change at the middle one that the whole fixture is about.
+TINY_GTFS = (
+    Path(__file__).resolve().parent.parent / "crates/routelab-gtfs/tests/data/tiny"
+)
+#: A Monday on which the fixture's weekday service runs.
+TINY_DATE = _datetime.date(2026, 9, 7)
 
 
 @pytest.fixture

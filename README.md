@@ -13,13 +13,15 @@ run on the same instance, and compared.
 routelab is that lobby. It is not a production routing engine and does not want
 to be. It is a place to implement published algorithms honestly — fast enough
 that their constant factors mean something, behind an API shared across
-implementations, checked against a reference implementation that is obviously
+implementations, checked against something independent that is obviously
 correct.
 
 **Status: early.** Today it has a static graph, the searches everything else
-builds on (Dijkstra, BFS, A*), two heuristics, and contraction hierarchies. The
-path from here runs through time-dependent and schedule-based search: RAPTOR,
-CSA, then the multimodal and multicriteria layers above them.
+builds on (Dijkstra, BFS, A*), two heuristics, contraction hierarchies,
+time-dependent search over OpenStreetMap's scheduled restrictions, and both of
+Pyrga et al.'s timetable models over GTFS. The path from here runs on through
+schedule-based search — RAPTOR, CSA — and then the multimodal and multicriteria
+layers above them.
 
 ## Install
 
@@ -330,6 +332,113 @@ search that gives up early adds a shortcut that was not needed, costing space
 and query time and never accuracy, which is why `max_settled` and `max_hops` are
 tuning knobs rather than correctness ones.
 
+### When the network is not always open
+
+OpenStreetMap records *when* a way may be used, not only whether. The walkway
+across Seattle's Hiram M. Chittenden Locks is tagged
+`foot:conditional=yes @ (07:00-21:00)`; the I-5 express lanes are
+`oneway=reversible` with hours. `Dijkstra` ignores every one of those and routes
+the always-open network, honestly and knowingly. `TimeDependentDijkstra` reads
+the clock — Dreyfus, *An Appraisal of Some Shortest-Path Algorithms* (1969),
+whose observation is that Dijkstra generalises unchanged provided arrival is
+non-decreasing in departure.
+
+```python
+env = rl.Environment(rl.OSM("seattle.osm.pbf", rl.Walking()))
+planner = rl.TimeDependentDijkstra().bind(env)
+planner.route(ballard, magnolia, departing=time(8, 0))    # 30.0 min
+planner.route(ballard, magnolia, departing=time(22, 0))   # 61.6 min
+```
+
+`python demos/route_by_clock.py seattle.osm.pbf` prints the same trip at every
+hour. 354 of Seattle's 1,480,122 walking edges carry a schedule — a rounding
+error that changes the answer completely for the trips that meet one:
+
+| depart | moving | legs | scheduled edges used |
+|---|---|---|---|
+| 06:00 | 61.6 min | 153 | 0 |
+| 07:00 | **30.0 min** | 106 | 20 |
+| 20:00 | 30.0 min | 106 | 20 |
+| 21:00 | 61.6 min | 153 | 0 |
+
+The gate opens at seven and shuts at nine, and the alternative is the long way
+around the ship canal. Waiting is a policy rather than an assumption:
+`TimeDependentDijkstra("forbidden")` treats a shut edge as absent, which is the
+control that shows waiting doing real work.
+
+Two things are stated rather than discovered. The clock is **weekly** — seconds
+since Monday 00:00 — because every restriction OSM can express repeats weekly;
+a schedule naming a date or a holiday is refused at parse time and counted in
+`unreadable_schedules` rather than approximated. And a conditional tag is read as
+the whole story for its edge: `yes @ (hours)` means shut outside them, `no @
+(hours)` means open outside them, and the base `access` tag does not get a vote.
+
+### Timetables: two models of the same departures
+
+Pyrga, Schulz, Wagner & Zaroliagis, *Efficient Models for Timetable Information
+in Public Transportation Systems* (ACM JEA 12, Article 2.4, 2007) is not a paper
+about an algorithm. A timetable is not a network with weights on it — it is a
+set of **connections**, each one a vehicle leaving one stop at one instant and
+reaching another at another — and the paper is about the two ways to make that
+into something a shortest-path algorithm can read.
+
+```python
+env = rl.Environment(rl.GTFS("kcm.zip", date(2026, 8, 17)))
+journey = rl.TimeDependent().bind(env).route(origin, target, departing=time(8, 30))
+journey.arrives, journey.transfers, journey.waiting   # 33600, 4, 1200
+```
+
+Both models answer with the same verb, `route(..., departing=)`, because
+comparing them is the point:
+
+| model | nodes | bind | memory | query | settled | arrives |
+|---|---|---|---|---|---|---|
+| Time-dependent | 6,313 stops | — | — | 0.1 ms | 187 | 09:20 |
+| Time-expanded | 837,924 events | 0.2 s | 37 MB | 2.5 ms | 740 | 09:20 |
+
+King County Metro plus Sound Transit on a Monday: 6,313 stops, 421,604
+connections, 7,038 stop pairs, 0 trips the reader could not represent. The
+time-expanded model builds a node per departure and per arrival, and what comes
+out is an **ordinary static graph** — `dijkstra` routes it unchanged, and so
+would A*, or landmarks, or a contraction hierarchy. That generality is the whole
+appeal, and 133× the nodes is what it costs. The time-dependent model keeps one
+node per stop and pays in the search instead: relaxing an edge is not reading a
+weight but a binary search for what leaves next.
+
+Neither is the reference implementation. **Each is the other's** — they must
+agree on every query, which is the paper's thesis and this module's main test,
+checked over random timetables, against a brute-force oracle, and on the real
+feed.
+
+The cost model is what makes the seam load-bearing rather than decorative:
+
+```python
+rl.Dijkstra().bind(env)
+# TypeError: Dijkstra cannot route over timetable layers; it accepts scalar
+```
+
+A GTFS layer contributes one edge per pair of adjacent stops weighted by the
+*shortest ride anyone makes along it* — a genuine lower bound, enough to give
+every stop a label and to snap a coordinate to one, and not enough to route on.
+Routing it as though those weights told the whole story is a wrong answer that
+looks like a right one, so `Dijkstra` refuses it and `missing_from` says so
+before anything is built.
+
+Two limits worth stating. Changing vehicles is **instantaneous**, which is the
+paper's *simple* model; its *realistic* one charges a minimum change time and is
+not expressible with one label per stop, because staying in your seat must not be
+charged and a stop label cannot say which vehicle you arrived on. The paper's
+answer is more nodes (§4.2), and that is its own increment — so `Transfer` offers
+only `Transfer::instant()` rather than a parameter that would be quietly ignored.
+And a timetable is on a **linear service day** — GTFS writes `25:30:00`, so
+`service_seconds` does not wrap the way `weekly_seconds` does. The two clocks are
+deliberately not interchangeable, which means walking and transit cannot yet
+share one environment. That is the multimodal problem, and the conversion needs a
+service-day-to-calendar anchor: exactly the thing that must not be implicit.
+
+`python demos/route_transit.py kcm.zip --date 2026-08-17` runs both models and
+prints the itinerary.
+
 ### Underneath
 
 The kernels are also callable directly, on dense integer ids, as the papers
@@ -368,13 +477,17 @@ a result you can ask for costs, paths, and the order nodes were settled in. Two
 algorithms solving the same problem are drop-in substitutes, so comparing them is
 a one-line change rather than a porting project.
 
-**A reference implementation for every kernel.** Each kernel has a twin in
-[`routelab.reference`](python/routelab/reference.py): the same algorithm written
-the obvious way in pure Python. It is slow and legible, and it is what the fast
-one is checked against — over random graphs, on every result field, not just
-distances. "Returns the right answer" is a falsifiable claim in this domain, which
-is what makes contributing a new kernel tractable: write it, diff it against the
-reference, and the diff is the review.
+**Something independent to check every kernel against.** The static searches
+have a twin in [`routelab.reference`](python/routelab/reference.py): the same
+algorithm written the obvious way in pure Python, slow and legible, diffed over
+random graphs on every result field rather than on distances alone. Where a
+second implementation would only be a second copy of the same reasoning, the
+check is something else independent — a brute-force oracle over tiny instances,
+or two models of one problem that must agree. The timetable kernels have both,
+and neither of the two is the reference: each is the other's. "Returns the right
+answer" stays a falsifiable claim either way, which is what makes contributing a
+new kernel tractable — write it, diff it against something that cannot be wrong
+in the same direction, and the diff is the review.
 
 **Results are checkable, not merely reported.** `Graph.walk` follows a returned
 edge path and reports where it lands and what it cost. A path is only correct if
@@ -384,7 +497,9 @@ that rather than trusting the search's own bookkeeping.
 ## Layout
 
 ```
-crates/routelab-core/   Rust: CSR graph, searches, heuristics, contraction. No Python.
+crates/routelab-core/   Rust: CSR graph, searches, heuristics, contraction, timetables. No Python.
+crates/routelab-osm/    Reading OpenStreetMap extracts. Kernel-free; wraps `osmpbf`.
+crates/routelab-gtfs/   Reading GTFS feeds. Kernel-free; wraps `gtfs-structures`.
 crates/routelab-py/     PyO3 bindings. Conversion and GIL release, nothing else.
 python/routelab/        The veneer: constructors, argument sugar, reference implementations.
 tests/                  Behaviour tests and differential tests against the reference.

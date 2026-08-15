@@ -33,7 +33,7 @@ import copy
 from typing import Any, Dict, Hashable, Iterable, Mapping, Optional, Union
 
 from . import _routelab
-from .clock import weekly_seconds
+from .clock import service_seconds, weekly_seconds
 from .environment import CompiledEnvironment, Environment
 from .heuristics import Heuristic
 from .journey import Journey
@@ -47,7 +47,10 @@ __all__ = [
     "ContractionHierarchy",
     "Dijkstra",
     "Planner",
+    "TimeDependent",
     "TimeDependentDijkstra",
+    "TimeExpanded",
+    "TimetablePlanner",
     "route",
 ]
 
@@ -477,6 +480,155 @@ class TimeDependentDijkstra(Planner):
 
     def __repr__(self) -> str:
         return self._describe(repr(self.waiting) if self.waiting != "unrestricted" else "")
+
+
+class TimetablePlanner(Planner):
+    """Earliest arrival over a timetable — the shared half of two models.
+
+    Pyrga, Schulz, Wagner & Zaroliagis, *Efficient Models for Timetable
+    Information in Public Transportation Systems* (ACM JEA 12, Article 2.4,
+    2007). The paper's subject is not an algorithm but a *modelling* decision:
+    a timetable is a set of departures, and there are two ways to make one into
+    something a shortest-path algorithm can read. :class:`TimeExpanded` spends
+    nodes; :class:`TimeDependent` spends search. They must agree on every query,
+    which is the paper's thesis and this library's test.
+
+    Both accept a ``"scalar"`` layer alongside the timetable so an environment
+    can carry stop geometry, and both **require** a timetable — bind one to a
+    plain road network and ``missing_from`` says so before anything is built.
+    """
+
+    accepts: "frozenset[str]" = frozenset({"scalar", "timetable"})
+
+    #: Departures to read. Without them there is no timetable to route over.
+    requires: "frozenset[str]" = frozenset({"timetable"})
+
+    def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
+        return super().missing_from(compiled) | (self.requires - compiled.provides)
+
+    def _timetable(self) -> "_routelab.Timetable":
+        timetable = self._bound().timetable
+        if timetable is None:
+            raise ValueError(
+                f"{self!r} needs a timetable and this environment has none. "
+                f"Register a layer that keeps departures — "
+                f"routelab.sources.gtfs.GTFS(path, date)."
+            )
+        return timetable
+
+    def _earliest_arrival(
+        self, origin: Hashable, destination: Hashable, departing: int
+    ) -> "Optional[_routelab.Itinerary]":
+        """Run the model. The one line the two subclasses do not share."""
+        raise NotImplementedError
+
+    def search(self, origins: Origins, **options: Any) -> Result:
+        """Not this. A timetable query answers with an itinerary.
+
+        The other planners return a cost per node because that is what their
+        kernels compute. These compute one journey and report what settling it
+        cost, so there is no table to hand back — and returning an empty one
+        would be worse than saying so.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} answers with an itinerary rather than a "
+            f"cost per node — use route(origin, destination, departing=...)."
+        )
+
+    def route(
+        self, origin: Origins, destination: Hashable, **options: Any
+    ) -> Optional[Journey]:
+        """The earliest arrival at ``destination``, leaving no earlier than
+        ``departing``.
+
+        Args:
+            origin: One stop label. Several origins would each have their own
+                departure time — an access walk of a different length to each —
+                and that is the multimodal query, not this one.
+            destination: The stop label to reach.
+            departing: When you can first leave, on the service day's clock. No
+                default, for the reason :class:`TimeDependentDijkstra` has none.
+        """
+        departing = options.pop("departing", None)
+        if departing is None:
+            raise ValueError(
+                "a timetable search needs a departure time: pass "
+                "departing=time(8, 30) or departing=30600, seconds since the "
+                "service day's midnight."
+            )
+        self._no_other(options, "a timetable search")
+        if isinstance(origin, Mapping) or (
+            isinstance(origin, Iterable) and not isinstance(origin, (str, bytes, tuple))
+        ):
+            raise ValueError(
+                f"{type(self).__name__} departs from one stop at one time; "
+                f"several origins would each need their own departure time."
+            )
+        at = service_seconds(departing)
+        itinerary = self._earliest_arrival(origin, destination, at)
+        if itinerary is None:
+            return None
+        return Journey.from_itinerary(self._bound(), itinerary, origin, at)
+
+
+class TimeDependent(TimetablePlanner):
+    """A node per stop, and a search that reads the clock (Pyrga et al. §4).
+
+        TimeDependent().bind(env).route("1_1234", "1_5678", departing=time(8, 30))
+
+    The graph stays the size of the network. Relaxing an edge is not reading a
+    weight but asking what leaves next along it, which is a binary search over
+    that edge's departures — so the model is small and the search is bespoke.
+    Nothing is built at bind time, which is the other half of the trade.
+
+    Changing vehicles is instantaneous here, which is the paper's *simple*
+    model. Its *realistic* one charges a minimum change time and is not
+    expressible with one label per stop: staying in your seat must not be
+    charged, so the cost of boarding depends on which vehicle you arrived on.
+    The paper's answer is more nodes (§4.2), and that is its own increment.
+    """
+
+    def _earliest_arrival(
+        self, origin: Hashable, destination: Hashable, departing: int
+    ) -> "Optional[_routelab.Itinerary]":
+        return self._timetable().earliest_arrival(
+            self.node_id(origin), departing, self.node_id(destination)
+        )
+
+
+class TimeExpanded(TimetablePlanner):
+    """A node per event, and then it is just a graph (Pyrga et al. §3).
+
+        TimeExpanded().bind(env).route("1_1234", "1_5678", departing=time(8, 30))
+
+    Every departure and every arrival becomes its own node; riding and waiting
+    become edges. What comes out is an ordinary static graph, so
+    :func:`~routelab.dijkstra` routes it unchanged — and so would A*, or
+    landmarks, or a contraction hierarchy. That is the model's whole appeal.
+
+    Its cost is size. A city's weekday is a few thousand stops and hundreds of
+    thousands of events, so the graph is built once at bind time and
+    :attr:`footprint` is worth reading before you build one.
+    """
+
+    def preprocess(self) -> None:
+        self._expanded = _routelab.TimeExpanded.build(self._timetable())
+
+    def _footprint(self) -> int:
+        return self._expanded.footprint
+
+    @property
+    def num_events(self) -> int:
+        """Nodes in the expanded graph — the number the model is judged on."""
+        self._bound()
+        return self._expanded.num_events
+
+    def _earliest_arrival(
+        self, origin: Hashable, destination: Hashable, departing: int
+    ) -> "Optional[_routelab.Itinerary]":
+        return self._expanded.earliest_arrival(
+            self.node_id(origin), departing, self.node_id(destination)
+        )
 
 
 def route(

@@ -77,12 +77,32 @@ def test_every_edge_remembers_the_layer_it_came_from():
 
 
 class Timetable(rl.EdgeSource):
-    """A stand-in for the layer that does not yet exist, to test the seam."""
+    """A two-stop shuttle, small enough to check the seam by hand.
+
+    Edge weights are the shortest ride anyone makes, which is a lower bound and
+    not a cost — the point of the ``"timetable"`` cost model.
+    """
 
     cost_model = "timetable"
 
+    #: `(trip, departs, arrives)` per edge, in the order `edges` yields them.
+    DEPARTURES = [
+        [(0, 8 * 3600, 8 * 3600 + 600), (1, 9 * 3600, 9 * 3600 + 500)],
+        [(2, 10 * 3600, 10 * 3600 + 900)],
+    ]
+
     def edges(self):
-        return [("a", "b", 1)]
+        return [("a", "b", 500), ("b", "c", 900)]
+
+    def connections(self, index):
+        return self.DEPARTURES[index]
+
+
+class Untimetabled(Timetable):
+    """A timetable layer with no departures — a service day nothing runs on."""
+
+    def connections(self, index):
+        return []
 
 
 def test_cost_models_are_collected_from_the_layers():
@@ -90,9 +110,45 @@ def test_cost_models_are_collected_from_the_layers():
     assert env.cost_models == frozenset({"scalar", "timetable"})
 
 
-def test_compiling_refuses_a_layer_it_would_have_to_lie_about():
-    # A time-dependent layer cannot flatten into fixed costs. Better to say so
-    # than to compile its edges as if their weights told the whole story.
-    env = rl.Environment(Timetable())
+def test_a_timetable_layer_compiles_and_brings_its_departures():
+    compiled = rl.Environment(Timetable()).compile()
+    assert "timetable" in compiled.provides
+    assert compiled.timetable.num_stops == 3
+    assert compiled.timetable.num_connections == 3
+    # Two of the three run along the same pair of stops, so the timetable has
+    # one fewer edge than it has connections.
+    assert compiled.timetable.num_edges == 2
+
+
+def test_departures_land_on_the_edge_they_were_filed_under():
+    # The trap this keying exists to avoid: `Graph` permutes its edges into CSR
+    # order, so a timetable keyed by edge id would put the 10:00 departure on
+    # a → b. Leaving at 08:00 must therefore reach 'c' at 10:15 — catching the
+    # 08:00 to 'b', waiting, then the only departure onward.
+    compiled = rl.Environment(Timetable()).compile()
+    itinerary = compiled.timetable.earliest_arrival(
+        compiled.node_id("a"), 8 * 3600, compiled.node_id("c")
+    )
+    assert itinerary.arrives == 10 * 3600 + 900
+    assert [ride[0] for ride in itinerary.rides()] == [0, 2]
+
+
+def test_a_timetable_layer_with_no_departures_provides_no_timetable():
+    # It compiles — the edges are real — but there is nothing to route over,
+    # which is what `missing_from` is for rather than a failure at compile time.
+    compiled = rl.Environment(Untimetabled()).compile()
+    assert compiled.timetable is None
+    assert "timetable" not in compiled.provides
+
+
+def test_compiling_refuses_a_cost_model_nothing_can_carry():
+    # The seam is still a seam: a model this class would have to lie about is
+    # refused rather than flattened.
+    class Continuous(rl.EdgeSource):
+        cost_model = "flow"
+
+        def edges(self):
+            return [("a", "b", 1)]
+
     with pytest.raises(NotImplementedError, match="does not"):
-        env.compile()
+        rl.Environment(Continuous()).compile()

@@ -16,6 +16,7 @@ rust-version = "1.83"
 
 [workspace.dependencies]
 routelab-core = { path = "crates/routelab-core" }
+routelab-gtfs = { path = "crates/routelab-gtfs" }
 routelab-osm = { path = "crates/routelab-osm" }
 
 [profile.release]
