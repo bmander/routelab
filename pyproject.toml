@@ -31,4 +31,6 @@ python-source = "python"
 features = ["extension-module"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# Docstring examples are run as tests, so the documentation cannot drift.
+testpaths = ["tests", "python/routelab"]
+addopts = "--doctest-modules"

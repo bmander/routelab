@@ -32,9 +32,52 @@ pip install -e '.[dev]'          # builds the Rust kernel via maturin
 
 ## Use
 
+Describe a world, then ask an algorithm to route over it.
+
 ```python
 import routelab as rl
 
+env = rl.Environment()
+env.register(rl.ScalarEdges(("a", "b", 1), ("b", "c", 15)))
+
+planner = rl.Dijkstra(env)          # preprocess once
+planner.route("a", "c")             # Journey('a' → 'b' → 'c', cost=16)
+```
+
+An environment is assembled from layers, and nodes are labelled by whatever you
+already call them — stop ids, OSM node ids, `("bike", 42)`. Each leg of a journey
+remembers which layer it came from, which is what makes a multimodal answer
+readable rather than just a number:
+
+```python
+streets = rl.ScalarEdges(("home", "stop_a", 300), bidirectional=True)
+transit = rl.ScalarEdges(("stop_a", "stop_b", 120))
+env = rl.Environment(streets, transit)
+
+journey = rl.Dijkstra(env).route("home", "stop_b")
+[(leg.head, leg.source) for leg in journey.legs]
+# [('stop_a', ScalarEdges(2 edges)), ('stop_b', ScalarEdges(1 edges))]
+```
+
+Queries take the arguments the problem actually needs — several origins, each
+already carrying the cost of an access walk, and a bound on how far to look:
+
+```python
+rl.Dijkstra(env).route({"stop_a": 0, "stop_b": 45}, "home", max_cost=600)
+```
+
+The planner is the unit of comparison: swap `rl.Dijkstra` for `rl.BFS` and the
+rest of the line is unchanged. `rl.route(rl.Dijkstra, env, "a", "c")` does the
+whole thing in one call when you only have one question to ask — but building a
+planner and keeping it is what makes preprocessing worth doing, which is the
+whole game for the algorithms this project is heading toward.
+
+### Underneath
+
+The kernels are also callable directly, on dense integer ids, as the papers
+state them. This is the layer to implement or benchmark an algorithm against:
+
+```python
 # (tail, head, weight) triples; weights are non-negative ints, conventionally seconds.
 graph = rl.Graph.from_edges([(0, 1, 60), (1, 3, 120), (0, 2, 90), (2, 3, 30)])
 
@@ -42,22 +85,11 @@ result = rl.dijkstra(graph, 0)
 result.cost(3)        # 120
 result.path(3)        # [0, 2, 3]
 result.edge_path(3)   # edge ids, for getting back to your own per-edge data
-```
 
-Searches take the arguments the problem actually needs:
-
-```python
-# Many sources, each already carrying a cost — an access walk to every nearby stop.
-rl.dijkstra(graph, {0: 0, 2: 45})
-
-# Stop as soon as these are settled.
-rl.dijkstra(graph, 0, targets=[3])
-
-# Or bound the search instead: an isochrone.
-rl.dijkstra(graph, 0, max_cost=90)
-
-# Hop counts, ignoring weights.
-rl.bfs(graph, 0, max_depth=2)
+rl.dijkstra(graph, {0: 0, 2: 45})     # many sources, each with an initial cost
+rl.dijkstra(graph, 0, targets=[3])    # stop as soon as these are settled
+rl.dijkstra(graph, 0, max_cost=90)    # or bound the search: an isochrone
+rl.bfs(graph, 0, max_depth=2)         # hop counts, ignoring weights
 ```
 
 ## The contract
