@@ -7,3 +7,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .DS_Store
+# OSM extracts: large, and everyone should fetch their own.
+/data/
+*.osm.pbf
+route.html
+route.geojson

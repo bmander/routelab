@@ -157,8 +157,26 @@ python demos/route_city.py liechtenstein.osm.pbf \
 ```
 
 writes a map of the route with every settled node behind it — blue where both
-searches went, orange for the 8,330 nodes A* never had to look at. Extracts come
-from [Geofabrik](https://download.geofabrik.de).
+searches went, orange for the 8,330 nodes A* never had to look at.
+
+For poking at it by hand, `demos/serve.py` puts the same thing behind a local
+page: click an origin, click a destination, and the route comes back with the
+search drawn underneath it.
+
+```bash
+python demos/serve.py data/Seattle.osm.pbf     # then open http://localhost:8000
+```
+
+The extract is read once at startup and the planners are built once, so a click
+costs a query and not a load — Seattle is 258,029 nodes and 590,671 edges from a
+65 MB extract, read in about five seconds, and a cross-town route answers in
+four milliseconds. Switching the algorithm dropdown re-runs the same query the
+other way: 19,530 nodes settled under A*, 44,557 under Dijkstra, for the same
+12.9-minute answer.
+
+Country extracts come from [Geofabrik](https://download.geofabrik.de), city ones
+from [BBBike](https://download.bbbike.org/osm/bbbike/). Neither is committed —
+`data/` is ignored.
 
 ### Underneath
 
