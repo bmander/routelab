@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Hashable, List, NamedTuple, Tuple
+from dataclasses import dataclass
+from typing import Hashable, Iterator, List, NamedTuple, Optional, Tuple
 
-from .environment import CompiledEnvironment, EdgeSource
+from .environment import CompiledEnvironment, EdgeSource, shape_of
 from .search import Result
 
 __all__ = ["Journey", "Leg"]
+
+#: A point on the ground, `(latitude, longitude)`.
+Point = Tuple[float, float]
 
 
 class Leg(NamedTuple):
@@ -17,14 +21,37 @@ class Leg(NamedTuple):
     head: Hashable
     weight: int
     source: EdgeSource
-    #: The graph edge this leg crossed. Keep it and you can ask the environment
-    #: for anything else the edge knows — its shape, most usefully, since a leg
-    #: between two labels may be a winding street on the ground.
+    #: The graph edge this leg crossed, for asking the environment about it.
     edge: int
+    #: Where this leg sits within its own layer, counted in the order that layer
+    #: emitted its edges. Carried rather than looked up because resolving the
+    #: layer already computed it, and because it is what makes a leg able to
+    #: answer for itself. Not `index`, which is a method every tuple already has.
+    position: int
+
+    @property
+    def geometry(self) -> "Optional[List[Point]]":
+        """The `(lat, lon)` shape of this leg, if its layer keeps one.
+
+        A leg between two labels is a straight line as far as the graph is
+        concerned; on the ground it may be a winding street. ``None`` from a
+        layer that knows only topology.
+        """
+        return shape_of(self.source, self.position)
 
 
-class Journey(NamedTuple):
+@dataclass(frozen=True)
+class Journey:
     """A path through an environment, with the cost the planner minimized.
+
+    Iterating a journey gives its legs, which is what a journey mostly is::
+
+        for leg in journey:
+            leg.head, leg.weight, leg.geometry
+
+    A record rather than a tuple, precisely so that can be true: a
+    :class:`~typing.NamedTuple` that iterated its legs would be lying about its
+    own length everywhere else.
 
     ``cost`` is what the planner was optimizing, which is not always the sum of
     the leg weights: :class:`~routelab.planners.BFS` counts hops, so its journeys
@@ -41,6 +68,24 @@ class Journey(NamedTuple):
         """The labels along the journey, origin first."""
         return [self.origin] + [leg.head for leg in self.legs]
 
+    @property
+    def geometry(self) -> "List[Point]":
+        """The whole route as one polyline, origin first.
+
+        Legs are stitched rather than concatenated — each one starts where the
+        last ended, and repeating that point would put a duplicate vertex at
+        every corner. Legs whose layer has no shape contribute nothing, so a
+        journey through a layer that knows only topology comes back empty rather
+        than partially drawn.
+        """
+        points: "List[Point]" = []
+        for leg in self.legs:
+            shape = leg.geometry
+            if shape is None:
+                continue
+            points.extend(shape[1:] if points else shape)
+        return points
+
     @classmethod
     def from_result(
         cls,
@@ -53,13 +98,15 @@ class Journey(NamedTuple):
         legs = []
         for edge_id in result.edge_path(node_id):
             tail, head, weight = compiled.graph.edge(edge_id)
+            source, position = compiled.locate(edge_id)
             legs.append(
                 Leg(
                     tail=compiled.label(tail),
                     head=compiled.label(head),
                     weight=weight,
-                    source=compiled.source_of(edge_id),
+                    source=source,
                     edge=edge_id,
+                    position=position,
                 )
             )
         return cls(
@@ -70,6 +117,14 @@ class Journey(NamedTuple):
             cost=result.cost(node_id),
             legs=tuple(legs),
         )
+
+    def __iter__(self) -> "Iterator[Leg]":
+        """The legs. Deliberately not `__len__`: a journey from a place to
+        itself has no legs and is still an answer, and `len(journey) == 0` would
+        make `if journey:` mean something other than "a route was found" —
+        which is what `route()` already says by returning None when one was not.
+        """
+        return iter(self.legs)
 
     def __repr__(self) -> str:
         arrow = " → ".join(repr(label) for label in self.nodes)

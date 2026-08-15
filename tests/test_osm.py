@@ -111,21 +111,38 @@ def test_nearest_can_be_confined_to_nodes_that_are_any_use():
 
 
 def test_a_leg_can_find_its_own_shape():
-    layer = rl.OSM(JUNCTION, rl.Walking())
-    env = rl.Environment(layer)
-    compiled = env.compile()
+    # Without being handed the environment back. A leg knows its layer and its
+    # place in it, which is everything needed to answer.
+    env = rl.Environment(rl.OSM(JUNCTION, rl.Walking()))
     journey = rl.AStar(rl.Euclidean()).bind(env).route(1, 3)
 
-    shapes = [compiled.geometry(leg.edge) for leg in journey.legs]
+    shapes = [leg.geometry for leg in journey]
     assert all(shape for shape in shapes), "every leg knows where it runs"
     # The shapes join up: each leg's last point is the next leg's first.
     for before, after in zip(shapes, shapes[1:]):
         assert before[-1] == after[0]
 
 
+def test_a_journey_draws_as_one_polyline():
+    env = rl.Environment(rl.OSM(JUNCTION, rl.Walking()))
+    journey = rl.AStar(rl.Euclidean()).bind(env).route(1, 3)
+
+    # Stitched, not concatenated: the shared point at each corner appears once.
+    separate = sum(len(leg.geometry) for leg in journey)
+    assert len(journey.geometry) == separate - (len(journey.legs) - 1)
+    assert journey.geometry[0] == journey.legs[0].geometry[0]
+    assert journey.geometry[-1] == journey.legs[-1].geometry[-1]
+
+
 def test_a_layer_without_geometry_simply_has_none():
     env = rl.Environment(rl.ScalarEdges(("a", "b", 1)))
-    assert env.compile().geometry(0) is None
+    compiled = env.compile()
+    assert compiled.geometry(0) is None
+
+    # And a journey over it draws as nothing, rather than as half a line.
+    journey = rl.Dijkstra().bind(env).route("a", "b")
+    assert journey.legs[0].geometry is None
+    assert journey.geometry == []
 
 
 def test_astar_and_dijkstra_agree_on_a_real_extract():

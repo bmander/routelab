@@ -132,7 +132,7 @@ class Router:
         # GeoJSON, which localhost and a canvas renderer both take in stride.
         tree = planner.explored(result)
         return {
-            "route": [point for leg in journey.legs for point in compiled.geometry(leg.edge)],
+            "route": journey.geometry,
             "tree": tree.geojson(limit=branches),
             "peak": tree.peak,
             "branch_count": len(tree),

@@ -99,7 +99,7 @@ def write_map(path, compiled, layer, journey, searches):
     what guidance let A* *skip*. So the layers are the difference and the
     overlap, not the two sets.
     """
-    route = [point for leg in journey.legs for point in compiled.geometry(leg.edge)]
+    route = journey.geometry
     coordinates = layer.coordinates()
     as_labels = lambda result: {compiled.label(node) for node in result.order}
 

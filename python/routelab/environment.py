@@ -50,6 +50,19 @@ LabelledEdge = Tuple[Hashable, Hashable, int]
 COMPILABLE_COST_MODELS = frozenset({"scalar"})
 
 
+def shape_of(source: "EdgeSource", index: int) -> "Optional[List[Tuple[float, float]]]":
+    """The shape of a layer's ``index``-th edge, in that layer's own numbering.
+
+    Separate from :meth:`CompiledEnvironment.geometry` because two callers need
+    it from different directions: an environment that has a graph edge id and
+    must work out which layer it came from, and a journey leg that already knows.
+    """
+    # `register` asks only for `edges`, so a layer need not inherit EdgeSource
+    # and need not have the hook at all.
+    getter = getattr(source, "geometry", None)
+    return None if getter is None else getter(index)
+
+
 class EdgeSource:
     """A layer of the world that contributes edges to an :class:`Environment`.
 
@@ -370,7 +383,7 @@ class CompiledEnvironment:
 
     def source_of(self, edge_id: int) -> EdgeSource:
         """The layer that contributed ``edge_id``."""
-        return self._locate(edge_id)[0]
+        return self.locate(edge_id)[0]
 
     def geometry(self, edge_id: int) -> "Optional[List[Tuple[float, float]]]":
         """The shape of ``edge_id``, if its layer keeps one.
@@ -379,15 +392,20 @@ class CompiledEnvironment:
         it may be a winding street. Layers that know the difference expose a
         ``geometry(index)``, and this finds the right layer and asks it in that
         layer's own numbering. ``None`` when the layer has no shape to give.
-        """
-        source, local_index = self._locate(edge_id)
-        # `register` asks only for `edges`, so a layer need not inherit
-        # EdgeSource and need not have the hook at all.
-        getter = getattr(source, "geometry", None)
-        return None if getter is None else getter(local_index)
 
-    def _locate(self, edge_id: int) -> "Tuple[EdgeSource, int]":
-        """The layer that produced ``edge_id``, and its index within that layer."""
+        For an edge you got from a :class:`~routelab.Journey`, prefer
+        ``leg.geometry`` — a leg already knows its layer and its place in it, and
+        should not send you back to the environment to find out its own shape.
+        """
+        return shape_of(*self.locate(edge_id))
+
+    def locate(self, edge_id: int) -> "Tuple[EdgeSource, int]":
+        """The layer that produced ``edge_id``, and its position within it.
+
+        Public because a :class:`~routelab.Leg` is built from it: a leg keeps
+        both, so it can answer for its own shape without being handed the
+        environment back.
+        """
         input_index = self.graph.input_index(edge_id)
         position = bisect.bisect_right(self._span_starts, input_index) - 1
         start, _, source = self._spans[position]
