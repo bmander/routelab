@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Two parallel 111 m streets, one posted and one not, for checking that a
+  maxspeed tag reaches the weight.
+-->
+<osm version="0.6" generator="hand">
+  <node id="1" lat="0.000" lon="0.000"/>
+  <node id="2" lat="0.001" lon="0.000"/>
+  <node id="3" lat="0.000" lon="0.010"/>
+  <node id="4" lat="0.001" lon="0.010"/>
+
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <tag k="highway" v="residential"/>
+  </way>
+
+  <way id="20">
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <tag k="highway" v="residential"/>
+    <tag k="maxspeed" v="36"/>
+  </way>
+</osm>

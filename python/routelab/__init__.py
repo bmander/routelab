@@ -26,7 +26,7 @@ benchmark an algorithm.
 
 from __future__ import annotations
 
-from . import _routelab, heuristics, reference
+from . import _routelab, heuristics, reference, sources
 from ._args import Nodes, Sources
 from .environment import (
     CompiledEnvironment,
@@ -40,12 +40,15 @@ from .heuristics import Euclidean, Heuristic, Zero
 from .journey import Journey, Leg
 from .planners import BFS, PLANNERS, AStar, Dijkstra, Planner, route
 from .search import SearchResult, astar, bfs, dijkstra
+from .sources import OSM, Cycling, Driving, Profile, Walking
 
 __all__ = [
     "AStar",
     "BFS",
     "CompiledEnvironment",
+    "Cycling",
     "Dijkstra",
+    "Driving",
     "EdgeSource",
     "Environment",
     "Euclidean",
@@ -54,12 +57,15 @@ __all__ = [
     "Journey",
     "Leg",
     "Nodes",
+    "OSM",
     "PLANNERS",
     "Planner",
     "Positions",
+    "Profile",
     "ScalarEdges",
     "SearchResult",
     "Sources",
+    "Walking",
     "Zero",
     "astar",
     "bfs",
@@ -67,6 +73,7 @@ __all__ = [
     "heuristics",
     "reference",
     "route",
+    "sources",
 ]
 
 __version__ = _routelab.__version__

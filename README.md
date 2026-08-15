@@ -119,6 +119,47 @@ Same code, same heuristic, same answers. The last row moves in L1 while the
 estimate measures L2, so the bound is loose by up to √2 everywhere and the
 guidance buys exactly nothing.
 
+### Real maps
+
+An OpenStreetMap extract is a layer like any other:
+
+```python
+env = rl.Environment().register(rl.OSM("liechtenstein.osm.pbf", rl.Driving()))
+planner = rl.AStar(env, rl.Euclidean())
+planner.route(planner.environment.sources[0].nearest(47.226, 9.523), ...)
+```
+
+Nodes keep their OSM ids, so a route traces back to the map it came from, and
+each leg can produce the shape of the street it followed — `compiled.geometry(leg.edge)`
+gives the polyline, not just the endpoints.
+
+A `Profile` decides who is travelling, because the same file is three different
+networks: which `highway` classes count, how fast each goes, whether `oneway`
+binds. `Walking()`, `Cycling()`, and `Driving()` ship as defaults, and any of them
+can be adjusted — `Driving().but(respect_oneway=False)`.
+
+One consequence worth knowing, because it is counter-intuitive and the demo
+measures it. A profile's top speed becomes the layer's `cost_per_distance`, so a
+straight-line bound must assume *everything* moves at motorway speed. The wider a
+network's range of speeds, the weaker that bound — guidance helps least exactly
+where the network is most varied. Same code, same heuristic, Liechtenstein:
+
+| profile | speeds | short route | long route |
+|---|---|---:|---:|
+| Walking | 0.5–1.4 m/s | 15% of Dijkstra's nodes | 46% |
+| Driving | 5–31 m/s | 56% | 98% |
+
+That is the argument for landmark heuristics, which do not price distance at all.
+
+```bash
+python demos/route_city.py liechtenstein.osm.pbf \
+    --from 47.2260,9.5230 --to 47.1300,9.5210 --profile walking
+```
+
+writes a map of the route with every settled node behind it — blue where both
+searches went, orange for the 8,330 nodes A* never had to look at. Extracts come
+from [Geofabrik](https://download.geofabrik.de).
+
 ### Underneath
 
 The kernels are also callable directly, on dense integer ids, as the papers

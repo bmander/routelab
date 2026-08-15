@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/routelab-core", "crates/routelab-py"]
+members = ["crates/routelab-core", "crates/routelab-osm", "crates/routelab-py"]
 resolver = "2"
 
 [workspace.package]
@@ -11,6 +11,7 @@ rust-version = "1.83"
 
 [workspace.dependencies]
 routelab-core = { path = "crates/routelab-core" }
+routelab-osm = { path = "crates/routelab-osm" }
 
 [profile.release]
 lto = "thin"

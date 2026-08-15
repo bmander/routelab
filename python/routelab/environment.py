@@ -28,6 +28,7 @@ time-dependence on the floor. That refusal is the seam CSA and RAPTOR plug into.
 
 from __future__ import annotations
 
+import bisect
 from typing import Any, Dict, Hashable, Iterable, Iterator, List, Mapping, Optional, Tuple
 
 from .graph import Graph
@@ -90,6 +91,18 @@ class EdgeSource:
         geometry.
         """
         return {}
+
+    def geometry(self, index: int) -> "Optional[List[Tuple[float, float]]]":
+        """The shape of the edge this layer emitted at ``index``, if it has one.
+
+        An edge is a straight line between two labels as far as the graph is
+        concerned; on the ground it may be a winding street. Indices are this
+        layer's own, counted in the order :meth:`edges` yielded them —
+        :meth:`CompiledEnvironment.geometry` does the translation from a graph
+        edge id. ``None`` by default: a layer that knows only topology has no
+        shape to give.
+        """
+        return None
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}()"
@@ -227,10 +240,12 @@ class CompiledEnvironment:
         # first-seen order — no second list to hold in lockstep.
         index: Dict[Hashable, int] = {}
         edges: List[Tuple[int, int, int]] = []
-        edge_sources: List[EdgeSource] = []
-        # Layers that actually produced an edge, noted as we go: a layer with no
-        # edges has no say in how fast the environment can move.
-        contributing: List[EdgeSource] = []
+        # Where each layer's edges sit in the input list, noted as we go. Layers
+        # emit contiguous runs, so a handful of spans replaces a per-edge table:
+        # provenance costs a bisect over the layers rather than memory per edge.
+        # A layer with no run at all also has no say in how fast the environment
+        # can move.
+        spans: "List[Tuple[int, int, EdgeSource]]" = []
 
         for source in sources:
             if source.cost_model not in COMPILABLE_COST_MODELS:
@@ -247,9 +262,8 @@ class CompiledEnvironment:
                     if label not in index:
                         index[label] = len(index)
                 edges.append((index[tail], index[head], int(weight)))
-                edge_sources.append(source)
             if len(edges) > before:
-                contributing.append(source)
+                spans.append((before, len(edges), source))
 
         # Straight to the kernel constructor: `from_edges` re-coerces every
         # triple to int for callers who might hand it anything, and these are
@@ -257,9 +271,10 @@ class CompiledEnvironment:
         self.graph = Graph(len(index), edges)
         self.labels: "Tuple[Hashable, ...]" = tuple(index)
         self._index = index
-        # Parallel to the *input* edge list, so a CSR edge id is looked up
+        # Spans index the *input* edge list, so a CSR edge id is looked up
         # through Graph.input_index rather than assumed to line up.
-        self._edge_sources: "Tuple[EdgeSource, ...]" = tuple(edge_sources)
+        self._spans: "Tuple[Tuple[int, int, EdgeSource], ...]" = tuple(spans)
+        self._span_starts: "Tuple[int, ...]" = tuple(start for start, _, _ in spans)
 
         #: Coordinates per node id, ``None`` where a node has none.
         self.positions: "Tuple[Optional[Tuple[float, float]], ...]" = self._gather_positions(
@@ -268,7 +283,9 @@ class CompiledEnvironment:
         #: The cheapest rate any edge-contributing layer charges per unit of
         #: distance, or ``None`` if one of them did not say. See
         #: :meth:`_gather_cost_per_distance` for why one silent layer spoils it.
-        self.cost_per_distance = self._gather_cost_per_distance(contributing)
+        self.cost_per_distance = self._gather_cost_per_distance(
+            [source for _, _, source in spans]
+        )
 
     @staticmethod
     def _gather_positions(
@@ -324,7 +341,28 @@ class CompiledEnvironment:
 
     def source_of(self, edge_id: int) -> EdgeSource:
         """The layer that contributed ``edge_id``."""
-        return self._edge_sources[self.graph.input_index(edge_id)]
+        return self._locate(edge_id)[0]
+
+    def geometry(self, edge_id: int) -> "Optional[List[Tuple[float, float]]]":
+        """The shape of ``edge_id``, if its layer keeps one.
+
+        An edge in the graph is a straight line between two labels; on the ground
+        it may be a winding street. Layers that know the difference expose a
+        ``geometry(index)``, and this finds the right layer and asks it in that
+        layer's own numbering. ``None`` when the layer has no shape to give.
+        """
+        source, local_index = self._locate(edge_id)
+        # `register` asks only for `edges`, so a layer need not inherit
+        # EdgeSource and need not have the hook at all.
+        getter = getattr(source, "geometry", None)
+        return None if getter is None else getter(local_index)
+
+    def _locate(self, edge_id: int) -> "Tuple[EdgeSource, int]":
+        """The layer that produced ``edge_id``, and its index within that layer."""
+        input_index = self.graph.input_index(edge_id)
+        position = bisect.bisect_right(self._span_starts, input_index) - 1
+        start, _, source = self._spans[position]
+        return source, input_index - start
 
     def __len__(self) -> int:
         return len(self.labels)

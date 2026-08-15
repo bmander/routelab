@@ -17,6 +17,10 @@ class Leg(NamedTuple):
     head: Hashable
     weight: int
     source: EdgeSource
+    #: The graph edge this leg crossed. Keep it and you can ask the environment
+    #: for anything else the edge knows — its shape, most usefully, since a leg
+    #: between two labels may be a winding street on the ground.
+    edge: int
 
 
 class Journey(NamedTuple):
@@ -55,6 +59,7 @@ class Journey(NamedTuple):
                     head=compiled.label(head),
                     weight=weight,
                     source=compiled.source_of(edge_id),
+                    edge=edge_id,
                 )
             )
         return cls(

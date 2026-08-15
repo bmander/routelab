@@ -1,0 +1,12 @@
+[package]
+name = "routelab-osm"
+description = "Build routable graphs from OpenStreetMap extracts."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+osmpbf = "0.3"
+quick-xml = "0.41"

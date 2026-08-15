@@ -5,11 +5,14 @@
 //! Python exceptions. Argument sugar (accepting a bare int for `sources`, and
 //! so on) lives in the Python veneer, where it is easier to read and change.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyList;
+
+use routelab_osm::{load as osm_load, OsmNetwork, Profile as OsmProfile};
 
 use routelab_core::{
     astar as core_astar, bfs as core_bfs, dijkstra as core_dijkstra, EdgeId, Graph as CoreGraph,
@@ -194,6 +197,112 @@ impl PySearchResult {
     }
 }
 
+/// A routable network read from an OpenStreetMap extract.
+///
+/// Holds the graph, the coordinates, and every edge's shape. The shape stays
+/// here rather than crossing into Python: a city has hundreds of thousands of
+/// edges and a route has a hundred, so points are handed over per edge, when
+/// something actually needs to draw one.
+#[pyclass(name = "OsmNetwork", module = "routelab._routelab", frozen)]
+pub struct PyOsmNetwork {
+    inner: Arc<OsmNetwork>,
+}
+
+#[pymethods]
+impl PyOsmNetwork {
+    #[getter]
+    fn num_nodes(&self) -> usize {
+        self.inner.num_nodes()
+    }
+
+    #[getter]
+    fn num_edges(&self) -> usize {
+        self.inner.num_edges()
+    }
+
+    /// OSM node ids, in dense graph order — the labels an environment sees.
+    #[getter]
+    fn node_ids(&self) -> Vec<i64> {
+        self.inner.node_ids.clone()
+    }
+
+    /// `(min_lat, min_lon, max_lat, max_lon)`.
+    #[getter]
+    fn bounds(&self) -> (f64, f64, f64, f64) {
+        self.inner.bounds
+    }
+
+    /// Every edge as `(tail_index, head_index, seconds)`, over dense node ids.
+    fn edges(&self) -> Vec<(u32, u32, u32)> {
+        (0..self.inner.num_edges())
+            .map(|edge| {
+                (
+                    self.inner.edge_tails[edge],
+                    self.inner.edge_heads[edge],
+                    self.inner.edge_weights[edge],
+                )
+            })
+            .collect()
+    }
+
+    /// Node coordinates projected into local metres, as `(xs, ys)`.
+    fn projected(&self) -> (Vec<f64>, Vec<f64>) {
+        self.inner.projected()
+    }
+
+    /// Node coordinates as they came off the map, as `(lats, lons)` — what you
+    /// need to draw a node rather than route through it.
+    fn coordinates(&self) -> (Vec<f64>, Vec<f64>) {
+        (self.inner.lats.clone(), self.inner.lons.clone())
+    }
+
+    /// `(lat, lon)` along an edge, from its tail to its head.
+    fn geometry(&self, edge: usize) -> PyResult<Vec<(f64, f64)>> {
+        check_index(edge as u32, self.inner.num_edges(), "edge")?;
+        Ok(self.inner.geometry(edge))
+    }
+
+    /// The dense index of the graph node closest to a coordinate, optionally
+    /// limited to the given OSM node ids.
+    #[pyo3(signature = (lat, lon, within=None))]
+    fn nearest(&self, lat: f64, lon: f64, within: Option<Vec<i64>>) -> Option<usize> {
+        match within {
+            None => self.inner.nearest(lat, lon, None),
+            Some(allowed) => self
+                .inner
+                .nearest(lat, lon, Some(&allowed.into_iter().collect())),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "OsmNetwork(num_nodes={}, num_edges={})",
+            self.inner.num_nodes(),
+            self.inner.num_edges()
+        )
+    }
+}
+
+/// Read an OSM extract into a routable network.
+///
+/// `speeds` maps a `highway` value to metres per second; a class left out is not
+/// routable for this profile.
+#[pyfunction]
+#[pyo3(signature = (path, speeds, *, respect_oneway=true, use_maxspeed=true))]
+fn load_osm(
+    py: Python<'_>,
+    path: PathBuf,
+    speeds: Vec<(String, f64)>,
+    respect_oneway: bool,
+    use_maxspeed: bool,
+) -> PyResult<PyOsmNetwork> {
+    let profile = OsmProfile::new(speeds, respect_oneway, use_maxspeed);
+    let network = py.detach(|| osm_load(&path, &profile)).map_err(value_err)?;
+    Ok(PyOsmNetwork {
+        inner: Arc::new(network),
+    })
+}
+
 /// An estimate of the cost remaining to a target, for goal-directed search.
 ///
 /// Built from data the environment gathered — never a Python callable: a callback
@@ -317,8 +426,10 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<PyGraph>()?;
     m.add_class::<PyHeuristic>()?;
+    m.add_class::<PyOsmNetwork>()?;
     m.add_class::<PySearchResult>()?;
     m.add_function(wrap_pyfunction!(astar, m)?)?;
+    m.add_function(wrap_pyfunction!(load_osm, m)?)?;
     m.add_function(wrap_pyfunction!(dijkstra, m)?)?;
     m.add_function(wrap_pyfunction!(bfs, m)?)?;
     Ok(())

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A small hand-built network, laid out so distances are easy to reason about:
+  0.001 degrees of latitude is ~111 m, and everything sits near the equator.
+
+      4
+      |            10  Main St runs 1-2-3 west to east, one-way eastbound.
+  1---2---3        20  Side St runs 2-4, two-way.
+                   30  A footpath 3-5, which no driving profile may use.
+      5 (via 3)
+-->
+<osm version="0.6" generator="hand">
+  <node id="1" lat="0.000" lon="0.000"/>
+  <node id="2" lat="0.000" lon="0.001"/>
+  <node id="3" lat="0.000" lon="0.002"/>
+  <node id="4" lat="0.001" lon="0.001"/>
+  <node id="5" lat="0.001" lon="0.002"/>
+  <node id="99" lat="5.000" lon="5.000"/>
+
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <tag k="highway" v="residential"/>
+    <tag k="oneway" v="yes"/>
+    <tag k="name" v="Main St"/>
+  </way>
+
+  <way id="20">
+    <nd ref="2"/>
+    <nd ref="4"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Side St"/>
+  </way>
+
+  <way id="30">
+    <nd ref="3"/>
+    <nd ref="5"/>
+    <tag k="highway" v="footway"/>
+  </way>
+
+  <way id="40">
+    <nd ref="1"/>
+    <nd ref="99"/>
+    <tag k="waterway" v="stream"/>
+  </way>
+</osm>

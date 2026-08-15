@@ -18,3 +18,4 @@ extension-module = ["pyo3/extension-module"]
 [dependencies]
 pyo3 = { version = "0.29" }
 routelab-core.workspace = true
+routelab-osm.workspace = true
