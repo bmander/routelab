@@ -211,6 +211,22 @@ impl Graph {
             .expect("a reversed graph has the same nodes and weights as its original")
     }
 
+    /// Take one step along `edge` from `node`: where it lands, and what it costs.
+    /// `None` if `edge` does not leave `node`.
+    ///
+    /// The single rule for what makes a step legal, so that everything checking a
+    /// path agrees on it. [`Graph::walk`] is the plain case; a search with extra
+    /// conditions of its own — a schedule, say — composes this rather than
+    /// restating it, which is how the two stay in step when one of them changes.
+    pub fn step(&self, node: NodeId, edge: EdgeId) -> Option<(NodeId, Weight)> {
+        // The current node is already known, so membership in its out-edge range
+        // settles both "is this a real edge" and "does it start here" without the
+        // binary search `tail` would need.
+        self.out_edges(node)
+            .contains(&edge)
+            .then(|| (self.head(edge), self.weight(edge)))
+    }
+
     /// Follow a sequence of edges from `start`, returning the node it ends at and
     /// the total weight. `None` if the edges do not form a walk from `start`.
     ///
@@ -223,14 +239,9 @@ impl Graph {
         let mut node = start;
         let mut cost: Weight = 0;
         for &edge in edges {
-            // The current node is already known, so membership in its out-edge
-            // range settles both "is this a real edge" and "does it start here"
-            // without the binary search `tail` would need.
-            if !self.out_edges(node).contains(&edge) {
-                return None;
-            }
-            cost = cost.checked_add(self.weight(edge))?;
-            node = self.head(edge);
+            let (head, weight) = self.step(node, edge)?;
+            cost = cost.checked_add(weight)?;
+            node = head;
         }
         Some((node, cost))
     }

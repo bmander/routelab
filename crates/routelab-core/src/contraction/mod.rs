@@ -176,7 +176,6 @@ impl ContractionHierarchy {
         self.ranks[node as usize]
     }
 
-
     pub fn upward(&self) -> &Graph {
         &self.upward
     }

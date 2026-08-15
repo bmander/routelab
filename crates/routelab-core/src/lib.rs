@@ -27,6 +27,7 @@ pub mod heuristic;
 pub mod landmark;
 pub(crate) mod rng;
 pub mod search;
+pub mod timedep;
 pub mod tree;
 
 pub use astar::astar;
@@ -37,4 +38,5 @@ pub use graph::{EdgeId, Graph, GraphError, NodeId, Weight, NO_EDGE, NO_NODE, UNR
 pub use heuristic::{Heuristic, HeuristicError, StandardHeuristic};
 pub use landmark::{Landmarks, Selection};
 pub use search::{SearchError, SearchOptions, SearchResult};
+pub use timedep::{time_dependent_dijkstra, Calendar, Clock, Departure, Waiting, Window, WEEK};
 pub use tree::{Magnitude, SearchTree};
