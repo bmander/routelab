@@ -178,7 +178,13 @@ class Router:
             "route": journey.geometry,
             "snapped": [coordinates[start], coordinates[end]],
             "seconds": journey.cost,
+            "waiting": journey.waiting,
             "legs": len(journey.legs),
+            # How many edges this profile has a schedule for, and whether the
+            # chosen technique is reading it. A schedule quietly ignored is the
+            # failure nobody can see, so the page is told and says so.
+            "scheduled_edges": 0 if compiled.calendar is None else len(compiled.calendar),
+            "reads_clock": bool(when),
             "settled_count": result.settled,
             "graph_nodes": compiled.graph.num_nodes,
             "ms": round(elapsed, 1),
@@ -454,17 +460,39 @@ async function request(explore) {
   answer.snapped.forEach(p => L.circleMarker(p, {radius: 4, stroke: false,
     fillOpacity: 1, fillColor: '#1d3557'}).addTo(route));
 
-  const minutes = (answer.seconds / 60).toFixed(1);
+  const minutes = (answer.moving_minutes = ((answer.seconds - answer.waiting) / 60)).toFixed(1);
   const share = (100 * answer.settled_count / answer.graph_nodes).toFixed(1);
+  // A ten-hour wait for a gate is not a ten-hour walk, and reporting one total
+  // makes it look like one.
+  const waited = answer.waiting > 0
+    ? ` + <b>${humanise(answer.waiting)}</b> waiting`
+    : '';
   status.className = '';
   status.innerHTML =
-    `<b>${minutes}</b> min over <b>${answer.legs}</b> legs<br>` +
+    `<b>${minutes}</b> min walking${waited} over <b>${answer.legs}</b> legs<br>` +
     `settled <b>${answer.settled_count.toLocaleString()}</b> nodes ` +
     `(${share}% of ${answer.graph_nodes.toLocaleString()}) in <b>${answer.ms}</b> ms` +
     (answer.tree
       ? `<br><span class="hint">tree: ${answer.branch_count.toLocaleString()} branches, ` +
         `${answer.tree.features.length.toLocaleString()} drawn</span>`
-      : `<br><span class="hint">drop the pin to draw the search</span>`);
+      : `<br><span class="hint">drop the pin to draw the search</span>`) +
+    scheduleNote(answer);
+}
+
+function humanise(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.round((seconds % 3600) / 60);
+  return hours ? `${hours}h ${minutes}m` : `${minutes} min`;
+}
+
+// Say when this profile has a schedule that the chosen algorithm is not
+// reading. Otherwise the map looks the same at every hour and there is nothing
+// to tell you the clock was never consulted.
+function scheduleNote(answer) {
+  if (!answer.scheduled_edges || answer.reads_clock) { return ''; }
+  return `<br><span class="hint">${answer.scheduled_edges} edges here are ` +
+         `scheduled; this algorithm ignores them — pick ` +
+         `<b>Time-dependent Dijkstra</b> to route with the clock</span>`;
 }
 </script>
 """

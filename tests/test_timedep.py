@@ -157,3 +157,29 @@ def test_seconds_since_monday_accepts_what_a_caller_would_reach_for():
     assert rl.weekly_seconds(rl.WEEK + 60) == 60, "the clock wraps"
     with pytest.raises(TypeError):
         rl.weekly_seconds("07:30")
+
+
+def test_a_journey_separates_waiting_from_walking(gated):
+    planner = rl.TimeDependentDijkstra().bind(gated)
+    moving = planner.route(1, 3, departing=at(12))
+    assert moving.waiting == 0
+    assert moving.moving == moving.cost
+
+    # Arriving two minutes before the gate opens: the walk is unchanged and the
+    # wait is the whole of the difference. Reporting one total instead makes a
+    # short walk after a long wait look like a long walk.
+    waited = planner.route(1, 3, departing=at(6, 58))
+    assert waited.moving == moving.cost, "the walking is the same walking"
+    assert waited.waiting == waited.cost - moving.cost > 0
+
+
+def test_waiting_is_zero_for_a_search_with_no_clock(gated):
+    journey = rl.Dijkstra().bind(gated).route(1, 3)
+    assert journey.waiting == 0 and journey.moving == journey.cost
+
+
+def test_a_hop_count_is_not_a_wait(gated):
+    # BFS costs hops while its legs carry seconds, so the difference is
+    # meaningless rather than a delay — and is reported as no delay.
+    journey = rl.BFS().bind(gated).route(1, 3)
+    assert journey.waiting == 0

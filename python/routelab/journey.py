@@ -69,6 +69,27 @@ class Journey:
         return [self.origin] + [leg.head for leg in self.legs]
 
     @property
+    def waiting(self) -> int:
+        """Seconds of the journey spent not moving — a shut gate, a locked path.
+
+        Whatever the planner counted that no leg accounts for. That makes it
+        work for any result, including a bidirectional one that can only report
+        a cost at its target, and it is why this is a total rather than a figure
+        per leg: the legs cannot each be asked when a search never priced them
+        individually.
+
+        Zero for a search with no clock, and clamped at zero for one whose cost
+        is not seconds at all — :class:`~routelab.planners.BFS` counts hops, and
+        the difference between a hop count and a sum of seconds is not a wait.
+        """
+        return max(0, self.cost - sum(leg.weight for leg in self.legs))
+
+    @property
+    def moving(self) -> int:
+        """Seconds actually spent travelling: :attr:`cost` less :attr:`waiting`."""
+        return self.cost - self.waiting
+
+    @property
     def geometry(self) -> "List[Point]":
         """The whole route as one polyline, origin first.
 
