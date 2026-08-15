@@ -149,7 +149,37 @@ where the network is most varied. Same code, same heuristic, Liechtenstein:
 | Walking | 0.5–1.4 m/s | 15% of Dijkstra's nodes | 46% |
 | Driving | 5–31 m/s | 56% | 98% |
 
-That is the argument for landmark heuristics, which do not price distance at all.
+That is the argument for the other heuristic in the box.
+
+### Measuring instead of assuming
+
+`Euclidean` assumes one thing about a network and must assume the worst of it:
+priced at the fastest layer, it is three times too optimistic on every street
+that is not a motorway. `Landmarks` measures instead — precomputing the distance
+to and from a handful of fixed nodes, and bounding by the triangle inequality:
+
+```python
+planner = rl.AStar(env, rl.Landmarks(16))    # a few seconds, ~32 MB
+```
+
+The bound it produces already knows about one-way streets, dead ends, bridges,
+and speed limits, because it was measured through them. It also asks nothing of
+the environment — no coordinates, no declared speeds — which makes it the
+heuristic for networks whose geometry is unknown or beside the point.
+
+Seattle, driving, corner to corner (258,029 nodes):
+
+| | settled | of graph | query | preprocessing |
+|---|---:|---:|---:|---|
+| Dijkstra | 41,162 | 16.0% | 6.5 ms | — |
+| A* (euclidean) | 12,173 | 4.7% | 2.9 ms | — |
+| A* (16 landmarks) | 1,749 | 0.7% | 1.7 ms | 1.6 s, 33 MB |
+
+Same 11.2-minute route from all three. The landmark count is the dial: 2
+landmarks (4 MB) already beat Euclidean, 32 (66 MB) settle 443 nodes. Spreading
+them to the edges of the network beats scattering them at random by about 2× for
+the same memory, which is why `selection="farthest"` is the default and
+`"random"` is kept as the control.
 
 ```bash
 python demos/route_city.py liechtenstein.osm.pbf \

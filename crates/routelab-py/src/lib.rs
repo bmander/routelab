@@ -16,8 +16,8 @@ use routelab_osm::{load as osm_load, OsmNetwork, Profile as OsmProfile};
 
 use routelab_core::{
     astar as core_astar, bfs as core_bfs, dijkstra as core_dijkstra, EdgeId, Graph as CoreGraph,
-    Heuristic as _, Magnitude, NodeId, SearchOptions, SearchResult as CoreResult,
-    SearchTree as CoreSearchTree, StandardHeuristic, Weight,
+    Heuristic as _, Landmarks as CoreLandmarks, Magnitude, NodeId, SearchOptions,
+    SearchResult as CoreResult, SearchTree as CoreSearchTree, Selection, StandardHeuristic, Weight,
 };
 
 /// Core errors describe themselves; Python only needs the sentence.
@@ -406,10 +406,51 @@ impl PyHeuristic {
         })
     }
 
+    /// Distances measured from a handful of nodes, combined by the triangle
+    /// inequality. Needs no coordinates — only the graph, and the time to walk
+    /// it twice per landmark.
+    ///
+    /// `selection` is `"farthest"` or `"random"`.
+    #[staticmethod]
+    #[pyo3(signature = (graph, count, selection="farthest", seed=0))]
+    fn landmarks(
+        py: Python<'_>,
+        graph: &PyGraph,
+        count: usize,
+        selection: &str,
+        seed: u64,
+    ) -> PyResult<Self> {
+        let selection = match selection {
+            "farthest" => Selection::Farthest,
+            "random" => Selection::Random,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown selection {other:?}; expected 'farthest' or 'random'"
+                )))
+            }
+        };
+        let graph = Arc::clone(&graph.inner);
+        // Two full searches per landmark: seconds on a city, and the reason
+        // this is preprocessing rather than something a query can afford.
+        let landmarks = py.detach(|| CoreLandmarks::build(&graph, count, selection, seed));
+        Ok(PyHeuristic {
+            inner: Arc::new(StandardHeuristic::Landmarks(landmarks)),
+        })
+    }
+
     /// How many nodes this heuristic holds data for, or `None` if it needs none.
     #[getter]
     fn coverage(&self) -> Option<usize> {
         self.inner.coverage()
+    }
+
+    /// Bytes of precomputed table this heuristic holds, if it holds any.
+    #[getter]
+    fn footprint(&self) -> usize {
+        match self.inner.as_ref() {
+            StandardHeuristic::Landmarks(landmarks) => landmarks.footprint(),
+            _ => 0,
+        }
     }
 
     /// The estimated cost from `node` to `target`. Exposed so a test can check
@@ -428,6 +469,11 @@ impl PyHeuristic {
             } => format!(
                 "Heuristic.euclidean({} nodes, cost_per_distance={cost_per_distance})",
                 xs.len()
+            ),
+            StandardHeuristic::Landmarks(landmarks) => format!(
+                "Heuristic.landmarks({} landmarks over {} nodes)",
+                landmarks.len(),
+                landmarks.num_nodes()
             ),
         }
     }

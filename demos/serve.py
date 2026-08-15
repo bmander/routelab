@@ -30,7 +30,14 @@ from urllib.parse import parse_qs, urlparse
 import routelab as rl
 
 PROFILES = {"walking": rl.Walking, "cycling": rl.Cycling, "driving": rl.Driving}
-ALGORITHMS = ("astar", "dijkstra")
+#: Each entry builds a planner over an environment. Adding an algorithm to the
+#: demo is adding a line here — everything downstream asks the planner what it
+#: found and what it explored, and neither answer depends on which one it is.
+ALGORITHMS = {
+    "dijkstra": rl.Dijkstra,
+    "astar": lambda env: rl.AStar(env, rl.Euclidean()),
+    "landmarks": lambda env: rl.AStar(env, rl.Landmarks(16)),
+}
 
 
 class Router:
@@ -62,13 +69,20 @@ class Router:
         return self._environments[profile]
 
     def planner(self, profile: str, algorithm: str) -> rl.Planner:
+        """The planner for a profile and algorithm, built once and kept.
+
+        Building is where preprocessing happens, and landmarks make that a real
+        cost — a couple of seconds and tens of megabytes for a city. Paying it
+        per click would be absurd; paying it once is the entire argument for a
+        planner being an object you hold on to.
+        """
         if (profile, algorithm) not in self._planners:
             environment, _ = self.environment(profile)
-            self._planners[(profile, algorithm)] = (
-                rl.AStar(environment, rl.Euclidean())
-                if algorithm == "astar"
-                else rl.Dijkstra(environment)
-            )
+            started = time.perf_counter()
+            self._planners[(profile, algorithm)] = ALGORITHMS[algorithm](environment)
+            elapsed = time.perf_counter() - started
+            if elapsed > 0.1:
+                print(f"  {algorithm} on {profile}: ready in {elapsed:.1f}s", flush=True)
         return self._planners[(profile, algorithm)]
 
     @lru_cache(maxsize=8)
@@ -203,6 +217,7 @@ PAGE = """<!doctype html>
   <label for="algorithm">algorithm</label>
   <select id="algorithm">
     <option value="astar">A* (euclidean)</option>
+    <option value="landmarks">A* (16 landmarks)</option>
     <option value="dijkstra">Dijkstra</option>
   </select>
   <div id="status" class="hint">Click the map to set an origin.</div>

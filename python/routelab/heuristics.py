@@ -21,7 +21,7 @@ from typing import Hashable, List, Optional
 from . import _routelab
 from .environment import CompiledEnvironment
 
-__all__ = ["Euclidean", "Heuristic", "Zero"]
+__all__ = ["Euclidean", "Heuristic", "Landmarks", "Zero"]
 
 #: How many missing labels to name in an error before trailing off.
 _MAX_REPORTED = 5
@@ -116,3 +116,55 @@ class Euclidean(Heuristic):
         if self.cost_per_distance is None:
             return "Euclidean()"
         return f"Euclidean(cost_per_distance={self.cost_per_distance})"
+
+
+class Landmarks(Heuristic):
+    """Distances measured from a few fixed nodes, combined by triangle inequality.
+
+        >>> Landmarks(16)
+        Landmarks(16, selection='farthest')
+
+    Where :class:`Euclidean` assumes — that nothing crosses ground faster than
+    the fastest layer — this one *measures*. For every landmark it precomputes
+    the distance to and from every node, and a bound follows from the triangle
+    inequality. Because those distances were measured through the network, the
+    bound already knows about one-way streets, dead ends, water, and the fact
+    that most roads are not motorways.
+
+    That last point is what makes it worth the memory on a road network. A
+    straight-line bound must be priced at the network's top speed, so on a
+    graph spanning 5 to 31 m/s it is roughly three times too optimistic
+    everywhere. A landmark bound has no such problem.
+
+    It also asks nothing of the environment — no coordinates, no declared
+    speeds — which makes it the heuristic for networks whose geometry is
+    unknown or meaningless.
+
+    What it costs is paid at :meth:`bind` time: two full searches of the graph
+    per landmark, and two ``u32`` per landmark per node held for as long as the
+    planner lives. Sixteen landmarks over a 250,000-node city is a few seconds
+    and about 32 MB.
+
+    Args:
+        count: How many landmarks. More is a sharper bound and more memory,
+            with the usual diminishing returns; 16 is the conventional default.
+        selection: ``"farthest"`` spreads them to the edges of the network,
+            which is where they inform. ``"random"`` is the control — a
+            landmark set that cannot beat random is not earning its memory.
+        seed: Fixes the choice, so a benchmark can be repeated.
+    """
+
+    def __init__(self, count: int = 16, selection: str = "farthest", seed: int = 0):
+        self.count = count
+        self.selection = selection
+        self.seed = seed
+
+    def bind(self, compiled: CompiledEnvironment) -> "_routelab.Heuristic":
+        if self.count < 1:
+            raise ValueError(f"a landmark heuristic needs at least one landmark, got {self.count}")
+        return _routelab.Heuristic.landmarks(
+            compiled.graph, self.count, self.selection, self.seed
+        )
+
+    def __repr__(self) -> str:
+        return f"Landmarks({self.count}, selection={self.selection!r})"

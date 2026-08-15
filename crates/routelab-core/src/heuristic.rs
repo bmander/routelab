@@ -79,6 +79,10 @@ pub enum StandardHeuristic {
         ys: Vec<f64>,
         cost_per_distance: f64,
     },
+    /// Distances measured from a handful of fixed nodes, combined by the
+    /// triangle inequality. Needs no geometry — only the graph and the time to
+    /// walk it. See [`crate::landmark`].
+    Landmarks(crate::landmark::Landmarks),
 }
 
 impl StandardHeuristic {
@@ -127,6 +131,7 @@ impl Heuristic for StandardHeuristic {
                 // saturates, and UNREACHABLE is reserved, so clamp below it.
                 (estimate.floor() as Weight).min(UNREACHABLE - 1)
             }
+            StandardHeuristic::Landmarks(landmarks) => landmarks.estimate(node, target),
         }
     }
 
@@ -134,6 +139,7 @@ impl Heuristic for StandardHeuristic {
         match self {
             StandardHeuristic::Zero => None,
             StandardHeuristic::Euclidean { xs, .. } => Some(xs.len()),
+            StandardHeuristic::Landmarks(landmarks) => landmarks.coverage(),
         }
     }
 }

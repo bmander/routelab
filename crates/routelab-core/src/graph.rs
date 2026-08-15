@@ -193,6 +193,24 @@ impl Graph {
         })
     }
 
+    /// The same graph with every edge turned around.
+    ///
+    /// Searching backwards is how you learn the cost of reaching a node rather
+    /// than the cost of leaving it — which is half of what a landmark bound
+    /// needs, and is not something a forward search can answer.
+    ///
+    /// Edge ids do not survive: CSR order follows the tails, and the tails have
+    /// changed. Callers who need to get back to the original edge should carry
+    /// the id themselves.
+    pub fn reversed(&self) -> Graph {
+        let flipped: Vec<(NodeId, NodeId, Weight)> = self
+            .iter_edges()
+            .map(|(tail, head, weight)| (head, tail, weight))
+            .collect();
+        Graph::from_edges(self.num_nodes(), &flipped)
+            .expect("a reversed graph has the same nodes and weights as its original")
+    }
+
     /// Follow a sequence of edges from `start`, returning the node it ends at and
     /// the total weight. `None` if the edges do not form a walk from `start`.
     ///

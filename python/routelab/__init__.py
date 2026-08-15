@@ -36,7 +36,7 @@ from .environment import (
     ScalarEdges,
 )
 from .graph import Graph
-from .heuristics import Euclidean, Heuristic, Zero
+from .heuristics import Euclidean, Heuristic, Landmarks, Zero
 from .journey import Journey, Leg
 from .planners import BFS, PLANNERS, AStar, Dijkstra, Planner, route
 from .search import SearchResult, astar, bfs, dijkstra
@@ -57,6 +57,7 @@ __all__ = [
     "Graph",
     "Heuristic",
     "Journey",
+    "Landmarks",
     "Leg",
     "Nodes",
     "OSM",
