@@ -266,9 +266,11 @@ PAGE = """<!doctype html>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   html, body, #map { height: 100%; margin: 0; font: 14px system-ui, sans-serif; }
+  /* Fixed, not min-width: the status text changes length with every answer,
+     and a panel that resizes under the cursor is its own distraction. */
   #panel { position: absolute; top: 12px; left: 12px; z-index: 1000; background: #fff;
            padding: 12px 14px; border-radius: 6px; box-shadow: 0 1px 6px rgba(0,0,0,.3);
-           min-width: 240px; }
+           width: 280px; box-sizing: border-box; }
   h1 { font-size: 15px; margin: 0 0 8px; }
   label { display: block; margin: 6px 0 2px; color: #555; font-size: 12px; }
   select { width: 100%; padding: 4px; }
