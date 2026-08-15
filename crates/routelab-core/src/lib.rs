@@ -28,6 +28,7 @@ pub mod landmark;
 pub(crate) mod rng;
 pub mod search;
 pub mod timedep;
+pub mod timetable;
 pub mod tree;
 
 pub use astar::astar;
@@ -39,4 +40,7 @@ pub use heuristic::{Heuristic, HeuristicError, StandardHeuristic};
 pub use landmark::{Landmarks, Selection};
 pub use search::{SearchError, SearchOptions, SearchResult};
 pub use timedep::{time_dependent_dijkstra, Calendar, Clock, Departure, Waiting, Window, WEEK};
+pub use timetable::{
+    time_dependent_query, Connection, Itinerary, Ride, Time, TimeExpanded, Timetable, Transfer,
+};
 pub use tree::{Magnitude, SearchTree};
