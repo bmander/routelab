@@ -198,6 +198,22 @@ class Planner:
                 f"to a different kind of search."
             )
 
+    def _reads_no_clock(self, options: "Dict[str, Any]") -> None:
+        """Refuse a departure time, naming the technique that takes one.
+
+        Every planner but one routes the network as though it were always open,
+        which is a fair question to ask and a terrible one to answer by
+        accident. So the refusal says what to ask instead, rather than letting
+        the kernel complain about a keyword argument it has never heard of.
+        """
+        if "departing" in options:
+            raise ValueError(
+                f"{type(self).__name__} routes the network as though it were "
+                f"always open, so it has no departure time. Use "
+                f"TimeDependentDijkstra() to read the clock, or drop "
+                f"departing= to search the always-open network knowingly."
+            )
+
     def _single_target(self, options: "Dict[str, Any]", searches: str) -> int:
         """Pop the one target a goal-directed search needs, or explain.
 
@@ -254,6 +270,7 @@ class Dijkstra(Planner):
     """Cheapest-cost routing over fixed-cost edges."""
 
     def search(self, origins: Origins, **options: Any) -> SearchResult:
+        self._reads_no_clock(options)
         return dijkstra(self._bound().graph, self._origin_ids(origins), **options)
 
 
@@ -265,6 +282,7 @@ class BFS(Planner):
     """
 
     def search(self, origins: Origins, **options: Any) -> SearchResult:
+        self._reads_no_clock(options)
         starts = self._origin_ids(origins)
         priced = {self.label(node) for node, cost in starts.items() if cost}
         if priced:
@@ -312,6 +330,7 @@ class AStar(Planner):
         a target there is nothing to aim at, and with several there is no single
         thing the heuristic could be a bound on.
         """
+        self._reads_no_clock(options)
         target = self._single_target(options, "A*")
         return astar(
             self._bound().graph, self._origin_ids(origins), target, self.heuristic, **options
@@ -371,6 +390,7 @@ class ContractionHierarchy(Planner):
         is the answer. It reports costs and paths in the environment's own edges,
         which is all :class:`~routelab.Journey` ever asked of a result.
         """
+        self._reads_no_clock(options)
         target = self._single_target(options, "A hierarchy")
         if options:
             unsupported = ", ".join(sorted(options))

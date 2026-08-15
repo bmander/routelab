@@ -183,3 +183,23 @@ def test_a_hop_count_is_not_a_wait(gated):
     # meaningless rather than a delay — and is reported as no delay.
     journey = rl.BFS().bind(gated).route(1, 3)
     assert journey.waiting == 0
+
+
+@pytest.mark.parametrize(
+    "technique",
+    [rl.Dijkstra(), rl.AStar(rl.Euclidean()), rl.BFS(), rl.ContractionHierarchy()],
+    ids=lambda t: type(t).__name__,
+)
+def test_a_planner_with_no_clock_refuses_a_departure_by_name(gated, technique):
+    # Refusing is the easy part; refusing usefully is the point. The kernel's
+    # own "unexpected keyword argument 'departing'" names a function the caller
+    # never called and offers nothing to do about it.
+    with pytest.raises(ValueError, match="as though it were always open"):
+        technique.bind(gated).route(1, 3, departing=at(22))
+    with pytest.raises(ValueError, match="TimeDependentDijkstra"):
+        technique.bind(gated).route(1, 3, departing=at(22))
+
+
+def test_dropping_the_departure_routes_the_always_open_network(gated):
+    # And the alternative the message names actually works.
+    assert rl.Dijkstra().bind(gated).route(1, 3).nodes == [1, 2, 3]
