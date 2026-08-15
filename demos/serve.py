@@ -3,8 +3,10 @@
     python demos/serve.py data/Seattle.osm.pbf
 
 Then open http://localhost:8000. Click once to drop an origin, again for a
-destination, and the page draws the route along with every node the search
-settled to find it — which is the part a routing engine normally hides.
+destination, and the page draws the route over the search tree that found it —
+the part a routing engine normally throws away. Branch widths follow the total
+hanging off each one, so the tree reads like a river network: thick where the
+whole search flowed, thinning to capillaries where it gave up.
 
 The extract is read once at startup and the planners are built once; each click
 is a query against them, which is the whole point of a planner being an object
@@ -82,7 +84,14 @@ class Router:
         result = rl.Dijkstra(environment).search(origin)
         return tuple(compiled.label(node) for node in result.order)
 
-    def route(self, profile: str, algorithm: str, origin, destination) -> dict:
+    def route(
+        self,
+        profile: str,
+        algorithm: str,
+        origin,
+        destination,
+        branches: "int | None" = None,
+    ) -> dict:
         """Route between two `(lat, lon)` clicks, and report the search too."""
         environment, layer = self.environment(profile)
         compiled = environment.compile()
@@ -100,9 +109,17 @@ class Router:
             return {"error": "no route between those points"}
 
         coordinates = layer.coordinates()
+        # The search space, as the planner reports it. Every branch is drawn by
+        # default — keeping only the heaviest keeps the trunk and throws away
+        # the crown, which is exactly the part that shows how far the search
+        # reached. A city-wide Dijkstra is ~40k branches and about 10 MB of
+        # GeoJSON, which localhost and a canvas renderer both take in stride.
+        tree = planner.explored(result)
         return {
             "route": [point for leg in journey.legs for point in compiled.geometry(leg.edge)],
-            "settled": [coordinates[compiled.label(node)] for node in result.order],
+            "tree": tree.geojson(limit=branches)["features"],
+            "peak": tree.peak,
+            "branch_count": len(tree),
             "snapped": [coordinates[start], coordinates[end]],
             "seconds": journey.cost,
             "legs": len(journey.legs),
@@ -131,11 +148,13 @@ class Handler(BaseHTTPRequestHandler):
             return float(lat), float(lon)
 
         try:
+            branches = query.get("branches", [""])[0]
             payload = self.router.route(
                 query.get("profile", ["driving"])[0],
                 query.get("algorithm", ["astar"])[0],
                 point("from"),
                 point("to"),
+                int(branches) if branches else None,
             )
         except (KeyError, ValueError) as error:
             payload = {"error": str(error)}
@@ -190,10 +209,15 @@ PAGE = """<!doctype html>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // Zoom buttons move aside: the panel wants the top-left corner.
-const map = L.map('map', {zoomControl: false}).setView(__CENTER__, 12);
+// Canvas, not SVG: a search tree is thousands of lines, and thousands of DOM
+// nodes is where a map stops being interactive.
+const map = L.map('map', {zoomControl: false, preferCanvas: true}).setView(__CENTER__, 12);
 L.control.zoom({position: 'topright'}).addTo(map);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  {maxZoom: 19, attribution: '© OpenStreetMap'}).addTo(map);
+// A grey basemap, not the standard one: standard OSM tiles draw roads in the
+// same oranges and yellows the search tree needs, and the tree disappears into
+// the streets it is drawn over.
+L.tileLayer('https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  {maxZoom: 19, attribution: '© OpenStreetMap, © CARTO'}).addTo(map);
 
 const status = document.getElementById('status');
 const drawn = L.layerGroup().addTo(map);
@@ -240,10 +264,18 @@ async function request() {
     return;
   }
 
-  // Settled nodes first, so the route draws over them.
-  L.layerGroup(answer.settled.map(p => L.circleMarker(p,
-    {radius: 1.5, stroke: false, fillOpacity: 0.3, fillColor: '#e8a33d'}))).addTo(drawn);
-  L.polyline(answer.route, {color: '#d1495b', weight: 5}).addTo(drawn);
+  // The search tree first, so the route draws over it. Widths follow the
+  // square root of each branch's share of the peak: the trunk carries the whole
+  // search and the twigs almost none of it, and a linear scale would render
+  // everything but the trunk invisible.
+  L.geoJSON({type: 'FeatureCollection', features: answer.tree}, {
+    style: feature => ({
+      color: '#1d6fa5',
+      weight: 0.4 + 6 * Math.sqrt(feature.properties.share),
+      opacity: 0.8,
+    }),
+  }).addTo(drawn);
+  L.polyline(answer.route, {color: '#d1495b', weight: 4}).addTo(drawn);
   answer.snapped.forEach(p => L.circleMarker(p, {radius: 4, stroke: false,
     fillOpacity: 1, fillColor: '#1d3557'}).addTo(drawn));
 
@@ -253,7 +285,9 @@ async function request() {
   status.innerHTML =
     `<b>${minutes}</b> min over <b>${answer.legs}</b> legs<br>` +
     `settled <b>${answer.settled_count.toLocaleString()}</b> nodes ` +
-    `(${share}% of ${answer.graph_nodes.toLocaleString()}) in <b>${answer.ms}</b> ms`;
+    `(${share}% of ${answer.graph_nodes.toLocaleString()}) in <b>${answer.ms}</b> ms<br>` +
+    `<span class="hint">tree: ${answer.branch_count.toLocaleString()} branches, ` +
+    `${answer.tree.length.toLocaleString()} drawn</span>`;
 }
 </script>
 """

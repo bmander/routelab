@@ -24,6 +24,7 @@ pub mod dijkstra;
 pub mod graph;
 pub mod heuristic;
 pub mod search;
+pub mod tree;
 
 pub use astar::astar;
 pub use bfs::bfs;
@@ -31,3 +32,4 @@ pub use dijkstra::dijkstra;
 pub use graph::{EdgeId, Graph, GraphError, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
 pub use heuristic::{Heuristic, HeuristicError, StandardHeuristic};
 pub use search::{SearchError, SearchOptions, SearchResult};
+pub use tree::{Magnitude, SearchTree};

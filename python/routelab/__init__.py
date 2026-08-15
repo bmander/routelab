@@ -40,11 +40,13 @@ from .heuristics import Euclidean, Heuristic, Zero
 from .journey import Journey, Leg
 from .planners import BFS, PLANNERS, AStar, Dijkstra, Planner, route
 from .search import SearchResult, astar, bfs, dijkstra
+from .searchspace import Branch, SearchSpace, ShortestPathTree
 from .sources import OSM, Cycling, Driving, Profile, Walking
 
 __all__ = [
     "AStar",
     "BFS",
+    "Branch",
     "CompiledEnvironment",
     "Cycling",
     "Dijkstra",
@@ -64,6 +66,8 @@ __all__ = [
     "Profile",
     "ScalarEdges",
     "SearchResult",
+    "SearchSpace",
+    "ShortestPathTree",
     "Sources",
     "Walking",
     "Zero",

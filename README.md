@@ -178,6 +178,39 @@ Country extracts come from [Geofabrik](https://download.geofabrik.de), city ones
 from [BBBike](https://download.bbbike.org/osm/bbbike/). Neither is committed —
 `data/` is ignored.
 
+### Looking at the search
+
+The route is the answer; the search is the work, and most of what separates one
+algorithm from another lives there. Every planner can hand over what it explored:
+
+```python
+result = planner.search(origin, targets=[planner.node_id(destination)])
+tree = planner.explored(result)          # ShortestPathTree(19529 branches, ...)
+tree.geojson()                           # drop into QGIS, geojson.io, Leaflet
+```
+
+Dijkstra and A* explore by growing a shortest-path tree, so that is what they
+report. Each branch carries the total of everything hanging off it, which is what
+makes a hundred thousand identical lines into a picture: magnitudes accumulate
+toward the root, so the tree renders like a river network — thick where the whole
+search flowed, thinning to capillaries where it stopped.
+
+```python
+for branch in tree.branches(min_magnitude=1000):
+    branch.tail, branch.head, branch.magnitude
+```
+
+`magnitude="weight"` accumulates travel time beyond each branch; `"nodes"` counts
+settled nodes instead. `SearchSpace` is the general promise — an algorithm that
+explores differently reports something else, and a schedule-based search will
+report a decision graph rather than a tree — but whatever it explored, you can
+draw it.
+
+The interactive demo draws exactly this, which is the quickest way to see what a
+heuristic buys: the same 11.2-minute Seattle route settles 41,161 branches under
+Dijkstra, reaching across Lake Washington to Bellevue, and 12,172 under A*, which
+never leaves the corridor.
+
 ### Underneath
 
 The kernels are also callable directly, on dense integer ids, as the papers

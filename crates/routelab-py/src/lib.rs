@@ -16,7 +16,8 @@ use routelab_osm::{load as osm_load, OsmNetwork, Profile as OsmProfile};
 
 use routelab_core::{
     astar as core_astar, bfs as core_bfs, dijkstra as core_dijkstra, EdgeId, Graph as CoreGraph,
-    Heuristic as _, NodeId, SearchOptions, SearchResult as CoreResult, StandardHeuristic, Weight,
+    Heuristic as _, Magnitude, NodeId, SearchOptions, SearchResult as CoreResult,
+    SearchTree as CoreSearchTree, StandardHeuristic, Weight,
 };
 
 /// Core errors describe themselves; Python only needs the sentence.
@@ -188,11 +189,82 @@ impl PySearchResult {
         self.order()
     }
 
+    /// The shortest-path tree this search grew.
+    ///
+    /// `magnitude` is `"nodes"` or `"weight"`: what each branch should carry
+    /// from the subtree beyond it. See `routelab_core::tree`.
+    #[pyo3(signature = (graph, magnitude="weight"))]
+    fn tree(&self, graph: &PyGraph, magnitude: &str) -> PyResult<PySearchTree> {
+        let magnitude = match magnitude {
+            "nodes" => Magnitude::Nodes,
+            "weight" => Magnitude::Weight,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown magnitude {other:?}; expected 'nodes' or 'weight'"
+                )))
+            }
+        };
+        Ok(PySearchTree {
+            inner: self.inner.tree(&graph.inner, magnitude),
+        })
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "SearchResult(num_nodes={}, settled={})",
             self.inner.costs.len(),
             self.inner.order.len()
+        )
+    }
+}
+
+/// A shortest-path tree, as parallel arrays over its branches.
+///
+/// Arrays rather than a list of objects: a city-wide search is hundreds of
+/// thousands of branches, and most callers filter before they iterate.
+#[pyclass(name = "SearchTree", module = "routelab._routelab", frozen)]
+pub struct PySearchTree {
+    inner: CoreSearchTree,
+}
+
+#[pymethods]
+impl PySearchTree {
+    #[getter]
+    fn tails(&self) -> Vec<NodeId> {
+        self.inner.tails.clone()
+    }
+
+    #[getter]
+    fn heads(&self) -> Vec<NodeId> {
+        self.inner.heads.clone()
+    }
+
+    #[getter]
+    fn edges(&self) -> Vec<EdgeId> {
+        self.inner.edges.clone()
+    }
+
+    /// What each branch carries from the subtree beyond it.
+    #[getter]
+    fn magnitudes(&self) -> Vec<u64> {
+        self.inner.magnitudes.clone()
+    }
+
+    /// The largest magnitude — what a renderer scales its widths against.
+    #[getter]
+    fn peak(&self) -> u64 {
+        self.inner.peak()
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SearchTree({} branches, peak={})",
+            self.inner.len(),
+            self.inner.peak()
         )
     }
 }
@@ -428,6 +500,7 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHeuristic>()?;
     m.add_class::<PyOsmNetwork>()?;
     m.add_class::<PySearchResult>()?;
+    m.add_class::<PySearchTree>()?;
     m.add_function(wrap_pyfunction!(astar, m)?)?;
     m.add_function(wrap_pyfunction!(load_osm, m)?)?;
     m.add_function(wrap_pyfunction!(dijkstra, m)?)?;

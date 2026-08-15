@@ -22,6 +22,7 @@ from .environment import CompiledEnvironment, Environment
 from .heuristics import Heuristic
 from .journey import Journey
 from .search import SearchResult, astar, bfs, dijkstra
+from .searchspace import SearchSpace, ShortestPathTree
 
 __all__ = ["AStar", "BFS", "Dijkstra", "PLANNERS", "Planner", "route"]
 
@@ -82,6 +83,23 @@ class Planner:
         if result.cost(target) is None:
             return None
         return Journey.from_result(self.compiled, result, destination)
+
+    def explored(self, result: SearchResult, magnitude: str = "weight") -> SearchSpace:
+        """What the search looked at, in a form something can draw.
+
+        Dijkstra and A* — and BFS — explore by growing a shortest-path tree, so
+        that is what they report. An algorithm that explores differently returns
+        a different :class:`~routelab.SearchSpace`; the promise is only that
+        whatever it explored can be rendered.
+
+        Args:
+            result: A result from :meth:`search`, or from :meth:`route` if you
+                kept one. The tree is rebuilt from it rather than recorded during
+                the search, so asking costs nothing until you ask.
+            magnitude: What each branch should carry from the subtree beyond it:
+                ``"weight"`` for travel time, ``"nodes"`` for a count.
+        """
+        return ShortestPathTree(self.compiled, result, magnitude)
 
     def node_id(self, label: Hashable) -> int:
         """The dense id this environment gave ``label``."""
