@@ -8,17 +8,19 @@
 //! something a shortest-path algorithm can read is the whole problem, and the
 //! paper gives two answers:
 //!
-//! - **Time-expanded** ([`expanded`]) — a node per *event*. Every departure and
-//!   every arrival is its own node, connections and waiting are edges, and what
-//!   comes out is an ordinary static graph that [`crate::dijkstra`] routes with
-//!   no changes at all.
-//! - **Time-dependent** ([`dependent`]) — a node per *stop*. Far fewer nodes,
-//!   but each edge carries the connections running along it and traversing one
-//!   means finding the next departure, so the search has to be written for it.
+//! - **Time-expanded** ([`TimeExpanded`]) — a node per *event*. Every departure
+//!   and every arrival is its own node, connections and waiting are edges, and
+//!   what comes out is an ordinary static graph that [`crate::dijkstra`] routes
+//!   with no changes at all.
+//! - **Time-dependent** ([`earliest_arrival`]) — a node per *stop*. Far fewer
+//!   nodes, but each edge carries the connections running along it and
+//!   traversing one means finding the next departure, so the search has to be
+//!   written for it.
 //!
-//! The two must agree on every query. That is the paper's thesis and it is also
-//! this module's main test: neither model is the reference implementation,
-//! because each is the other's.
+//! Both answer with the same verb — `earliest_arrival` — because comparing them
+//! is the point. The two must agree on every query; that is the paper's thesis
+//! and it is also this module's main test, since neither model is the reference
+//! implementation. Each is the other's.
 //!
 //! ## The clock is a line, not a cycle
 //!
@@ -30,9 +32,13 @@
 //! midnight and arrives after it. Wrapping that into the previous Monday would
 //! be silently wrong.
 //!
-//! The consequence is worth stating rather than discovering: **walking and
-//! transit are on different clocks**, so one environment cannot yet carry both.
-//! That is the multimodal problem, and it is a later increment.
+//! The two are not re-exported at the crate root together, so that a reader
+//! meets them as `timetable::Time` and `timedep::Clock` rather than as two
+//! interchangeable `u32`s. The consequence is worth stating rather than
+//! discovering: **walking and transit are on different clocks**, so one
+//! environment cannot yet carry both. That is the multimodal problem, and it is
+//! a later increment — the conversion needs a service-day-to-calendar anchor,
+//! which is exactly the thing that must not be implicit.
 
 mod dependent;
 mod expanded;
@@ -40,7 +46,7 @@ mod expanded;
 #[cfg(test)]
 mod tests;
 
-pub use dependent::time_dependent_query;
+pub use dependent::earliest_arrival;
 pub use expanded::TimeExpanded;
 
 use crate::graph::NodeId;
@@ -58,7 +64,7 @@ pub type Time = u32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Connection {
     /// Which vehicle run this belongs to. Two connections sharing a trip can be
-    /// ridden through without changing, which is what a transfer time exempts.
+    /// ridden through without changing.
     pub trip: u32,
     pub from: NodeId,
     pub to: NodeId,
@@ -66,18 +72,29 @@ pub struct Connection {
     pub arrives: Time,
 }
 
+/// One boarded vehicle, in an answer.
+///
+/// An itinerary is a list of these rather than of edges, because "which bus, at
+/// what time" is the answer to a transit query and an edge id is not. It is the
+/// same five facts a [`Connection`] carries — the name is the difference, and
+/// the name is worth having at a call site.
+pub type Ride = Connection;
+
 /// How long changing vehicles takes at a stop.
 ///
-/// The paper's *simple* model assumes changing is instant and its *realistic*
-/// model does not. That is one parameter rather than two implementations:
-/// `Transfer::instant()` is the simple model, and having it be the degenerate
-/// case of the realistic one means the simple model is tested for free rather
-/// than maintained separately.
+/// **Only [`Transfer::instant`] exists**, which is the paper's *simple* model:
+/// changing vehicles takes no time. Its *realistic* model charges a minimum
+/// change time, and that is not a parameter this can honour yet — see
+/// [`earliest_arrival`] for why one label per stop cannot express it. Rather
+/// than offer a constructor whose every product would be rejected, the type
+/// makes the unsupported case unrepresentable, the way [`crate::timedep::Waiting`]
+/// is a closed set of the policies that actually exist.
 ///
-/// Staying aboard the same trip never costs it — that is not a change.
+/// The parameter stays in both signatures so that the realistic model, when it
+/// lands, is a new constructor rather than a new argument everywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Transfer {
-    pub minimum: Time,
+    minimum: Time,
 }
 
 impl Transfer {
@@ -86,30 +103,33 @@ impl Transfer {
         Transfer { minimum: 0 }
     }
 
-    /// The realistic model: `seconds` to change from one vehicle to another.
-    pub fn of(seconds: Time) -> Self {
-        Transfer { minimum: seconds }
+    /// Seconds needed to change from one vehicle to another.
+    pub fn minimum(&self) -> Time {
+        self.minimum
     }
 }
 
 /// A day's connections, indexed for both models to read.
 ///
-/// Stored once as a CSR over **stop pairs**: for each stop, the pairs leaving
-/// it; for each pair, the connections along it in departure order. The
-/// time-dependent search wants exactly that shape — an edge, then a binary
-/// search within it. The time-expanded builder wants only to walk everything
-/// once, which any order allows.
+/// Stored once as a two-level index: for each stop the **stop pairs** leaving
+/// it, and for each pair the connections along it in departure order. The
+/// time-dependent search wants exactly that shape — pick an edge, then find the
+/// next departure on it. The time-expanded builder wants only to walk
+/// everything once, which any order allows.
 #[derive(Debug, Clone, Default)]
 pub struct Timetable {
-    stops: usize,
     /// Sorted by `(from, to, departs)`, so an edge's connections are contiguous
     /// and already in the order a search reads them.
     connections: Vec<Connection>,
-    /// Offsets into `edge_to`/`edge_span`, one per stop plus a tail.
+    /// Offsets into `edge_start`, one per stop plus a tail.
     stop_edges: Vec<u32>,
-    edge_to: Vec<NodeId>,
-    /// `[start, end)` into `connections` for each edge.
-    edge_span: Vec<(u32, u32)>,
+    /// `[edge_start[e], edge_start[e + 1])` is edge `e`'s run of connections.
+    /// The edge's destination is that run's first `to`, so it is not stored.
+    edge_start: Vec<u32>,
+    /// For each connection, the index of the soonest-arriving connection at or
+    /// after it on the same edge. A suffix minimum, so a relaxation is a binary
+    /// search and then a lookup rather than a scan — see [`earliest_arrival`].
+    best_from: Vec<u32>,
 }
 
 impl Timetable {
@@ -117,8 +137,7 @@ impl Timetable {
     ///
     /// Connections whose stops fall outside `stops`, or which arrive before they
     /// depart, are dropped — a timetable that goes back in time is not something
-    /// to route over, and a reader that produced one has a bug worth failing on
-    /// rather than a schedule worth honouring.
+    /// to route over.
     pub fn new(stops: usize, connections: impl IntoIterator<Item = Connection>) -> Self {
         let mut connections: Vec<Connection> = connections
             .into_iter()
@@ -128,119 +147,120 @@ impl Timetable {
             .collect();
         connections.sort_unstable_by_key(|c| (c.from, c.to, c.departs, c.arrives));
 
-        // One pass to cut the sorted run into edges, and a second to index the
-        // edges by their tail. Both are linear; the sort above is the cost.
+        // Cut the sorted run into edges, counting them per stop as we go.
         let mut stop_edges = vec![0u32; stops + 1];
-        let mut edge_to = Vec::new();
-        let mut edge_span = Vec::new();
+        let mut edge_start = Vec::new();
         let mut start = 0usize;
         while start < connections.len() {
             let (from, to) = (connections[start].from, connections[start].to);
-            let mut end = start + 1;
-            while end < connections.len()
-                && connections[end].from == from
-                && connections[end].to == to
-            {
-                end += 1;
-            }
-            edge_to.push(to);
-            edge_span.push((start as u32, end as u32));
+            let end = connections[start..]
+                .iter()
+                .position(|c| c.from != from || c.to != to)
+                .map_or(connections.len(), |offset| start + offset);
+            edge_start.push(start as u32);
             stop_edges[from as usize + 1] += 1;
             start = end;
         }
+        edge_start.push(connections.len() as u32);
         for stop in 0..stops {
             stop_edges[stop + 1] += stop_edges[stop];
         }
 
+        // Suffix minimum by arrival, within each edge. A later departure can
+        // land sooner — an express overtaking a local on the same pair of stops
+        // — so "the next one" is not always the best one.
+        let mut best_from = vec![0u32; connections.len()];
+        for edge in 0..edge_start.len().saturating_sub(1) {
+            let (first, last) = (edge_start[edge] as usize, edge_start[edge + 1] as usize);
+            let mut best = last.saturating_sub(1);
+            for index in (first..last).rev() {
+                if connections[index].arrives <= connections[best].arrives {
+                    best = index;
+                }
+                best_from[index] = best as u32;
+            }
+        }
+
         Timetable {
-            stops,
             connections,
             stop_edges,
-            edge_to,
-            edge_span,
+            edge_start,
+            best_from,
         }
     }
 
     pub fn num_stops(&self) -> usize {
-        self.stops
+        self.stop_edges.len().saturating_sub(1)
     }
 
     pub fn num_connections(&self) -> usize {
         self.connections.len()
     }
 
-    /// How many stop-to-stop edges the connections collapse onto — the node
-    /// count of the time-dependent model's graph is `num_stops`, and this is its
-    /// edge count.
+    /// How many stop-to-stop edges the connections collapse onto — the edge
+    /// count of the time-dependent model's graph, whose node count is
+    /// [`Timetable::num_stops`].
     pub fn num_edges(&self) -> usize {
-        self.edge_to.len()
+        self.edge_start.len().saturating_sub(1)
     }
 
     pub fn connections(&self) -> &[Connection] {
         &self.connections
     }
 
-    /// The edges leaving `stop`, as `(to, connections)` in no particular order.
-    pub fn edges_from(&self, stop: NodeId) -> impl Iterator<Item = (NodeId, &[Connection])> + '_ {
-        let range = match self.stop_edges.get(stop as usize + 1) {
-            Some(&end) => self.stop_edges[stop as usize] as usize..end as usize,
-            None => 0..0,
+    /// The edges leaving `stop`, as `(to, connections, first_index)` — the index
+    /// being where that run starts in [`Timetable::connections`], which is what
+    /// makes the suffix minimum addressable.
+    pub(super) fn edges_from(
+        &self,
+        stop: NodeId,
+    ) -> impl Iterator<Item = (NodeId, &[Connection], usize)> + '_ {
+        let stop = stop as usize;
+        let range = if stop + 1 < self.stop_edges.len() {
+            self.stop_edges[stop] as usize..self.stop_edges[stop + 1] as usize
+        } else {
+            0..0
         };
         range.map(move |edge| {
-            let (start, end) = self.edge_span[edge];
-            (
-                self.edge_to[edge],
-                &self.connections[start as usize..end as usize],
-            )
+            let (first, last) = (
+                self.edge_start[edge] as usize,
+                self.edge_start[edge + 1] as usize,
+            );
+            let run = &self.connections[first..last];
+            (run[0].to, run, first)
         })
+    }
+
+    /// The soonest-arriving connection at or after `index` on its own edge.
+    pub(super) fn soonest_from(&self, index: usize) -> Connection {
+        self.connections[self.best_from[index] as usize]
     }
 
     /// Bytes held, as every other preprocessed structure here reports it.
     pub fn footprint(&self) -> usize {
         self.connections.len() * std::mem::size_of::<Connection>()
-            + self.stop_edges.len() * std::mem::size_of::<u32>()
-            + self.edge_to.len() * std::mem::size_of::<NodeId>()
-            + self.edge_span.len() * std::mem::size_of::<(u32, u32)>()
+            + (self.stop_edges.len() + self.edge_start.len() + self.best_from.len())
+                * std::mem::size_of::<u32>()
     }
 }
 
-/// One boarded vehicle, in an answer.
-///
-/// An itinerary is a list of these rather than of edges, because "which bus, at
-/// what time" is the answer to a transit query — an edge id is not.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Ride {
-    pub trip: u32,
-    pub from: NodeId,
-    pub to: NodeId,
-    pub departs: Time,
-    pub arrives: Time,
-}
-
-impl From<Connection> for Ride {
-    fn from(c: Connection) -> Self {
-        Ride {
-            trip: c.trip,
-            from: c.from,
-            to: c.to,
-            departs: c.departs,
-            arrives: c.arrives,
-        }
-    }
-}
-
-/// When you get there, and what you rode.
+/// When you get there, what you rode, and what it took to work out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Itinerary {
     /// Absolute arrival time at the target.
     pub arrives: Time,
     /// The connections ridden, in order.
     pub rides: Vec<Ride>,
+    /// Nodes the search settled reaching this — stops for one model, events for
+    /// the other. Carried on the answer because it is the number the two models
+    /// are actually being compared on, and a caller that has the itinerary
+    /// should not have to ask a second time for the work it cost.
+    pub settled: usize,
 }
 
 impl Itinerary {
-    /// How many times you changed vehicles — one less than the number of
-    /// distinct trips ridden, and zero for a journey you never got off.
+    /// How many times you changed vehicles — zero for a journey you never got
+    /// off, and one less than the number of distinct trips ridden.
     pub fn transfers(&self) -> usize {
         self.rides
             .windows(2)
@@ -266,7 +286,7 @@ impl Itinerary {
                 // staying in your seat.
                 None => now,
                 Some(trip) if trip == ride.trip => now,
-                _ => now.saturating_add(transfer.minimum),
+                _ => now.saturating_add(transfer.minimum()),
             };
             if ride.departs < ready {
                 return false;

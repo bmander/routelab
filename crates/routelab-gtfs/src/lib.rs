@@ -18,7 +18,7 @@
 //! keep it that way — file formats are not kernels. Connections come out as
 //! plain parallel arrays; whoever holds both ends builds the timetable.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 use chrono::NaiveDate;
@@ -56,11 +56,15 @@ pub struct Skipped {
 }
 
 impl Skipped {
-    /// Did anything get dropped that a caller ought to know about?
-    pub fn is_clean(&self) -> bool {
-        self.trips_too_short == 0
-            && self.stop_times_without_times == 0
-            && self.trips_frequency_based == 0
+    /// Service this reader could not represent, as a count of trips.
+    ///
+    /// Deliberately not a "was it clean" boolean. `trips_not_running` is the
+    /// date filter working and `connections_not_boardable` is the feed
+    /// genuinely saying no — neither is a shortfall. What is left is service
+    /// that exists and this reader dropped, which is the number worth acting
+    /// on, and a caller can still read the individual fields for the reason.
+    pub fn unimplemented(&self) -> usize {
+        self.trips_too_short + self.stop_times_without_times + self.trips_frequency_based
     }
 }
 
@@ -98,51 +102,6 @@ impl Feed {
     pub fn num_connections(&self) -> usize {
         self.from_stop.len()
     }
-
-    pub fn num_trips(&self) -> usize {
-        self.trip_ids.len()
-    }
-
-    /// `(min_lat, min_lon, max_lat, max_lon)` over the stops that have a place.
-    pub fn bounds(&self) -> (f64, f64, f64, f64) {
-        let reduce = |values: &[f64], f: fn(f64, f64) -> f64| {
-            values.iter().copied().reduce(f).unwrap_or(0.0)
-        };
-        (
-            reduce(&self.lats, f64::min),
-            reduce(&self.lons, f64::min),
-            reduce(&self.lats, f64::max),
-            reduce(&self.lons, f64::max),
-        )
-    }
-}
-
-/// What can go wrong before there is a feed to read.
-///
-/// A date on which nothing runs is deliberately **not** an error: it comes back
-/// as a feed with no connections and `Skipped::trips_not_running` saying how
-/// many trips were passed over. That distinguishes "you asked for a holiday" from
-/// "the file is broken", and a caller can tell the difference.
-#[derive(Debug)]
-pub enum GtfsError {
-    /// The feed could not be opened or parsed.
-    Read(gtfs_structures::Error),
-}
-
-impl std::fmt::Display for GtfsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GtfsError::Read(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl std::error::Error for GtfsError {}
-
-impl From<gtfs_structures::Error> for GtfsError {
-    fn from(err: gtfs_structures::Error) -> Self {
-        GtfsError::Read(err)
-    }
 }
 
 /// Read the connections that run on `date`.
@@ -150,7 +109,12 @@ impl From<gtfs_structures::Error> for GtfsError {
 /// `path` may be a `.zip` or a directory of `.txt` files — `gtfs_structures`
 /// takes either, which is what lets the test fixture be readable CSV in git
 /// rather than a binary nobody can review.
-pub fn load(path: &Path, date: NaiveDate) -> Result<Feed, GtfsError> {
+///
+/// A date on which nothing runs is deliberately **not** an error. It comes back
+/// as a feed with no connections and [`Skipped::trips_not_running`] saying how
+/// many trips were passed over, which distinguishes "you asked for a holiday"
+/// from "the file is broken".
+pub fn load(path: &Path, date: NaiveDate) -> Result<Feed, gtfs_structures::Error> {
     let gtfs = Gtfs::from_path(path.to_string_lossy().as_ref())?;
     Ok(connections_on(&gtfs, date))
 }
@@ -163,14 +127,12 @@ pub fn load(path: &Path, date: NaiveDate) -> Result<Feed, GtfsError> {
 /// `trip_days` answers it, listing the day offsets a service runs from a start
 /// date, so asking about `date` itself means asking whether offset zero is
 /// among them.
-fn services_on(gtfs: &Gtfs, date: NaiveDate) -> Vec<&str> {
-    let named: std::collections::BTreeSet<&str> = gtfs
-        .calendar
+fn services_on(gtfs: &Gtfs, date: NaiveDate) -> BTreeSet<&str> {
+    gtfs.calendar
         .keys()
         .chain(gtfs.calendar_dates.keys())
         .map(String::as_str)
-        .collect();
-    named
+        .collect::<BTreeSet<&str>>()
         .into_iter()
         .filter(|service| gtfs.trip_days(service, date).contains(&0))
         .collect()
@@ -178,7 +140,7 @@ fn services_on(gtfs: &Gtfs, date: NaiveDate) -> Vec<&str> {
 
 fn connections_on(gtfs: &Gtfs, date: NaiveDate) -> Feed {
     let mut feed = Feed::default();
-    let running: std::collections::HashSet<&str> = services_on(gtfs, date).into_iter().collect();
+    let running = services_on(gtfs, date);
 
     // Dense indices, assigned on first sight, so the arrays stay small when a
     // feed covers a region and the day covers a corner of it.
@@ -372,7 +334,7 @@ mod tests {
     #[test]
     fn what_was_dropped_is_counted() {
         let feed = load(&fixture("tiny"), date(2026, 8, 17)).unwrap();
-        assert!(feed.skipped.is_clean(), "{:?}", feed.skipped);
+        assert_eq!(feed.skipped.unimplemented(), 0, "{:?}", feed.skipped);
         assert!(feed.skipped.trips_not_running > 0, "the weekend trip");
     }
 

@@ -22,29 +22,34 @@ use crate::dijkstra::dijkstra;
 use crate::graph::{Graph, NodeId, Weight};
 use crate::search::SearchOptions;
 
-use super::{Connection, Itinerary, Ride, Time, Timetable, Transfer};
+use super::{Itinerary, Ride, Time, Timetable, Transfer};
 
 /// What an event node stands for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Event {
-    /// A vehicle leaving `stop` at `time`, on the connection at this index.
+    /// A vehicle leaving `stop` at `time`.
     Departure { stop: NodeId, time: Time },
-    /// A vehicle reaching `stop` at `time`, off the connection at this index.
+    /// A vehicle reaching `stop` at `time`.
     Arrival { stop: NodeId, time: Time },
 }
 
 impl Event {
-    fn stop(&self) -> NodeId {
-        match self {
-            Event::Departure { stop, .. } | Event::Arrival { stop, .. } => *stop,
-        }
-    }
-
     fn time(&self) -> Time {
         match self {
             Event::Departure { time, .. } | Event::Arrival { time, .. } => *time,
         }
     }
+}
+
+/// Give `event` a node id, reusing one if this stop and time already has it.
+///
+/// Deduplicated so that two buses leaving together do not become two nodes
+/// nobody can wait between.
+fn intern(events: &mut Vec<Event>, index: &mut HashMap<Event, NodeId>, event: Event) -> NodeId {
+    *index.entry(event).or_insert_with(|| {
+        events.push(event);
+        (events.len() - 1) as NodeId
+    })
 }
 
 /// A timetable as a static graph of events.
@@ -56,63 +61,39 @@ pub struct TimeExpanded {
     departures: Vec<Vec<NodeId>>,
     /// Arrival events at each stop, in time order — where a query finishes.
     arrivals: Vec<Vec<NodeId>>,
-    /// The connection each graph edge rides, for edges that ride one.
-    ridden: HashMap<u32, Connection>,
-    stops: usize,
+    /// The connections, in the order their edges were pushed. Connection edges
+    /// come first, so an edge rides connection `i` exactly when its input index
+    /// is `i` — no side table needed, only the CSR permutation undone.
+    rides: Vec<Ride>,
 }
 
 impl TimeExpanded {
     /// Expand `timetable` into its event graph.
-    ///
-    /// `transfer` must be [`Transfer::instant`] for now — see
-    /// [`super::time_dependent_query`] for why the two models are only
-    /// comparable there, and why a non-zero change time is refused rather than
-    /// approximated.
-    pub fn build(timetable: &Timetable, transfer: Transfer) -> Self {
-        assert_eq!(
-            transfer.minimum, 0,
-            "a minimum change time needs the realistic model; see the module docs"
-        );
+    pub fn build(timetable: &Timetable, _transfer: Transfer) -> Self {
         let stops = timetable.num_stops();
-
-        // One departure and one arrival event per connection. Events are
-        // deduplicated per (stop, time) so that two buses leaving together do
-        // not become two nodes nobody can wait between.
         let mut events: Vec<Event> = Vec::new();
-        let mut index: HashMap<(bool, NodeId, Time), NodeId> = HashMap::new();
-        let mut intern = |event: Event, events: &mut Vec<Event>| -> NodeId {
-            let key = (
-                matches!(event, Event::Departure { .. }),
-                event.stop(),
-                event.time(),
-            );
-            *index.entry(key).or_insert_with(|| {
-                events.push(event);
-                (events.len() - 1) as NodeId
-            })
-        };
-
+        let mut index: HashMap<Event, NodeId> = HashMap::new();
         let mut edges: Vec<(NodeId, NodeId, Weight)> = Vec::new();
-        let mut ridden: HashMap<u32, Connection> = HashMap::new();
+
+        // Connection edges first, and in order, which is what lets an edge find
+        // its ride by input index alone.
         for connection in timetable.connections() {
             let leaves = intern(
+                &mut events,
+                &mut index,
                 Event::Departure {
                     stop: connection.from,
                     time: connection.departs,
                 },
-                &mut events,
             );
             let lands = intern(
+                &mut events,
+                &mut index,
                 Event::Arrival {
                     stop: connection.to,
                     time: connection.arrives,
                 },
-                &mut events,
             );
-            // The input position of this edge is where it will sit in `edges`;
-            // CSR permutes, so the mapping is recovered through `input_index`
-            // after the graph is built.
-            ridden.insert(edges.len() as u32, *connection);
             edges.push((leaves, lands, connection.arrives - connection.departs));
         }
 
@@ -128,12 +109,9 @@ impl TimeExpanded {
                 Event::Arrival { stop, .. } => arrivals[*stop as usize].push(node),
             }
         }
-        let by_time = |a: &NodeId, b: &NodeId, events: &[Event]| {
-            events[*a as usize].time().cmp(&events[*b as usize].time())
-        };
         for stop in 0..stops {
-            departures[stop].sort_by(|a, b| by_time(a, b, &events));
-            arrivals[stop].sort_by(|a, b| by_time(a, b, &events));
+            departures[stop].sort_by_key(|&node| events[node as usize].time());
+            arrivals[stop].sort_by_key(|&node| events[node as usize].time());
 
             // Waiting: each departure to the next.
             for pair in departures[stop].windows(2) {
@@ -141,13 +119,14 @@ impl TimeExpanded {
                 let wait = events[next as usize].time() - events[here as usize].time();
                 edges.push((here, next, wait));
             }
-            // Alighting: each arrival to the first departure not before it.
+            // Alighting: each arrival to the first departure not before it. Both
+            // lists are sorted, so this is a binary search rather than a scan —
+            // a downtown stop has thousands of each.
             for &arrival in &arrivals[stop] {
                 let ready = events[arrival as usize].time();
-                if let Some(&boarding) = departures[stop]
-                    .iter()
-                    .find(|&&d| events[d as usize].time() >= ready)
-                {
+                let next =
+                    departures[stop].partition_point(|&node| events[node as usize].time() < ready);
+                if let Some(&boarding) = departures[stop].get(next) {
                     edges.push((arrival, boarding, events[boarding as usize].time() - ready));
                 }
             }
@@ -155,23 +134,13 @@ impl TimeExpanded {
 
         let graph = Graph::from_edges(events.len(), &edges)
             .expect("event graph is built from its own node set");
-        // Re-key the ridden table from input position to CSR edge id, the same
-        // trap `Calendar::from_input_windows` exists to avoid.
-        let ridden = (0..graph.num_edges() as u32)
-            .filter_map(|edge| {
-                ridden
-                    .get(&graph.input_index(edge))
-                    .map(|connection| (edge, *connection))
-            })
-            .collect();
 
         TimeExpanded {
             graph,
             events,
             departures,
             arrivals,
-            ridden,
-            stops,
+            rides: timetable.connections().to_vec(),
         }
     }
 
@@ -183,15 +152,17 @@ impl TimeExpanded {
         self.graph.num_edges()
     }
 
+    /// Bytes held by this structure's own arrays. The graph reports its own.
     pub fn footprint(&self) -> usize {
         self.events.len() * std::mem::size_of::<Event>()
-            + self.graph.num_edges() * 12
-            + self.ridden.len() * (4 + std::mem::size_of::<Connection>())
+            + self.rides.len() * std::mem::size_of::<Ride>()
+            + self.graph.footprint()
     }
 
     /// Earliest arrival at `to`, leaving `from` no earlier than `at`.
     pub fn earliest_arrival(&self, from: NodeId, at: Time, to: NodeId) -> Option<Itinerary> {
-        if from as usize >= self.stops || to as usize >= self.stops {
+        let stops = self.departures.len();
+        if from as usize >= stops || to as usize >= stops {
             return None;
         }
         if from == to {
@@ -201,25 +172,23 @@ impl TimeExpanded {
             return Some(Itinerary {
                 arrives: at,
                 rides: Vec::new(),
+                settled: 0,
             });
         }
         // Enter at the first departure you could catch. Every later one is
         // reachable from it along the waiting chain, so one source is enough.
-        let start = *self.departures[from as usize]
-            .iter()
-            .find(|&&event| self.events[event as usize].time() >= at)?;
+        let entry = self.departures[from as usize]
+            .partition_point(|&node| self.events[node as usize].time() < at);
+        let start = *self.departures[from as usize].get(entry)?;
 
         // Seeded with the clock rather than zero, so costs come out as times.
+        // No target set: every arrival at `to` is a candidate, and a tracker
+        // over eight hundred thousand nodes costs more than it saves when the
+        // search has to reach the cheapest of them anyway.
         let sources = [(start, self.events[start as usize].time())];
-        let targets: Vec<NodeId> = self.arrivals[to as usize].clone();
-        let result = dijkstra(
-            &self.graph,
-            &sources,
-            &SearchOptions::default().with_targets(targets.iter().copied()),
-        )
-        .ok()?;
+        let result = dijkstra(&self.graph, &sources, &SearchOptions::default()).ok()?;
 
-        let (event, arrives) = targets
+        let (event, arrives) = self.arrivals[to as usize]
             .iter()
             .filter_map(|&event| result.cost(event).map(|time| (event, time)))
             .min_by_key(|&(_, time)| time)?;
@@ -227,8 +196,16 @@ impl TimeExpanded {
         let rides = result
             .edge_path(event)?
             .into_iter()
-            .filter_map(|edge| self.ridden.get(&edge).map(|c| Ride::from(*c)))
+            .filter_map(|edge| {
+                self.rides
+                    .get(self.graph.input_index(edge) as usize)
+                    .copied()
+            })
             .collect();
-        Some(Itinerary { arrives, rides })
+        Some(Itinerary {
+            arrives,
+            rides,
+            settled: result.order.len(),
+        })
     }
 }

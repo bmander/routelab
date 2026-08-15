@@ -211,6 +211,18 @@ impl Graph {
             .expect("a reversed graph has the same nodes and weights as its original")
     }
 
+    /// Bytes of graph held.
+    ///
+    /// Reported here rather than counted from outside, because the column count
+    /// is this type's business: anything guessing it silently goes stale when a
+    /// column is added.
+    pub fn footprint(&self) -> usize {
+        self.offsets.len() * std::mem::size_of::<EdgeId>()
+            + self.heads.len() * std::mem::size_of::<NodeId>()
+            + self.weights.len() * std::mem::size_of::<Weight>()
+            + self.input_indices.len() * std::mem::size_of::<u32>()
+    }
+
     /// Take one step along `edge` from `node`: where it lands, and what it costs.
     /// `None` if `edge` does not leave `node`.
     ///
