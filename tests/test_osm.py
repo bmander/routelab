@@ -71,10 +71,10 @@ def test_a_profile_decides_what_counts_as_a_road():
 
 def test_walking_and_driving_are_different_environments():
     env = rl.Environment(rl.OSM(JUNCTION, rl.Walking()))
-    planner = rl.Dijkstra(env)
+    planner = rl.Dijkstra().bind(env)
     assert planner.route(3, 1) is not None, "on foot you can walk back down Main St"
 
-    driving = rl.Dijkstra(rl.Environment(rl.OSM(JUNCTION, rl.Driving())))
+    driving = rl.Dijkstra().bind(rl.Environment(rl.OSM(JUNCTION, rl.Driving())))
     assert driving.route(3, 1) is None, "by car there is no way back"
 
 
@@ -114,7 +114,7 @@ def test_a_leg_can_find_its_own_shape():
     layer = rl.OSM(JUNCTION, rl.Walking())
     env = rl.Environment(layer)
     compiled = env.compile()
-    journey = rl.AStar(env, rl.Euclidean()).route(1, 3)
+    journey = rl.AStar(rl.Euclidean()).bind(env).route(1, 3)
 
     shapes = [compiled.geometry(leg.edge) for leg in journey.legs]
     assert all(shape for shape in shapes), "every leg knows where it runs"
@@ -130,7 +130,7 @@ def test_a_layer_without_geometry_simply_has_none():
 
 def test_astar_and_dijkstra_agree_on_a_real_extract():
     env = rl.Environment(rl.OSM(JUNCTION, rl.Walking()))
-    guided = rl.AStar(env, rl.Euclidean()).route(1, 5)
-    plain = rl.Dijkstra(env).route(1, 5)
+    guided = rl.AStar(rl.Euclidean()).bind(env).route(1, 5)
+    plain = rl.Dijkstra().bind(env).route(1, 5)
     assert guided.cost == plain.cost
     assert guided.nodes == plain.nodes

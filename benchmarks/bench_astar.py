@@ -63,9 +63,9 @@ def main() -> None:
     )
 
     planners = [
-        ("dijkstra", rl.Dijkstra(env)),
-        ("astar (zero)", rl.AStar(env, rl.Zero())),
-        ("astar (euclidean)", rl.AStar(env, rl.Euclidean())),
+        ("dijkstra", rl.Dijkstra().bind(env)),
+        ("astar (zero)", rl.AStar(rl.Zero()).bind(env)),
+        ("astar (euclidean)", rl.AStar(rl.Euclidean()).bind(env)),
     ]
 
     print(f"{'planner':<20}{'settled':>10}{'of graph':>10}{'ms':>8}{'cost':>10}")

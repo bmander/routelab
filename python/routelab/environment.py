@@ -271,6 +271,13 @@ class CompiledEnvironment:
         self.graph = Graph(len(index), edges)
         self.labels: "Tuple[Hashable, ...]" = tuple(index)
         self._index = index
+        #: The cost models of the layers that went into this graph. Always
+        #: ``{"scalar"}`` today, since compilation refuses anything else — but
+        #: carried so that a technique can be asked whether it handles what is
+        #: actually here, rather than what used to be.
+        self.cost_models: "frozenset[str]" = frozenset(
+            source.cost_model for source in sources
+        )
         # Spans index the *input* edge list, so a CSR edge id is looked up
         # through Graph.input_index rather than assumed to line up.
         self._spans: "Tuple[Tuple[int, int, EdgeSource], ...]" = tuple(spans)

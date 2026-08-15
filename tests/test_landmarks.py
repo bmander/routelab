@@ -31,14 +31,14 @@ def test_landmarks_need_no_geometry(ring):
     # unknown, or whose costs have nothing to do with distance.
     assert ring.compile().positions == (None,) * 4
     with pytest.raises(ValueError, match="position for every node"):
-        rl.AStar(ring, rl.Euclidean())
+        rl.AStar(rl.Euclidean()).bind(ring)
 
-    planner = rl.AStar(ring, rl.Landmarks(2))
+    planner = rl.AStar(rl.Landmarks(2)).bind(ring)
     assert planner.route("a", "c").cost == 20
 
 
 def test_a_measured_bound_knows_which_way_round(ring):
-    planner = rl.AStar(ring, rl.Landmarks(4))
+    planner = rl.AStar(rl.Landmarks(4)).bind(ring)
     forward = planner.node_id("b")
     backward = planner.node_id("a")
     # Getting from a to b is one hop; getting from b back to a is three.
@@ -87,7 +87,7 @@ def test_a_measured_bound_beats_a_geometric_one_on_mixed_speeds():
         ("euclidean", rl.Euclidean()),
         ("landmarks", rl.Landmarks(2)),
     ]:
-        planner = rl.AStar(env, heuristic)
+        planner = rl.AStar(heuristic).bind(env)
         result = planner.search(origin, targets=[planner.node_id(destination)])
         settled[name] = len(result.order)
         costs[name] = planner.route(origin, destination).cost
@@ -97,7 +97,7 @@ def test_a_measured_bound_beats_a_geometric_one_on_mixed_speeds():
 
 
 def test_selection_is_reproducible_and_the_seed_means_something(ring):
-    same = [rl.AStar(ring, rl.Landmarks(2, seed=5)).heuristic.estimate(0, 2) for _ in range(2)]
+    same = [rl.AStar(rl.Landmarks(2, seed=5)).bind(ring).heuristic.estimate(0, 2) for _ in range(2)]
     assert same[0] == same[1]
 
 
@@ -115,30 +115,30 @@ def test_spreading_landmarks_out_beats_scattering_them():
 
 
 def test_the_table_is_two_weights_per_landmark_per_node(ring):
-    planner = rl.AStar(ring, rl.Landmarks(3))
+    planner = rl.AStar(rl.Landmarks(3)).bind(ring)
     assert planner.heuristic.footprint == 2 * 3 * 4 * 4
     assert planner.heuristic.coverage == 4
 
 
 def test_a_landmark_set_has_to_have_landmarks(ring):
     with pytest.raises(ValueError, match="at least one landmark"):
-        rl.AStar(ring, rl.Landmarks(0))
+        rl.AStar(rl.Landmarks(0)).bind(ring)
 
 
 def test_an_unknown_selection_says_what_it_expected(ring):
     with pytest.raises(ValueError, match="expected 'farthest' or 'random'"):
-        rl.AStar(ring, rl.Landmarks(2, "vibes"))
+        rl.AStar(rl.Landmarks(2, "vibes")).bind(ring)
 
 
 def test_asking_for_more_landmarks_than_nodes_is_fine(ring):
-    planner = rl.AStar(ring, rl.Landmarks(99))
+    planner = rl.AStar(rl.Landmarks(99)).bind(ring)
     assert planner.route("a", "c").cost == 20
 
 
 def test_the_search_space_is_still_a_tree(ring):
     # Whatever the heuristic, A* explores by growing a tree — so a landmark
     # planner reports the same shape and the demo needs no special case.
-    planner = rl.AStar(ring, rl.Landmarks(2))
+    planner = rl.AStar(rl.Landmarks(2)).bind(ring)
     tree = planner.explored(planner.search("a", targets=[planner.node_id("c")]))
     assert tree.kind == "shortest-path-tree"
     assert len(tree) >= 1

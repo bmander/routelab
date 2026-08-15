@@ -30,13 +30,14 @@ from urllib.parse import parse_qs, urlparse
 import routelab as rl
 
 PROFILES = {"walking": rl.Walking, "cycling": rl.Cycling, "driving": rl.Driving}
-#: Each entry builds a planner over an environment. Adding an algorithm to the
-#: demo is adding a line here — everything downstream asks the planner what it
-#: found and what it explored, and neither answer depends on which one it is.
+#: The techniques on offer, as values — configured here, bound to an
+#: environment when someone first asks for one. Adding an algorithm to the demo
+#: is adding a line here; everything downstream asks the planner what it found
+#: and what it explored, and neither answer depends on which one it is.
 ALGORITHMS = {
-    "dijkstra": rl.Dijkstra,
-    "astar": lambda env: rl.AStar(env, rl.Euclidean()),
-    "landmarks": lambda env: rl.AStar(env, rl.Landmarks(16)),
+    "dijkstra": rl.Dijkstra(),
+    "astar": rl.AStar(rl.Euclidean()),
+    "landmarks": rl.AStar(rl.Landmarks(16)),
 }
 
 
@@ -79,7 +80,7 @@ class Router:
         if (profile, algorithm) not in self._planners:
             environment, _ = self.environment(profile)
             started = time.perf_counter()
-            self._planners[(profile, algorithm)] = ALGORITHMS[algorithm](environment)
+            self._planners[(profile, algorithm)] = ALGORITHMS[algorithm].bind(environment)
             elapsed = time.perf_counter() - started
             if elapsed > 0.1:
                 print(f"  {algorithm} on {profile}: ready in {elapsed:.1f}s", flush=True)
@@ -95,7 +96,7 @@ class Router:
         """
         environment, _ = self.environment(profile)
         compiled = environment.compile()
-        result = rl.Dijkstra(environment).search(origin)
+        result = rl.Dijkstra().bind(environment).search(origin)
         return tuple(compiled.label(node) for node in result.order)
 
     def route(

@@ -63,12 +63,12 @@ def main() -> int:
     # extract's edge — and landing on one produces a query with no answer for
     # reasons that have nothing to do with routing.
     origin = layer.nearest(*args.origin)
-    reachable = rl.Dijkstra(env).search(origin)
+    reachable = rl.Dijkstra().bind(env).search(origin)
     connected = [compiled.label(node) for node in reachable.order]
     destination = layer.nearest(*args.destination, within=connected)
     print(f"routing over {len(connected):,} nodes reachable from the origin")
 
-    planners = [("dijkstra", rl.Dijkstra(env)), ("astar", rl.AStar(env, rl.Euclidean()))]
+    planners = [("dijkstra", rl.Dijkstra().bind(env)), ("astar", rl.AStar(rl.Euclidean()).bind(env))]
     searches = {}
     journey = None
     for name, planner in planners:

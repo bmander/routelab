@@ -41,7 +41,7 @@ def test_labels_are_numbered_in_first_seen_order():
 
 def test_any_hashable_can_be_a_node():
     env = rl.Environment(rl.ScalarEdges((("stop", 7), ("bike", 3), 60)))
-    assert rl.Dijkstra(env).route(("stop", 7), ("bike", 3)).cost == 60
+    assert rl.Dijkstra().bind(env).route(("stop", 7), ("bike", 3)).cost == 60
 
 
 def test_compilation_is_cached_until_a_layer_is_registered():

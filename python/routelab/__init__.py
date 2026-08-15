@@ -11,7 +11,7 @@ There are two ways in. The high road describes a world and asks it questions:
     >>> env = rl.Environment()
     >>> env.register(rl.ScalarEdges(("a", "b", 1), ("b", "c", 15)))
     Environment(1 layer)
-    >>> rl.Dijkstra(env).route("a", "c")
+    >>> rl.Dijkstra().bind(env).route("a", "c")
     Journey('a' → 'b' → 'c', cost=16)
 
 The low road is the kernel itself, on dense integer ids, as the papers state it:
@@ -38,7 +38,7 @@ from .environment import (
 from .graph import Graph
 from .heuristics import Euclidean, Heuristic, Landmarks, Zero
 from .journey import Journey, Leg
-from .planners import BFS, PLANNERS, AStar, Dijkstra, Planner, route
+from .planners import BFS, AStar, Dijkstra, Planner, route
 from .search import SearchResult, astar, bfs, dijkstra
 from .searchspace import Branch, SearchSpace, ShortestPathTree
 from .sources import OSM, Cycling, Driving, Profile, Walking
@@ -61,7 +61,6 @@ __all__ = [
     "Leg",
     "Nodes",
     "OSM",
-    "PLANNERS",
     "Planner",
     "Positions",
     "Profile",

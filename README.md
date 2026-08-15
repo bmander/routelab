@@ -40,7 +40,8 @@ import routelab as rl
 env = rl.Environment()
 env.register(rl.ScalarEdges(("a", "b", 1), ("b", "c", 15)))
 
-planner = rl.Dijkstra(env)          # preprocess once
+technique = rl.Dijkstra()           # a configuration, costing nothing
+planner = technique.bind(env)       # preprocessing, if the technique has any
 planner.route("a", "c")             # Journey('a' → 'b' → 'c', cost=16)
 ```
 
@@ -54,7 +55,7 @@ streets = rl.ScalarEdges(("home", "stop_a", 300), bidirectional=True)
 transit = rl.ScalarEdges(("stop_a", "stop_b", 120))
 env = rl.Environment(streets, transit)
 
-journey = rl.Dijkstra(env).route("home", "stop_b")
+journey = rl.Dijkstra().bind(env).route("home", "stop_b")
 [(leg.head, leg.source) for leg in journey.legs]
 # [('stop_a', ScalarEdges(2 edges)), ('stop_b', ScalarEdges(1 edges))]
 ```
@@ -63,14 +64,30 @@ Queries take the arguments the problem actually needs — several origins, each
 already carrying the cost of an access walk, and a bound on how far to look:
 
 ```python
-rl.Dijkstra(env).route({"stop_a": 0, "stop_b": 45}, "home", max_cost=600)
+rl.Dijkstra().bind(env).route({"stop_a": 0, "stop_b": 45}, "home", max_cost=600)
 ```
 
-The planner is the unit of comparison: swap `rl.Dijkstra` for `rl.BFS` and the
-rest of the line is unchanged. `rl.route(rl.Dijkstra, env, "a", "c")` does the
-whole thing in one call when you only have one question to ask — but building a
-planner and keeping it is what makes preprocessing worth doing, which is the
-whole game for the algorithms this project is heading toward.
+Configuring and binding are separate because the middle step gets expensive:
+sixteen landmarks over a city is a second and 33 MB, and that belongs to a verb
+rather than to a constructor. It also makes a technique a *value* — something you
+can name, put in a list, and point at more than one dataset:
+
+```python
+study = {
+    "dijkstra": rl.Dijkstra(),
+    "astar": rl.AStar(rl.Euclidean()),
+    "alt-16": rl.AStar(rl.Landmarks(16)),
+}
+for name, technique in study.items():
+    if technique.missing_from(env.compile()):
+        continue                                  # this dataset cannot support it
+    planner = technique.bind(env)
+```
+
+There is no registry of names in the library: a dictionary of techniques is a
+line you write, and no fixed set could serve both a demo's dropdown and a
+parameter sweep. `rl.route(rl.Dijkstra(), env, "a", "c")` does the whole thing in
+one call when you have exactly one question to ask.
 
 ### Guided search
 
@@ -84,7 +101,7 @@ env = rl.Environment(
     rl.Positions({"home": (0, 0), "stop_a": (300, 40)}),
 )
 
-rl.AStar(env, rl.Euclidean()).route("home", "stop_b")
+rl.AStar(rl.Euclidean()).bind(env).route("home", "stop_b")
 ```
 
 `cost_per_distance` is the least a layer can charge to cover one unit of ground.
@@ -96,7 +113,7 @@ no rate disables the heuristic rather than being assumed slow; a heuristic that
 cannot be built says so instead of falling back:
 
 ```python
-rl.AStar(env, rl.Euclidean())
+rl.AStar(rl.Euclidean()).bind(env)
 # ValueError: Euclidean needs a position for every node; 2 have none ...
 ```
 
@@ -125,8 +142,8 @@ An OpenStreetMap extract is a layer like any other:
 
 ```python
 env = rl.Environment().register(rl.OSM("liechtenstein.osm.pbf", rl.Driving()))
-planner = rl.AStar(env, rl.Euclidean())
-planner.route(planner.environment.sources[0].nearest(47.226, 9.523), ...)
+planner = rl.AStar(rl.Euclidean()).bind(env)
+planner.route(env.sources[0].nearest(47.226, 9.523), ...)
 ```
 
 Nodes keep their OSM ids, so a route traces back to the map it came from, and
@@ -159,7 +176,7 @@ that is not a motorway. `Landmarks` measures instead — precomputing the distan
 to and from a handful of fixed nodes, and bounding by the triangle inequality:
 
 ```python
-planner = rl.AStar(env, rl.Landmarks(16))    # a few seconds, ~32 MB
+planner = rl.AStar(rl.Landmarks(16)).bind(env)   # a few seconds, ~32 MB
 ```
 
 The bound it produces already knows about one-way streets, dead ends, bridges,

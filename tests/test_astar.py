@@ -24,14 +24,14 @@ def corridor() -> rl.Environment:
 
 
 def test_hello_world(corridor):
-    journey = rl.AStar(corridor, rl.Euclidean()).route("a", "d")
+    journey = rl.AStar(rl.Euclidean()).bind(corridor).route("a", "d")
     assert journey.cost == 30
     assert journey.nodes == ["a", "b", "c", "d"]
 
 
 def test_guidance_skips_what_leads_away(corridor):
-    guided = rl.AStar(corridor, rl.Euclidean())
-    plain = rl.Dijkstra(corridor)
+    guided = rl.AStar(rl.Euclidean()).bind(corridor)
+    plain = rl.Dijkstra().bind(corridor)
     target = [guided.node_id("d")]
 
     guided_order = guided.search("a", targets=target).order
@@ -78,19 +78,19 @@ def test_declared_requirements_agree_with_what_binding_actually_does(corridor, h
 
 def test_the_heuristic_is_required(corridor):
     with pytest.raises(TypeError):
-        rl.AStar(corridor)  # type: ignore[call-arg]
+        rl.AStar()  # type: ignore[call-arg]
 
 
 def test_zero_is_available_but_must_be_asked_for(corridor):
     # A* that quietly became Dijkstra is the one failure a benchmark can't see,
     # so the degenerate heuristic is spelled out rather than defaulted to.
-    assert rl.AStar(corridor, rl.Zero()).route("a", "d").cost == 30
+    assert rl.AStar(rl.Zero()).bind(corridor).route("a", "d").cost == 30
 
 
 def test_euclidean_needs_positions():
     env = rl.Environment(rl.ScalarEdges(("a", "b", 1), cost_per_distance=1.0))
     with pytest.raises(ValueError, match="position for every node"):
-        rl.AStar(env, rl.Euclidean())
+        rl.AStar(rl.Euclidean()).bind(env)
 
 
 def test_euclidean_names_the_nodes_it_cannot_place():
@@ -99,7 +99,7 @@ def test_euclidean_names_the_nodes_it_cannot_place():
         rl.Positions({"a": (0, 0)}),
     )
     with pytest.raises(ValueError, match=r"'b'.*'c'|'c'.*'b'"):
-        rl.AStar(env, rl.Euclidean())
+        rl.AStar(rl.Euclidean()).bind(env)
 
 
 def test_euclidean_needs_a_rate_from_every_edge_layer():
@@ -112,7 +112,7 @@ def test_euclidean_needs_a_rate_from_every_edge_layer():
         rl.Positions({"a": (0, 0), "b": (1, 0), "c": (2, 0)}),
     )
     with pytest.raises(ValueError, match="cost_per_distance"):
-        rl.AStar(env, rl.Euclidean())
+        rl.AStar(rl.Euclidean()).bind(env)
 
 
 def test_the_fastest_layer_sets_the_bound():
@@ -123,17 +123,17 @@ def test_the_fastest_layer_sets_the_bound():
 
 
 def test_an_explicit_rate_overrides_the_layers(corridor):
-    weaker = rl.AStar(corridor, rl.Euclidean(cost_per_distance=0.0))
+    weaker = rl.AStar(rl.Euclidean(cost_per_distance=0.0)).bind(corridor)
     assert weaker.route("a", "d").cost == 30
     # Priced at zero it estimates nothing, so it degenerates to Dijkstra.
     target = [weaker.node_id("d")]
-    assert weaker.search("a", targets=target).order == rl.Dijkstra(corridor).search(
+    assert weaker.search("a", targets=target).order == rl.Dijkstra().bind(corridor).search(
         "a", targets=target
     ).order
 
 
 def test_a_star_searches_toward_exactly_one_target(corridor):
-    planner = rl.AStar(corridor, rl.Euclidean())
+    planner = rl.AStar(rl.Euclidean()).bind(corridor)
     with pytest.raises(ValueError, match="single target, and got no target"):
         planner.search("a")
     with pytest.raises(ValueError, match="got 2 targets"):
@@ -141,29 +141,29 @@ def test_a_star_searches_toward_exactly_one_target(corridor):
 
 
 def test_max_cost_bounds_the_real_cost_not_the_estimate(corridor):
-    planner = rl.AStar(corridor, rl.Euclidean())
+    planner = rl.AStar(rl.Euclidean()).bind(corridor)
     assert planner.route("a", "c", max_cost=20).cost == 20
     assert planner.route("a", "d", max_cost=20) is None
 
 
 def test_unreachable_destination_returns_none(corridor):
-    assert rl.AStar(corridor, rl.Euclidean()).route("d", "a") is None
+    assert rl.AStar(rl.Euclidean()).bind(corridor).route("d", "a") is None
 
 
 def test_several_origins_with_access_costs(corridor):
-    planner = rl.AStar(corridor, rl.Euclidean())
+    planner = rl.AStar(rl.Euclidean()).bind(corridor)
     assert planner.route({"a": 0, "c": 5}, "d").cost == 15
 
 
 def test_the_heuristic_is_bound_once_in_preprocess(corridor):
-    planner = rl.AStar(corridor, rl.Euclidean())
+    planner = rl.AStar(rl.Euclidean()).bind(corridor)
     assert planner.heuristic.coverage == corridor.compile().graph.num_nodes
     assert planner.heuristic is planner.heuristic, "bound once, reused per query"
-    assert repr(planner) == "AStar(Environment(2 layers), Euclidean())"
+    assert repr(planner) == "AStar(Euclidean()) bound to Environment(2 layers)"
 
 
 def test_journeys_are_walkable(corridor):
-    journey = rl.AStar(corridor, rl.Euclidean()).route("a", "d")
+    journey = rl.AStar(rl.Euclidean()).bind(corridor).route("a", "d")
     compiled = corridor.compile()
     edge_ids = [
         edge_id
@@ -187,8 +187,8 @@ def settled(env, planner, origin, destination):
 
 def test_on_a_grid_it_settles_far_fewer_nodes():
     env = grid_environment(25)
-    guided_count, guided_cost = settled(env, rl.AStar(env, rl.Euclidean()), (0, 0), (24, 24))
-    plain_count, plain_cost = settled(env, rl.Dijkstra(env), (0, 0), (24, 24))
+    guided_count, guided_cost = settled(env, rl.AStar(rl.Euclidean()).bind(env), (0, 0), (24, 24))
+    plain_count, plain_cost = settled(env, rl.Dijkstra().bind(env), (0, 0), (24, 24))
 
     assert guided_cost == plain_cost, "same answer"
     assert guided_count < plain_count / 10, "for a tenth of the work"
@@ -200,8 +200,8 @@ def test_a_heuristic_only_helps_when_it_is_tight():
     # bound is loose by up to sqrt(2) everywhere and A* settles nearly everything
     # Dijkstra does. Same code, same heuristic, no win.
     env = grid_environment(15, diagonal=False)
-    guided_count, guided_cost = settled(env, rl.AStar(env, rl.Euclidean()), (0, 0), (14, 14))
-    plain_count, plain_cost = settled(env, rl.Dijkstra(env), (0, 0), (14, 14))
+    guided_count, guided_cost = settled(env, rl.AStar(rl.Euclidean()).bind(env), (0, 0), (14, 14))
+    plain_count, plain_cost = settled(env, rl.Dijkstra().bind(env), (0, 0), (14, 14))
 
     assert guided_cost == plain_cost
     assert guided_count > plain_count * 0.9
