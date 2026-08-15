@@ -812,7 +812,11 @@ impl PyHeuristic {
 }
 
 fn options(targets: Option<Vec<NodeId>>, max_cost: Option<Weight>) -> SearchOptions {
-    SearchOptions { targets, max_cost }
+    SearchOptions {
+        targets,
+        max_cost,
+        ..SearchOptions::default()
+    }
 }
 
 /// Dijkstra's algorithm from `sources`, a list of `(node, initial_cost)` pairs.

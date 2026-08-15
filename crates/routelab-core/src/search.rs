@@ -56,9 +56,12 @@ impl std::error::Error for SearchError {}
 /// "settle everything reachable".
 #[derive(Debug, Clone, Default)]
 pub struct SearchOptions {
-    /// Stop once all of these nodes have been settled. `None` means run to exhaustion.
-    /// Ids outside the graph are unreachable, so they suppress the early exit.
+    /// Stop once [`SearchOptions::reach`] many of these have been settled.
+    /// `None` means run to exhaustion. Ids outside the graph are unreachable,
+    /// so they suppress the early exit.
     pub targets: Option<Vec<NodeId>>,
+    /// How much of `targets` the search is waiting for.
+    pub reach: Reach,
     /// Do not settle nodes whose cost exceeds this (inclusive bound), where
     /// "cost" is whatever the search puts in [`SearchResult::costs`] — summed
     /// edge weights for Dijkstra, hop count for BFS.
@@ -66,8 +69,23 @@ pub struct SearchOptions {
 }
 
 impl SearchOptions {
+    /// Stop once **every** one of `targets` is settled.
     pub fn with_targets(mut self, targets: impl IntoIterator<Item = NodeId>) -> Self {
         self.targets = Some(targets.into_iter().collect());
+        self.reach = Reach::All;
+        self
+    }
+
+    /// Stop as soon as **any** one of `targets` is settled.
+    ///
+    /// For a search that settles in cost order — which is every search here —
+    /// the first of a set to be settled is the cheapest of them. That makes
+    /// this the right question whenever a caller wants "the nearest of these"
+    /// rather than "all of these", and asking the other way round can be the
+    /// difference between visiting a fifth of a graph and visiting all of it.
+    pub fn with_any_target(mut self, targets: impl IntoIterator<Item = NodeId>) -> Self {
+        self.targets = Some(targets.into_iter().collect());
+        self.reach = Reach::Any;
         self
     }
 
@@ -173,13 +191,27 @@ impl SearchResult {
 
 /// Tracks which requested targets are still outstanding, so a search can stop
 /// as soon as the last one is settled.
+/// How many of a search's targets it is waiting for before it may stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Reach {
+    /// Every target. The conservative reading, and the default.
+    #[default]
+    All,
+    /// The first one settled, which in a cost-ordered search is the cheapest.
+    Any,
+}
+
 pub(crate) struct TargetTracker {
     is_target: Vec<bool>,
     remaining: usize,
 }
 
 impl TargetTracker {
-    pub(crate) fn new(targets: &Option<Vec<NodeId>>, num_nodes: usize) -> Option<Self> {
+    pub(crate) fn new(
+        targets: &Option<Vec<NodeId>>,
+        reach: Reach,
+        num_nodes: usize,
+    ) -> Option<Self> {
         let targets = targets.as_ref()?;
         let mut is_target = vec![false; num_nodes];
         let mut remaining = 0;
@@ -197,7 +229,10 @@ impl TargetTracker {
         }
         Some(TargetTracker {
             is_target,
-            remaining,
+            remaining: match reach {
+                Reach::All => remaining,
+                Reach::Any => remaining.min(1),
+            },
         })
     }
 

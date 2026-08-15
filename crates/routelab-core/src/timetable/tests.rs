@@ -257,3 +257,25 @@ fn you_are_already_where_you_already_are() {
         );
     }
 }
+
+#[test]
+fn stopping_at_the_first_target_finds_the_same_answer_as_exhausting() {
+    // The expanded model asks for *any* arrival at the target rather than all
+    // of them, which is only right because costs are absolute times and the
+    // search settles in cost order. If that reasoning were wrong, it would show
+    // up as an early exit on a later arrival — so check it against the model
+    // that has no early exit to get wrong.
+    for seed in 0..12 {
+        let table = random_timetable(seed, 12, 25);
+        let expanded = expanded(&table);
+        for from in 0..12u32 {
+            for to in 0..12u32 {
+                assert_eq!(
+                    expanded.earliest_arrival(from, 0, to).map(|i| i.arrives),
+                    earliest_arrival(&table, from, 0, to, Transfer::instant()).map(|i| i.arrives),
+                    "seed {seed}: {from} -> {to}"
+                );
+            }
+        }
+    }
+}

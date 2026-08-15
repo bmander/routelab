@@ -20,7 +20,7 @@ pub fn bfs(
     check_nodes(graph, sources.iter().copied())?;
 
     let mut result = SearchResult::new(graph.num_nodes());
-    let mut tracker = TargetTracker::new(&options.targets, graph.num_nodes());
+    let mut tracker = TargetTracker::new(&options.targets, options.reach, graph.num_nodes());
     if tracker.as_ref().is_some_and(|t| t.done()) {
         return Ok(result);
     }

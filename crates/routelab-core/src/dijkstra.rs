@@ -22,7 +22,7 @@ pub fn dijkstra(
     check_sources(graph, sources)?;
 
     let mut result = SearchResult::new(graph.num_nodes());
-    let mut tracker = TargetTracker::new(&options.targets, graph.num_nodes());
+    let mut tracker = TargetTracker::new(&options.targets, options.reach, graph.num_nodes());
     if tracker.as_ref().is_some_and(|t| t.done()) {
         return Ok(result);
     }
@@ -116,6 +116,23 @@ mod tests {
         // Costs already relaxed when the search stopped are upper bounds, not
         // final distances, except at settled nodes.
         assert_eq!(r.order.last(), Some(&1));
+    }
+
+    #[test]
+    fn any_target_stops_at_the_nearest_of_them() {
+        let g = diamond();
+        // Nodes 2 and 3 cost 10 and 3. Asking for all of them settles both;
+        // asking for any stops at 3, which is the nearer.
+        let all = dijkstra(&g, &from(0), &SearchOptions::default().with_targets([2, 3])).unwrap();
+        let any = dijkstra(
+            &g,
+            &from(0),
+            &SearchOptions::default().with_any_target([2, 3]),
+        )
+        .unwrap();
+        assert_eq!(all.order, vec![0, 1, 3, 2]);
+        assert_eq!(any.order, vec![0, 1, 3], "stopped once the nearest was in");
+        assert_eq!(any.cost(3), Some(3));
     }
 
     #[test]

@@ -181,12 +181,19 @@ impl TimeExpanded {
             .partition_point(|&node| self.events[node as usize].time() < at);
         let start = *self.departures[from as usize].get(entry)?;
 
-        // Seeded with the clock rather than zero, so costs come out as times.
-        // No target set: every arrival at `to` is a candidate, and a tracker
-        // over eight hundred thousand nodes costs more than it saves when the
-        // search has to reach the cheapest of them anyway.
+        // Seeded with the clock rather than zero, so costs come out as times —
+        // which is also what makes the early exit right. Any arrival at `to`
+        // will do, and because the search settles in cost order the first one
+        // settled is the earliest. Asking for *all* of them instead runs the
+        // search to exhaustion: 608,611 events settled on a Seattle weekday
+        // against 18,956 for the first.
         let sources = [(start, self.events[start as usize].time())];
-        let result = dijkstra(&self.graph, &sources, &SearchOptions::default()).ok()?;
+        let result = dijkstra(
+            &self.graph,
+            &sources,
+            &SearchOptions::default().with_any_target(self.arrivals[to as usize].iter().copied()),
+        )
+        .ok()?;
 
         let (event, arrives) = self.arrivals[to as usize]
             .iter()
