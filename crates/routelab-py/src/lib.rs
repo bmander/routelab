@@ -712,6 +712,12 @@ impl PyCalendar {
         self.inner.is_open(edge, at)
     }
 
+    /// Does `edge` carry a schedule at all? An edge nobody scheduled is open at
+    /// every hour, which looks the same as one that happens to be open now.
+    fn is_restricted(&self, edge: EdgeId) -> bool {
+        self.inner.is_restricted(edge)
+    }
+
     fn __repr__(&self) -> String {
         format!("Calendar({} edges restricted)", self.inner.len())
     }

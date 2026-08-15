@@ -191,6 +191,16 @@ impl Calendar {
         self.entries.get(&edge).map(Vec::as_slice)
     }
 
+    /// Does `edge` carry a schedule at all?
+    ///
+    /// Distinct from [`Calendar::is_open`], and the distinction is the one that
+    /// answers "why did the hour make no difference": an edge nobody scheduled
+    /// is open at every hour, which looks exactly like an edge that happens to
+    /// be open now.
+    pub fn is_restricted(&self, edge: EdgeId) -> bool {
+        self.windows_for(edge).is_some()
+    }
+
     /// Is `edge` open at weekly time `at`?
     pub fn is_open(&self, edge: EdgeId, at: Clock) -> bool {
         self.wait(edge, at, Waiting::Forbidden) == Some(0)

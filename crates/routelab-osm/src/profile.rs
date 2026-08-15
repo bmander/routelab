@@ -122,27 +122,32 @@ impl Profile {
 
     /// The windows during which this traveller may use the way at all.
     ///
-    /// The first access key the way carries wins, so `foot=no` beats a permissive
-    /// `access` on a footpath. A schedule that cannot be read leaves the way
-    /// unrestricted rather than guessed at.
+    /// **A conditional tag answers on its own.** Where one exists — the most
+    /// specific this profile reads — it says both when the way is open and, by
+    /// inversion, when it is not, and any plain tag beside it is ignored.
+    /// Every Ballard Locks footway carries `foot=yes` next to
+    /// `access:conditional=yes @(07:00-21:00)`; reading that `foot=yes` as the
+    /// default is what made a whole city's gate disappear.
+    ///
+    /// Only when nothing states hours does the plain tag decide, and then only
+    /// to exclude: `foot=no` keeps a path out of a walking graph.
     fn access_windows(&self, tags: &WayTags) -> Option<Vec<conditional::Window>> {
-        for key in &self.access_keys {
-            let (base, schedule) = tags.access_for(key);
-            if let Some(schedule) = schedule {
-                if let Some(windows) = conditional::open_windows(base, schedule) {
-                    return Some(windows);
-                }
-                // Unreadable: fall through to the plain tag below.
-            }
-            if let Some(base) = base {
-                return match conditional::permits(base) {
-                    Some(true) => None,              // allowed, and always
-                    Some(false) => Some(Vec::new()), // never allowed
-                    None => None,                    // unreadable value, so no opinion
-                };
-            }
+        if let Some(schedule) = self
+            .access_keys
+            .iter()
+            .find_map(|key| tags.access_for(key).1)
+        {
+            return conditional::open_windows(schedule);
         }
-        None
+        match self
+            .access_keys
+            .iter()
+            .find_map(|key| tags.access_for(key).0)
+            .and_then(conditional::permits)
+        {
+            Some(false) => Some(Vec::new()), // never allowed
+            _ => None,                       // allowed always, or no opinion
+        }
     }
 }
 

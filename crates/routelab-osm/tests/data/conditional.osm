@@ -35,12 +35,15 @@
     <tag k="highway" v="footway"/>
   </way>
 
-  <!-- The gate. Open only during its hours, and note the missing space after
-       the @, which is how it is actually written on the map. -->
+  <!-- The gate. Open only during its hours, and tagged the way the real locks
+       are: `foot=yes` beside an `access:conditional`, with the missing space
+       after the @. The `foot=yes` is what a reader must not mistake for a
+       default, or the gate disappears. -->
   <way id="20">
     <nd ref="2"/>
     <nd ref="3"/>
     <tag k="highway" v="footway"/>
+    <tag k="foot" v="yes"/>
     <tag k="access:conditional" v="yes @(07:00-21:00)"/>
   </way>
 

@@ -185,6 +185,12 @@ class Router:
             # failure nobody can see, so the page is told and says so.
             "scheduled_edges": 0 if compiled.calendar is None else len(compiled.calendar),
             "reads_clock": bool(when),
+            # How many legs of *this* route are scheduled. The number that
+            # answers "why did changing the hour do nothing": a route over
+            # edges nobody scheduled cannot care what time it is.
+            "scheduled_legs": 0
+            if compiled.calendar is None
+            else sum(1 for leg in journey.legs if compiled.calendar.is_restricted(leg.edge)),
             "settled_count": result.settled,
             "graph_nodes": compiled.graph.num_nodes,
             "ms": round(elapsed, 1),
@@ -333,6 +339,16 @@ const route = L.layerGroup().addTo(map);
 const PIN = L.divIcon({className: 'pin', iconSize: [14, 14], iconAnchor: [7, 7]});
 let pins = [];
 
+function dropPin(latlng) {
+  const pin = L.marker(latlng, {icon: PIN, draggable: true}).addTo(map);
+  // Live while moving, and the whole picture once it stops.
+  pin.on('dragstart', () => space.clearLayers());
+  pin.on('drag', () => trace());
+  pin.on('dragend', () => request(true));
+  pins.push(pin);
+  return pin;
+}
+
 map.on('click', event => {
   if (pins.length === 2) {
     pins.forEach(pin => pin.remove());
@@ -340,12 +356,7 @@ map.on('click', event => {
     space.clearLayers();
     route.clearLayers();
   }
-  const pin = L.marker(event.latlng, {icon: PIN, draggable: true}).addTo(map);
-  // Live while moving, and the whole picture once it stops.
-  pin.on('dragstart', () => space.clearLayers());
-  pin.on('drag', () => trace());
-  pin.on('dragend', () => request(true));
-  pins.push(pin);
+  dropPin(event.latlng);
 
   if (pins.length === 1) {
     status.className = 'hint';
@@ -354,6 +365,45 @@ map.on('click', event => {
     request(true);
   }
 });
+
+// Everything that decides a query lives in the URL, so a result can be copied
+// and handed to someone else. `replaceState`, not `pushState`: dragging a pin
+// would otherwise fill the back button with a hundred near-identical steps.
+function syncUrl() {
+  const query = new URLSearchParams({
+    profile: document.getElementById('profile').value,
+    algorithm: document.getElementById('algorithm').value,
+  });
+  if (pins.length === 2) {
+    query.set('from', at(pins[0]));
+    query.set('to', at(pins[1]));
+  }
+  if (!document.getElementById('when').hidden) {
+    query.set('day', document.getElementById('day').value);
+    query.set('minute', document.getElementById('minute').value);
+  }
+  history.replaceState(null, '', '?' + query);
+}
+
+// And read back, so a pasted URL reproduces exactly what it recorded.
+function restoreFromUrl() {
+  const query = new URLSearchParams(location.search);
+  for (const id of ['profile', 'algorithm', 'day', 'minute']) {
+    const value = query.get(id);
+    if (value !== null) { document.getElementById(id).value = value; }
+  }
+  showWhen();
+  showClock();
+  const points = ['from', 'to']
+    .map(name => query.get(name))
+    .filter(Boolean)
+    .map(pair => L.latLng(...pair.split(',').map(Number)));
+  points.forEach(dropPin);
+  if (points.length) {
+    map.setView(points[0], points.length === 2 ? 14 : 16);
+  }
+  if (pins.length === 2) { request(true); }
+}
 
 const when = document.getElementById('when');
 const day = document.getElementById('day');
@@ -397,6 +447,9 @@ minute.addEventListener('change', () => {
   if (pins.length === 2) { request(true); }
 });
 
+// Last, because it drives everything above it.
+restoreFromUrl();
+
 // One request in flight at a time, with the last drag position remembered.
 // Leaflet fires `drag` on every mousemove, and queueing sixty of those a second
 // would make the route lag further behind the cursor the longer you dragged.
@@ -427,6 +480,7 @@ async function request(explore) {
     departing: departing()});
   if (!explore) { query.set('explore', '0'); }
 
+  syncUrl();
   const answer = await (await fetch('/route?' + query)).json();
   if (answer.error) {
     status.className = 'hint';
@@ -489,10 +543,22 @@ function humanise(seconds) {
 // reading. Otherwise the map looks the same at every hour and there is nothing
 // to tell you the clock was never consulted.
 function scheduleNote(answer) {
-  if (!answer.scheduled_edges || answer.reads_clock) { return ''; }
-  return `<br><span class="hint">${answer.scheduled_edges} edges here are ` +
-         `scheduled; this algorithm ignores them — pick ` +
-         `<b>Time-dependent Dijkstra</b> to route with the clock</span>`;
+  if (!answer.scheduled_edges) { return ''; }
+  if (!answer.reads_clock) {
+    return `<br><span class="hint">${answer.scheduled_edges} edges here are ` +
+           `scheduled; this algorithm ignores them — pick ` +
+           `<b>Time-dependent Dijkstra</b> to route with the clock</span>`;
+  }
+  // Reading the clock and still seeing no change is the confusing case, and it
+  // has an ordinary cause: this particular route never touches a scheduled
+  // edge, so there is nothing for the hour to change.
+  if (!answer.scheduled_legs) {
+    return `<br><span class="hint">none of this route is scheduled, so the ` +
+           `hour cannot change it (${answer.scheduled_edges} edges in this ` +
+           `profile are)</span>`;
+  }
+  return `<br><span class="hint"><b>${answer.scheduled_legs}</b> of ` +
+         `${answer.legs} legs are scheduled</span>`;
 }
 </script>
 """
