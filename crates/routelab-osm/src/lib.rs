@@ -17,12 +17,14 @@
 //! It is kept apart from `routelab-core`, which has no dependencies and should
 //! keep it that way — file formats are not kernels.
 
+pub mod conditional;
 pub mod network;
 pub mod profile;
 pub mod read;
 
 use std::path::Path;
 
+pub use conditional::{open_windows, Window, WEEK};
 pub use network::{haversine, GeometrySpan, NetworkBuilder, OsmNetwork, EARTH_RADIUS};
 pub use profile::{Profile, Travel, WayTags};
 pub use read::{Format, OsmError};
