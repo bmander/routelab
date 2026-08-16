@@ -143,9 +143,13 @@ class Board {
     this.viewport = host.querySelector('#viewport');
     this.dragging = null;
 
-    this.viewport.addEventListener('mousedown', event => this.onDown(event));
-    window.addEventListener('mousemove', event => this.onMove(event));
-    window.addEventListener('mouseup', event => this.onUp(event));
+    // Pointer events, not mouse events, so a finger drags a node or a wire
+    // exactly as a mouse does. A touch that the browser cancels — a scroll it
+    // decided to take, a second finger — ends the drag the way letting go does.
+    this.viewport.addEventListener('pointerdown', event => this.onDown(event));
+    window.addEventListener('pointermove', event => this.onMove(event));
+    window.addEventListener('pointerup', event => this.onUp(event));
+    window.addEventListener('pointercancel', event => this.onUp(event));
     this.viewport.addEventListener('wheel', event => this.onWheel(event), {passive: false});
   }
 
@@ -493,7 +497,7 @@ class Board {
     }
     input.addEventListener('change', () => { read(); this.onchange(true); });
     // Otherwise a click on a select starts dragging the node under it.
-    input.addEventListener('mousedown', event => event.stopPropagation());
+    input.addEventListener('pointerdown', event => event.stopPropagation());
     wrap.append(input);
     return wrap;
   }
@@ -529,7 +533,7 @@ class Board {
     const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     hit.setAttribute('d', d);
     hit.setAttribute('class', 'wire hit');
-    hit.addEventListener('mousedown', event => {
+    hit.addEventListener('pointerdown', event => {
       event.stopPropagation();
       this.links = this.links.filter(l => l !== link);
       this.draw();
@@ -568,6 +572,7 @@ class Board {
   }
 
   onDown(event) {
+    if (event.button !== undefined && event.button !== 0) { return; }
     const port = event.target.closest('.port');
     if (port) {
       event.preventDefault();
@@ -636,7 +641,10 @@ class Board {
     this.highlight(null);
 
     if (drag.what === 'wire') {
-      const port = event.target.closest('.port');
+      // Whatever is under the pointer now — not `event.target`, which for a
+      // touch is still the socket the drag began on.
+      const under = document.elementFromPoint(event.clientX, event.clientY);
+      const port = under && under.closest('.port');
       let landed = false;
       if (port && port.dataset.direction !== drag.origin.direction) {
         const [source, target] = drag.origin.direction === 'out'

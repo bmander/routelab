@@ -232,7 +232,7 @@ document.getElementById('add').addEventListener('click', event => {
   menu.style.top = (anchor.bottom - board_box.top + 4) + 'px';
   menu.hidden = false;
 });
-document.addEventListener('mousedown', event => {
+document.addEventListener('pointerdown', event => {
   if (!menu.hidden && !menu.contains(event.target)) { menu.hidden = true; }
 });
 
@@ -263,7 +263,7 @@ presets.addEventListener('change', () => {
 // A node is deleted with the keyboard, the way it is in every editor that has
 // nodes. Selection is the last node whose header was pressed.
 let selected = null;
-document.getElementById('nodes').addEventListener('mousedown', event => {
+document.getElementById('nodes').addEventListener('pointerdown', event => {
   const node = event.target.closest('.node');
   document.querySelectorAll('.node.selected').forEach(n => n.classList.remove('selected'));
   selected = node ? node.dataset.id : null;
@@ -280,7 +280,7 @@ window.addEventListener('keydown', event => {
 // --- resizing the board ------------------------------------------------
 
 const grip = document.getElementById('grip');
-grip.addEventListener('mousedown', event => {
+grip.addEventListener('pointerdown', event => {
   event.preventDefault();
   const panel = document.getElementById('board');
   const start = event.clientY, height = panel.getBoundingClientRect().height;
@@ -291,12 +291,30 @@ grip.addEventListener('mousedown', event => {
     map.invalidateSize();
   };
   const stop = () => {
-    window.removeEventListener('mousemove', move);
-    window.removeEventListener('mouseup', stop);
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', stop);
+    window.removeEventListener('pointercancel', stop);
   };
-  window.addEventListener('mousemove', move);
-  window.addEventListener('mouseup', stop);
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', stop);
+  window.addEventListener('pointercancel', stop);
 });
+
+// --- the drawer --------------------------------------------------------
+
+// The board folds down to its toolbar. On a phone that is how it starts: the
+// map gets the screen, and the graph is a tap away — the same graph, wired the
+// same way, only put out of sight. Nothing about the query changes when it
+// folds; a folded board still *is* the query.
+const drawer = document.getElementById('drawer');
+function setCollapsed(collapsed) {
+  document.body.classList.toggle('collapsed', collapsed);
+  drawer.textContent = collapsed ? '\u25B2' : '\u25BC';
+  drawer.setAttribute('aria-expanded', String(!collapsed));
+  map.invalidateSize();
+}
+drawer.addEventListener('click', () => setCollapsed(!document.body.classList.contains('collapsed')));
+setCollapsed(window.matchMedia('(max-width: 720px)').matches);
 
 // --- URL state ---------------------------------------------------------
 

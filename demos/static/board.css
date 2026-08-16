@@ -10,7 +10,7 @@ body { display: flex; flex-direction: column; }
 
 #readout {
   position: absolute; top: 12px; left: 12px; z-index: 1000;
-  width: 300px; box-sizing: border-box;
+  width: 300px; max-width: calc(100% - 24px); box-sizing: border-box;
   background: #fff; padding: 10px 12px; border-radius: 6px;
   box-shadow: 0 1px 6px rgba(0,0,0,.3); line-height: 1.5; color: #333;
 }
@@ -18,10 +18,21 @@ body { display: flex; flex-direction: column; }
 #readout.hint, .hint { color: #777; font-size: 12px; }
 
 #grip {
-  flex: 0 0 6px; background: #d6d9de; cursor: ns-resize;
+  flex: 0 0 6px; background: #d6d9de; cursor: ns-resize; touch-action: none;
   border-top: 1px solid #b9bec6;
 }
 #grip:hover { background: #9aa1ab; }
+
+/* --- the drawer ----------------------------------------------------- */
+
+/* The board is a drawer: collapsed, only its toolbar shows, and the map has
+   the screen. On a phone that is the resting state — a graph editor and a
+   map do not both fit above the fold — and the toolbar's first button pulls
+   it open. The grip goes with it; there is nothing to resize. */
+body.collapsed #board { flex-basis: var(--toolbar-height) !important; }
+body.collapsed #grip { display: none; }
+#drawer { min-width: 28px; }
+:root { --toolbar-height: 30px; }
 
 /* --- the board ------------------------------------------------------ */
 
@@ -36,7 +47,8 @@ body { display: flex; flex-direction: column; }
 #toolbar {
   position: absolute; top: 0; left: 0; right: 0; z-index: 3;
   display: flex; align-items: center; gap: 12px;
-  padding: 6px 10px; background: rgba(28,31,35,.92);
+  height: var(--toolbar-height); box-sizing: border-box;
+  padding: 0 10px; background: rgba(28,31,35,.92);
   border-bottom: 1px solid #3a3f46; font-size: 12px;
 }
 #toolbar .grow { flex: 1; }
@@ -51,7 +63,10 @@ body { display: flex; flex-direction: column; }
   border: 1px solid #4a505a; border-radius: 4px; padding: 3px 6px;
 }
 
-#viewport { position: absolute; inset: 0; top: 29px; overflow: hidden; cursor: grab; }
+#viewport {
+  position: absolute; inset: 0; top: var(--toolbar-height); overflow: hidden; cursor: grab;
+  touch-action: none;   /* a finger on the board pans the board, not the page */
+}
 #viewport.panning { cursor: grabbing; }
 
 /* Wires and nodes share one transform, so they stay together under pan and
@@ -174,3 +189,15 @@ body { display: flex; flex-direction: column; }
 .pin { border-radius: 50%; background: #fff; border: 2px solid #1d3557;
        box-sizing: border-box; cursor: grab; }
 .leaflet-drag-target .pin { cursor: grabbing; }
+
+/* --- small screens ---------------------------------------------------- */
+
+@media (max-width: 720px) {
+  #toolbar { gap: 8px; padding: 0 6px; }
+  #toolbar .hint { display: none; }          /* mouse instructions, on a phone */
+  #toolbar button, #toolbar select { padding: 5px 8px; }   /* finger-sized */
+  #readout { top: 8px; left: 8px; font-size: 13px; }
+  /* Open, the drawer takes most of the screen: the nodes are the same size as
+     on a desk and half a phone is not enough of them to wire anything. */
+  body:not(.collapsed) #board { flex-basis: 70vh; }
+}

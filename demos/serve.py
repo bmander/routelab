@@ -55,6 +55,10 @@ spread exactly as far as the rebuild does and no further — swap the ordering
 under a hierarchy and the hierarchy waits, while the extract it was built from
 does not. A change that costs nothing shows nothing.
 
+The board is a drawer: the first button on its toolbar folds it down to the
+toolbar and back, and on a phone it starts folded, the map having the screen.
+Nodes, wires and the grip answer to a finger as they do to a mouse.
+
 Nothing here is a production server: it is the standard library's `http.server`,
 bound to localhost, with no cache and no rate limiting. It is a way to look at
 what the algorithms do.

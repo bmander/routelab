@@ -1,5 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>routelab</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="/static/board.css">
@@ -13,6 +14,7 @@
 
 <div id="board">
   <div id="toolbar">
+    <button id="drawer" title="show or hide the board" aria-expanded="true">&#9660;</button>
     <b>node board</b>
     <span class="hint">drag a port to a port &middot; click a wire to cut it &middot;
       drag the background to pan &middot; scroll to zoom</span>
