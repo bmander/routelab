@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Hashable, Iterator, List, NamedTuple, Optional, Tuple
 
-from . import _routelab
+from .. import _routelab
 from .environment import CompiledEnvironment, EdgeSource, shape_of
 from .search import EdgeResult
 

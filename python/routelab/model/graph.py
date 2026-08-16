@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Optional
 
-from . import _routelab
+from .. import _routelab
 
 __all__ = ["Graph"]
 

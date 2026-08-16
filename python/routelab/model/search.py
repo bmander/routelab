@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import List, Optional, Protocol, runtime_checkable
 
-from . import _routelab
-from ._args import Nodes, Sources, normalize_nodes, normalize_sources
-from ._routelab import SearchResult
+from .. import _routelab
+from ..util._args import Nodes, Sources, normalize_nodes, normalize_sources
+from .._routelab import SearchResult
 
 __all__ = ["EdgeResult", "Result", "SearchResult", "astar", "bfs", "dijkstra"]
 

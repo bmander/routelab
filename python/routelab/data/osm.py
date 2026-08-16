@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, replace
 from typing import Hashable, Iterable, Iterator, List, Mapping, Optional, Tuple
 
 from .. import _routelab
-from ..environment import EdgeSource, LabelledEdge
+from ..model.environment import EdgeSource, LabelledEdge
 
 __all__ = ["OSM", "Cycling", "Driving", "Profile", "Walking"]
 

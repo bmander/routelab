@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Iterator, List, Optional, Tuple
 
 from . import _routelab
-from .environment import CompiledEnvironment, EdgeSource
+from .model.environment import CompiledEnvironment, EdgeSource
 
 __all__ = ["Schedule"]
 

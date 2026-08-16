@@ -26,21 +26,21 @@ benchmark an algorithm.
 
 from __future__ import annotations
 
-from . import _routelab, heuristics, orderings, planners, reference, sources
-from ._args import Nodes, Sources
+from . import _routelab, data, heuristics, orderings, planners, reference
+from .util._args import Nodes, Sources
 from .departures import Departures, Walks
-from .environment import (
+from .model.environment import (
     CompiledEnvironment,
     EdgeSource,
     Environment,
     Positions,
     ScalarEdges,
 )
-from .graph import Graph
+from .model.graph import Graph
 from .heuristics import Euclidean, Heuristic, Landmarks, Pace, Plane, Zero
-from .journey import Journey, Leg
+from .model.journey import Journey, Leg
 from .orderings import EdgeDifference, Ordering, RandomOrder
-from .clock import WEEK, service_seconds, weekly_seconds
+from .util.clock import WEEK, service_seconds, weekly_seconds
 from .schedule import Schedule
 from .planners import (
     BFS,
@@ -56,8 +56,8 @@ from .planners import (
     clock_readers,
     route,
 )
-from .search import EdgeResult, Result, SearchResult, astar, bfs, dijkstra
-from .searchspace import (
+from .model.search import EdgeResult, Result, SearchResult, astar, bfs, dijkstra
+from .model.searchspace import (
     Branch,
     Leap,
     MeetingTrees,
@@ -66,7 +66,7 @@ from .searchspace import (
     SearchSpace,
     ShortestPathTree,
 )
-from .sources import GTFS, OSM, Cycling, Driving, Footpaths, Profile, Walking
+from .data import GTFS, OSM, Cycling, Driving, Footpaths, Profile, Walking
 
 __all__ = [
     "AStar",
@@ -120,7 +120,7 @@ __all__ = [
     "orderings",
     "reference",
     "route",
-    "sources",
+    "data",
     "weekly_seconds",
     "RAPTOR",
     "TimetablePlanner",

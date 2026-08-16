@@ -21,7 +21,7 @@ import heapq
 from collections import deque
 from typing import Any, Callable, List, Optional, Sequence
 
-from ._args import Nodes, Sources, normalize_nodes, normalize_sources
+from .util._args import Nodes, Sources, normalize_nodes, normalize_sources
 
 __all__ = ["ReferenceResult", "astar", "bfs", "dijkstra"]
 

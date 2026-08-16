@@ -33,15 +33,15 @@ import copy
 from typing import Any, Dict, Hashable, Iterable, List, Mapping, Optional, Tuple, Union
 
 from . import _routelab
-from .clock import service_seconds, weekly_seconds
+from .util.clock import service_seconds, weekly_seconds
 from .departures import Departures, Walks
-from .environment import CompiledEnvironment, Environment
+from .model.environment import CompiledEnvironment, Environment
 from .heuristics import Heuristic
 from .schedule import Schedule
-from .journey import Journey
+from .model.journey import Journey
 from .orderings import EdgeDifference, Ordering
-from .search import Result, SearchResult, astar, bfs, dijkstra
-from .searchspace import MeetingTrees, Rounds, SearchSpace, ShortestPathTree
+from .model.search import Result, SearchResult, astar, bfs, dijkstra
+from .model.searchspace import MeetingTrees, Rounds, SearchSpace, ShortestPathTree
 
 __all__ = [
     "AStar",

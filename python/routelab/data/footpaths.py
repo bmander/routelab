@@ -30,7 +30,7 @@ from collections import defaultdict
 from typing import Dict, Hashable, Iterator, List, Mapping, Optional, Tuple
 
 from .. import _routelab
-from ..environment import EdgeSource, LabelledEdge
+from ..model.environment import EdgeSource, LabelledEdge
 
 __all__ = ["Footpaths"]
 

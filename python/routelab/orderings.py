@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Optional
 
 from . import _routelab
-from .environment import CompiledEnvironment
+from .model.environment import CompiledEnvironment
 
 __all__ = ["EdgeDifference", "Ordering", "RandomOrder"]
 

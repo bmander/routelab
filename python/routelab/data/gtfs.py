@@ -31,7 +31,7 @@ import os
 from typing import Dict, Hashable, Iterable, Iterator, List, Mapping, Optional, Tuple
 
 from .. import _routelab
-from ..environment import EdgeSource, LabelledEdge
+from ..model.environment import EdgeSource, LabelledEdge
 
 __all__ = ["GTFS"]
 
