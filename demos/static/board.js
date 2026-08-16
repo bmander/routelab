@@ -38,6 +38,13 @@ const LOOKS = {
     fields: [{id: '_date', label: 'service day', type: 'note',
               text: () => SETUP.date}],
   },
+  Footpaths: {
+    title: 'Footpaths', group: 'layers',
+    sub: () => 'walks between stops',
+    available: () => Boolean(SETUP.feed),
+    fields: [{id: 'within', label: 'within (m)', type: 'number',
+              value: 200, min: 10, max: 2000}],
+  },
   Environment: {title: 'Environment', group: 'environment'},
   Euclidean: {title: 'Euclidean', group: 'heuristics'},
   Landmarks: {
@@ -161,9 +168,11 @@ class Board {
   connect(from, fromPort, to, toPort) {
     if (!this.compatible(from, fromPort, to, toPort)) { return false; }
     // One wire per socket, except a bag of layers: an `Environment` takes as
-    // many as you give it, and everything else takes one argument. Even then a
-    // second wire from the same source replaces rather than duplicates.
-    const many = TYPES[this.nodes.get(to).type].inputs[toPort] === 'layer';
+    // many as you give it, and everything else takes one argument — including
+    // a layer that takes a layer, like `Footpaths`. Even then a second wire
+    // from the same source replaces rather than duplicates.
+    const target = TYPES[this.nodes.get(to).type];
+    const many = target.kind === 'environment' && target.inputs[toPort] === 'layer';
     this.links = this.links.filter(l =>
       !(l.to === to && l.toPort === toPort && (!many || l.from === from)));
     this.links.push({from, fromPort, to, toPort});

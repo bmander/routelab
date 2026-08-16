@@ -17,6 +17,14 @@
 //!   traversing one means finding the next departure, so the search has to be
 //!   written for it.
 //!
+//! Both read the same optional third thing: [`Footpaths`], the paper's
+//! *foot-edges* — a link between two stops a rider can take at any time for a
+//! fixed duration, which is what lets a real feed's northbound and southbound
+//! stops across a street be the same place for the purpose of changing buses.
+//! Without them a city timetable is routable only between stops a single trip
+//! chain connects, and a query dropped at the wrong side of the street has no
+//! answer.
+//!
 //! Both answer with the same verb — `earliest_arrival` — because comparing them
 //! is the point. The two must agree on every query; that is the paper's thesis
 //! and it is also this module's main test, since neither model is the reference
@@ -49,7 +57,8 @@ mod tests;
 pub use dependent::earliest_arrival;
 pub use expanded::TimeExpanded;
 
-use crate::graph::{EdgeId, Graph, NodeId};
+use crate::graph::{Graph, NodeId, Weight};
+use crate::search::SearchOptions;
 
 /// A moment, in seconds since the service day's midnight.
 ///
@@ -79,6 +88,268 @@ pub struct Connection {
 /// same five facts a [`Connection`] carries — the name is the difference, and
 /// the name is worth having at a call site.
 pub type Ride = Connection;
+
+/// A stretch of an itinerary made on foot, between two stops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Walk {
+    pub from: NodeId,
+    pub to: NodeId,
+    pub departs: Time,
+    pub arrives: Time,
+}
+
+/// One stretch of an itinerary: aboard something, or on foot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Leg {
+    Ride(Ride),
+    Walk(Walk),
+}
+
+impl Leg {
+    pub fn from(&self) -> NodeId {
+        match self {
+            Leg::Ride(ride) => ride.from,
+            Leg::Walk(walk) => walk.from,
+        }
+    }
+
+    pub fn to(&self) -> NodeId {
+        match self {
+            Leg::Ride(ride) => ride.to,
+            Leg::Walk(walk) => walk.to,
+        }
+    }
+
+    pub fn departs(&self) -> Time {
+        match self {
+            Leg::Ride(ride) => ride.departs,
+            Leg::Walk(walk) => walk.departs,
+        }
+    }
+
+    pub fn arrives(&self) -> Time {
+        match self {
+            Leg::Ride(ride) => ride.arrives,
+            Leg::Walk(walk) => walk.arrives,
+        }
+    }
+
+    /// The vehicle run, for a leg that rides one.
+    pub fn trip(&self) -> Option<u32> {
+        match self {
+            Leg::Ride(ride) => Some(ride.trip),
+            Leg::Walk(_) => None,
+        }
+    }
+}
+
+/// Stop-to-stop links a rider may take on foot at any time, for a fixed duration.
+///
+/// The paper's *foot-edges*. Kept apart from the [`Timetable`] because they are
+/// not connections — nothing leaves, they are simply always open — and because
+/// which of them exist is a modelling choice (how far will a rider walk?)
+/// rather than a fact the feed states. Both models take them as a separate
+/// argument, and [`Footpaths::none`] is the paper's plain model.
+///
+/// **Closed under composition.** If you can walk A→B and B→C, then A→C is a
+/// footpath too, taking the shorter of the direct walk and the sum. That is
+/// not a convenience: the time-dependent search chains walks on its own —
+/// nothing stops it relaxing a footpath from a stop it walked to — while the
+/// time-expanded graph must not, or a pair of opposite footpaths would spawn
+/// events for ever. Closing the set is what lets one model take a walk one hop
+/// at a time and the other take it in one, and still agree on every query.
+/// It is also what the RAPTOR family requires of its footpaths, for the same
+/// reason. The cost is that "stops within 200 m" quietly becomes "stops
+/// reachable by 200 m hops"; on a real feed those components are small.
+///
+/// A closed link remembers the last stop it came through, so a walk taken in
+/// one can still be told as the hops it was made of — see [`Footpaths::hops`].
+/// An answer names the links that were given, never one the closure invented.
+///
+/// Stored CSR-style by origin stop, which is the shape both models read them
+/// in: from a stop I am standing at, where can I walk and how long does it take.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Footpaths {
+    /// Offsets into `links`, one per stop plus a tail.
+    stop_links: Vec<u32>,
+    /// `(to, duration, via)`, grouped by origin stop: `via` is the stop before
+    /// `to` on the shortest chain from the origin, and the origin itself for a
+    /// link that was given directly.
+    links: Vec<(NodeId, Time, NodeId)>,
+}
+
+impl Footpaths {
+    /// No footpaths at all: every stop is its own island, as in the paper's
+    /// plain model.
+    pub fn none() -> Self {
+        Footpaths::default()
+    }
+
+    /// Build from `(from, to, duration)` triples in any order.
+    ///
+    /// Links whose stops fall outside `stops` are dropped. Both directions are
+    /// the caller's business: a walk that only goes one way is unusual but
+    /// not impossible (a one-way turnstile), so nothing is mirrored here.
+    pub fn new(stops: usize, links: impl IntoIterator<Item = (NodeId, NodeId, Time)>) -> Self {
+        let given: Vec<(NodeId, NodeId, Weight)> = links
+            .into_iter()
+            .filter(|(from, to, _)| {
+                (*from as usize) < stops && (*to as usize) < stops && from != to
+            })
+            .collect();
+        let mut links = Self::closure(stops, &given);
+        links.sort_unstable();
+        let mut stop_links = vec![0u32; stops + 1];
+        for (from, _, _, _) in &links {
+            stop_links[*from as usize + 1] += 1;
+        }
+        for stop in 0..stops {
+            stop_links[stop + 1] += stop_links[stop];
+        }
+        Footpaths {
+            stop_links,
+            links: links
+                .into_iter()
+                .map(|(_, to, duration, via)| (to, duration, via))
+                .collect(),
+        }
+    }
+
+    /// Every walk reachable by chaining `given`, at its shortest duration, as
+    /// `(from, to, duration, via)`.
+    ///
+    /// The links are a graph, so this is [`crate::dijkstra`] from each stop
+    /// that has one, and `via` is the search's own parent pointer. The
+    /// footpath graph is a scatter of small components — a street corner, a
+    /// transit centre — so this is cheap; it is not, and need not be, an
+    /// all-pairs pass over the network.
+    fn closure(stops: usize, given: &[(NodeId, NodeId, Weight)]) -> Vec<(NodeId, NodeId, Time, NodeId)> {
+        let graph = Graph::from_edges(stops, given).expect("links were filtered to the stop set");
+        let mut closed = Vec::new();
+        for origin in 0..stops as NodeId {
+            if graph.out_edges(origin).next().is_none() {
+                continue;
+            }
+            let Ok(reached) = crate::dijkstra::dijkstra(&graph, &[(origin, 0)], &SearchOptions::default())
+            else {
+                continue;
+            };
+            for &stop in &reached.order {
+                if stop == origin {
+                    continue;
+                }
+                let (Some(duration), Some(via)) = (reached.cost(stop), reached.parent(stop)) else {
+                    continue;
+                };
+                closed.push((origin, stop, duration, via));
+            }
+        }
+        closed
+    }
+
+    /// Build from **positions in a graph's input edge list**: each named edge
+    /// becomes a footpath between its endpoints taking its weight.
+    ///
+    /// The join between an environment and the models, in one place, and by
+    /// input position for the reason [`Timetable::from_input_connections`]
+    /// gives — `Graph` permutes edges into CSR order, and whatever produced
+    /// the edges holds input positions.
+    pub fn from_input_edges(graph: &Graph, positions: impl IntoIterator<Item = u32>) -> Self {
+        let to_edge = graph.edges_by_input();
+        let links = positions
+            .into_iter()
+            .filter(|input| (*input as usize) < to_edge.len())
+            .map(|input| graph.edge(to_edge[input as usize]));
+        Footpaths::new(graph.num_nodes(), links)
+    }
+
+    /// Where you can walk from `stop`, as `(to, duration)`.
+    pub fn from(&self, stop: NodeId) -> impl Iterator<Item = (NodeId, Time)> + '_ {
+        self.links_from(stop).iter().map(|&(to, duration, _)| (to, duration))
+    }
+
+    fn links_from(&self, stop: NodeId) -> &[(NodeId, Time, NodeId)] {
+        let stop = stop as usize;
+        if stop + 1 < self.stop_links.len() {
+            &self.links[self.stop_links[stop] as usize..self.stop_links[stop + 1] as usize]
+        } else {
+            &[]
+        }
+    }
+
+    fn link(&self, from: NodeId, to: NodeId) -> Option<(Time, NodeId)> {
+        self.links_from(from)
+            .iter()
+            .find(|(next, _, _)| *next == to)
+            .map(|&(_, duration, via)| (duration, via))
+    }
+
+    /// How long the walk from `from` to `to` takes, if there is one.
+    pub fn duration(&self, from: NodeId, to: NodeId) -> Option<Time> {
+        self.link(from, to).map(|(duration, _)| duration)
+    }
+
+    /// Was the walk from `from` to `to` given directly, rather than made by
+    /// the closure?
+    pub fn is_given(&self, from: NodeId, to: NodeId) -> bool {
+        self.link(from, to).is_some_and(|(_, via)| via == from)
+    }
+
+    /// The walk from `from` to `to` as the given links it chains, in order,
+    /// each as `(from, to, duration)`. Empty if there is no such walk.
+    pub fn hops(&self, from: NodeId, to: NodeId) -> Vec<(NodeId, NodeId, Time)> {
+        let mut hops = Vec::new();
+        let mut here = to;
+        while here != from {
+            let Some((walked, via)) = self.link(from, here) else {
+                return Vec::new();
+            };
+            let before = if via == from { 0 } else { self.duration(from, via).unwrap_or(0) };
+            hops.push((via, here, walked - before));
+            here = via;
+        }
+        hops.reverse();
+        hops
+    }
+
+    /// `walk`, told as the given links it chains: one [`Walk`] per hop, with
+    /// the clock advanced along them. A walk that was given directly is one
+    /// hop and comes back as it was.
+    pub fn expand(&self, walk: Walk) -> Vec<Walk> {
+        let mut clock = walk.departs;
+        let hops = self.hops(walk.from, walk.to);
+        if hops.is_empty() {
+            return vec![walk];
+        }
+        hops.into_iter()
+            .map(|(from, to, duration)| {
+                let departs = clock;
+                clock = clock.saturating_add(duration);
+                Walk {
+                    from,
+                    to,
+                    departs,
+                    arrives: clock,
+                }
+            })
+            .collect()
+    }
+
+    /// How many links there are.
+    pub fn len(&self) -> usize {
+        self.links.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.links.is_empty()
+    }
+
+    /// Bytes held, as every other preprocessed structure here reports it.
+    pub fn footprint(&self) -> usize {
+        self.stop_links.len() * std::mem::size_of::<u32>()
+            + self.links.len() * std::mem::size_of::<(NodeId, Time, NodeId)>()
+    }
+}
 
 /// How long changing vehicles takes at a stop.
 ///
@@ -205,10 +476,7 @@ impl Timetable {
         graph: &Graph,
         entries: impl IntoIterator<Item = (u32, Vec<(u32, Time, Time)>)>,
     ) -> Self {
-        let mut to_edge = vec![0u32; graph.num_edges()];
-        for edge in 0..graph.num_edges() as EdgeId {
-            to_edge[graph.input_index(edge) as usize] = edge;
-        }
+        let to_edge = graph.edges_by_input();
         let connections = entries
             .into_iter()
             .filter(|(input, _)| (*input as usize) < to_edge.len())
@@ -282,13 +550,14 @@ impl Timetable {
     }
 }
 
-/// When you get there, what you rode, and what it took to work out.
+/// When you get there, what you rode and walked, and what it took to work out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Itinerary {
     /// Absolute arrival time at the target.
     pub arrives: Time,
-    /// The connections ridden, in order.
-    pub rides: Vec<Ride>,
+    /// The stretches of the journey, in order: each a vehicle ridden or a
+    /// footpath walked.
+    pub legs: Vec<Leg>,
     /// Nodes the search settled reaching this — stops for one model, events for
     /// the other. Carried on the answer because it is the number the two models
     /// are actually being compared on, and a caller that has the itinerary
@@ -297,41 +566,81 @@ pub struct Itinerary {
 }
 
 impl Itinerary {
-    /// How many times you changed vehicles — zero for a journey you never got
-    /// off, and one less than the number of distinct trips ridden.
-    pub fn transfers(&self) -> usize {
-        self.rides
-            .windows(2)
-            .filter(|pair| pair[0].trip != pair[1].trip)
-            .count()
+    /// The vehicles ridden, in order, with the walks between them left out.
+    pub fn rides(&self) -> impl Iterator<Item = &Ride> + '_ {
+        self.legs.iter().filter_map(|leg| match leg {
+            Leg::Ride(ride) => Some(ride),
+            Leg::Walk(_) => None,
+        })
     }
 
-    /// Is this a legal itinerary under `transfer`?
+    /// The footpaths walked, in order.
+    pub fn walks(&self) -> impl Iterator<Item = &Walk> + '_ {
+        self.legs.iter().filter_map(|leg| match leg {
+            Leg::Walk(walk) => Some(walk),
+            Leg::Ride(_) => None,
+        })
+    }
+
+    /// How many times you changed vehicles — zero for a journey you never got
+    /// off, and one less than the number of distinct trips ridden. A walk
+    /// between two vehicles is how a change is made, not a second one.
+    pub fn transfers(&self) -> usize {
+        let trips: Vec<u32> = self.rides().map(|ride| ride.trip).collect();
+        trips.windows(2).filter(|pair| pair[0] != pair[1]).count()
+    }
+
+    /// Is this a legal itinerary under `transfer`, walking only `footpaths`?
     ///
     /// The falsifiability check, in the manner of [`crate::graph::Graph::walk`]:
-    /// every ride must start where the last one ended, no earlier than it
-    /// arrived, and leave enough time to change when the vehicle changes.
-    pub fn is_valid(&self, from: NodeId, at: Time, transfer: Transfer) -> bool {
+    /// every leg must start where the last one ended, no earlier than it
+    /// arrived; a ride must leave enough time to change when the vehicle
+    /// changes; a walk must be a footpath that exists and take exactly as long
+    /// as it says.
+    pub fn is_valid(
+        &self,
+        from: NodeId,
+        at: Time,
+        transfer: Transfer,
+        footpaths: &Footpaths,
+    ) -> bool {
         let mut here = from;
         let mut now = at;
         let mut aboard: Option<u32> = None;
-        for ride in &self.rides {
-            if ride.from != here || ride.arrives < ride.departs {
+        for leg in &self.legs {
+            if leg.from() != here || leg.arrives() < leg.departs() || leg.departs() < now {
                 return false;
             }
-            let ready = match aboard {
-                // Getting on for the first time is not a change, and neither is
-                // staying in your seat.
-                None => now,
-                Some(trip) if trip == ride.trip => now,
-                _ => now.saturating_add(transfer.minimum()),
-            };
-            if ride.departs < ready {
-                return false;
+            match leg {
+                Leg::Ride(ride) => {
+                    let ready = match aboard {
+                        // Getting on for the first time is not a change, and
+                        // neither is staying in your seat.
+                        None => now,
+                        Some(trip) if trip == ride.trip => now,
+                        _ => now.saturating_add(transfer.minimum()),
+                    };
+                    if ride.departs < ready {
+                        return false;
+                    }
+                    aboard = Some(ride.trip);
+                }
+                Leg::Walk(walk) => {
+                    // A given link, not one the closure invented: an answer
+                    // says which footpaths were walked, hop by hop.
+                    if !footpaths.is_given(walk.from, walk.to)
+                        || footpaths.duration(walk.from, walk.to) != Some(walk.arrives - walk.departs)
+                    {
+                        return false;
+                    }
+                    // Off the vehicle: the next boarding is a change whatever
+                    // trip it is, but a change made on foot is already timed
+                    // by the walk itself.
+                    aboard = None;
+                }
             }
-            here = ride.to;
-            now = ride.arrives;
-            aboard = Some(ride.trip);
+            here = leg.to();
+            now = leg.arrives();
         }
         now == self.arrives
     }

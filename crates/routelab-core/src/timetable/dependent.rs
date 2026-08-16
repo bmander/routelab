@@ -11,6 +11,15 @@
 //! correct for the same reason the static case is: arrival is non-decreasing in
 //! departure, so a stop reached earliest is reached best.
 //!
+//! ## Footpaths
+//!
+//! A footpath is the one kind of edge here that *is* a weight: from a stop I
+//! am standing at, I can be at the other end after a fixed walk, whatever the
+//! clock says. So it relaxes exactly as a static edge would, and because it is
+//! relaxed from any settled stop, a walk can follow a walk — the search chains
+//! footpaths as far as they go, which is what the time-expanded model must
+//! also do for the two to keep agreeing.
+//!
 //! ## Why there is no minimum change time
 //!
 //! It is not expressible with one label per stop. Staying in your seat is not a
@@ -30,15 +39,17 @@ use std::collections::BinaryHeap;
 
 use crate::graph::{NodeId, UNREACHABLE};
 
-use super::{Itinerary, Ride, Time, Timetable, Transfer};
+use super::{Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk};
 
-/// Earliest arrival at `to`, leaving `from` no earlier than `at`.
+/// Earliest arrival at `to`, leaving `from` no earlier than `at`, riding
+/// `timetable` and walking `footpaths`.
 pub fn earliest_arrival(
     timetable: &Timetable,
     from: NodeId,
     at: Time,
     to: NodeId,
     _transfer: Transfer,
+    footpaths: &Footpaths,
 ) -> Option<Itinerary> {
     let stops = timetable.num_stops();
     if from as usize >= stops || to as usize >= stops {
@@ -47,7 +58,7 @@ pub fn earliest_arrival(
     if from == to {
         return Some(Itinerary {
             arrives: at,
-            rides: Vec::new(),
+            legs: Vec::new(),
             settled: 0,
         });
     }
@@ -55,7 +66,7 @@ pub fn earliest_arrival(
     // The clock reading at each stop, and how we got there. Absolute times, so
     // the queue orders by arrival and the answer needs no conversion.
     let mut earliest = vec![UNREACHABLE; stops];
-    let mut arrived_by: Vec<Option<Ride>> = vec![None; stops];
+    let mut arrived_by: Vec<Option<Leg>> = vec![None; stops];
     earliest[from as usize] = at;
 
     let mut settled = 0;
@@ -84,8 +95,23 @@ pub fn earliest_arrival(
             let connection = timetable.soonest_from(first + boarding);
             if connection.arrives < earliest[next as usize] {
                 earliest[next as usize] = connection.arrives;
-                arrived_by[next as usize] = Some(connection);
+                arrived_by[next as usize] = Some(Leg::Ride(connection));
                 queue.push(Reverse((connection.arrives, next)));
+            }
+        }
+        // The static case, for the edges that have a weight after all: a walk
+        // starts the moment you are standing here.
+        for (next, duration) in footpaths.from(stop) {
+            let arrives = now.saturating_add(duration);
+            if arrives < earliest[next as usize] {
+                earliest[next as usize] = arrives;
+                arrived_by[next as usize] = Some(Leg::Walk(Walk {
+                    from: stop,
+                    to: next,
+                    departs: now,
+                    arrives,
+                }));
+                queue.push(Reverse((arrives, next)));
             }
         }
     }
@@ -95,18 +121,22 @@ pub fn earliest_arrival(
         return None;
     }
 
-    // Walk the rides back to the origin.
-    let mut rides = Vec::new();
+    // Walk the legs back to the origin. A walk the closure made in one is
+    // told as the given links it chains, so the answer names real footpaths.
+    let mut legs = Vec::new();
     let mut here = to;
     while here != from {
-        let ride = arrived_by[here as usize]?;
-        rides.push(ride);
-        here = ride.from;
+        let leg = arrived_by[here as usize]?;
+        match leg {
+            Leg::Walk(walk) => legs.extend(footpaths.expand(walk).into_iter().rev().map(Leg::Walk)),
+            ride => legs.push(ride),
+        }
+        here = leg.from();
     }
-    rides.reverse();
+    legs.reverse();
     Some(Itinerary {
         arrives,
-        rides,
+        legs,
         settled,
     })
 }

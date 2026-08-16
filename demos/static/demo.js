@@ -22,6 +22,8 @@ const readout = document.getElementById('readout');
 // endpoint moves, so it is cleared for the duration and drawn again at the end.
 const space = L.layerGroup().addTo(map);
 const route = L.layerGroup().addTo(map);
+// One per vehicle boarded, cycled: the point is that consecutive rides differ.
+const LEG_COLOURS = ['#d1495b', '#1d7fbf', '#e09f3e', '#4f9d69', '#8e5ea2'];
 const PIN = L.divIcon({className: 'pin', iconSize: [14, 14], iconAnchor: [7, 7]});
 let pins = [];
 
@@ -109,12 +111,16 @@ const PRESETS = [
     id: 'transit-dependent',
     label: 'Transit · time-dependent',
     layer: ['GTFS', {}],
+    // A second layer, made from the first: walks between nearby stops.
+    // Without them a feed's two sides of a street are different places.
+    walks: ['Footpaths', {within: 200}],
     technique: ['TimeDependent', {}],
   },
   {
     id: 'transit-expanded',
     label: 'Transit · time-expanded',
     layer: ['GTFS', {}],
+    walks: ['Footpaths', {within: 200}],
     technique: ['TimeExpanded', {}],
   },
 ];
@@ -154,6 +160,14 @@ function load(preset) {
     spec.nodes.push({id: 'config', type, x: 232, y: 148, params});
     spec.links.push({from: 'config', fromPort: out(type), to: 'technique', toPort: port});
   }
+  if (preset.walks) {
+    // A layer fed by the layer: the feed's stops in, walks between them out,
+    // and both plugged into the environment.
+    const [type, params] = preset.walks;
+    spec.nodes.push({id: 'walks', type, x: 232, y: 148, params});
+    spec.links.push({from: 'layer', fromPort: out(layer), to: 'walks', toPort: 'stops'});
+    spec.links.push({from: 'walks', fromPort: out(type), to: 'env', toPort: 'layers'});
+  }
   board.load(spec);
 }
 
@@ -163,7 +177,8 @@ function load(preset) {
  * a preset cannot claim to work when a node it needs is greyed out.
  */
 function available(preset) {
-  return [preset.layer[0], preset.technique[0], preset.config && preset.config[1]]
+  return [preset.layer[0], preset.technique[0], preset.config && preset.config[1],
+          preset.walks && preset.walks[0]]
     .filter(Boolean)
     .every(type => !TYPES[type].available || TYPES[type].available());
 }
@@ -532,7 +547,18 @@ async function request(explore) {
   // and the readout still reports what the search cost, because the query was
   // asked either way.
   route.clearLayers();
-  if (answer.drawn) {
+  if (answer.drawn && answer.segments) {
+    // A transit answer, in pieces: each vehicle boarded takes the next colour
+    // in turn, so a change of bus reads as a change of colour, and a walk
+    // between stops is a dashed grey line — the transfer made on foot.
+    let boarded = 0;
+    for (const segment of answer.segments) {
+      const style = segment.walk
+        ? {color: '#5b6770', weight: 3, dashArray: '4 6', opacity: 0.9}
+        : {color: LEG_COLOURS[boarded++ % LEG_COLOURS.length], weight: 4};
+      L.polyline(segment.points, style).addTo(route);
+    }
+  } else if (answer.drawn) {
     L.polyline(answer.route, {color: '#d1495b', weight: 4}).addTo(route);
   }
   answer.snapped.forEach(p => L.circleMarker(p, {radius: 4, stroke: false,
@@ -550,8 +576,11 @@ async function request(explore) {
   // street answer's is how long it takes. The second line is the same question
   // for both — how much of the graph the search had to settle — which is the
   // number the two timetable models exist to be compared on.
+  const walked = answer.walked > 0
+    ? ` + <b>${humanise(answer.walked)}</b> walking`
+    : '';
   const headline = answer.transit
-    ? `arrive <b>${hhmm(answer.arrives)}</b>, <b>${minutes}</b> min riding${waited}<br>` +
+    ? `arrive <b>${hhmm(answer.arrives)}</b>, <b>${minutes}</b> min riding${walked}${waited}<br>` +
       `<b>${answer.transfers}</b> transfer${answer.transfers === 1 ? '' : 's'} ` +
       `over <b>${answer.legs}</b> stops`
     : `<b>${minutes}</b> min moving${waited} over <b>${answer.legs}</b> legs`;

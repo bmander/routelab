@@ -48,8 +48,8 @@ def test_a_feed_compiles_to_stops_and_departures(env: rl.Environment):
     # A→B is served by two trips and B→C by two, so four connections collapse
     # onto two edges.
     assert compiled.graph.num_edges == 2
-    assert compiled.timetable.num_connections == 4
-    assert "timetable" in compiled.provides
+    assert rl.Departures().bind(compiled).num_connections == 4
+    assert rl.Departures.missing_from(compiled) == frozenset()
 
 
 def test_dijkstra_refuses_a_timetable(env: rl.Environment):

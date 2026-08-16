@@ -47,9 +47,9 @@ def test_a_missing_extract_is_caught_at_construction():
 def test_cost_per_distance_comes_from_the_profile():
     layer = rl.OSM(JUNCTION, rl.Driving())
     assert layer.cost_per_distance == pytest.approx(1 / rl.Driving().max_speed)
-    # And it reaches the environment, which is what makes Euclidean usable.
+    # And a straight-line bound can derive it, which is what makes Euclidean usable.
     env = rl.Environment(layer)
-    assert env.compile().cost_per_distance == layer.cost_per_distance
+    assert rl.Pace().bind(env.compile()) == layer.cost_per_distance
 
 
 def test_profiles_disagree_about_one_way_streets():

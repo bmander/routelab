@@ -25,8 +25,9 @@ use routelab_core::timedep::{
     Waiting as CoreWaiting, Window as CoreWindow,
 };
 use routelab_core::timetable::{
-    earliest_arrival as core_earliest_arrival, Itinerary as CoreItinerary,
-    TimeExpanded as CoreTimeExpanded, Timetable as CoreTimetable, Transfer,
+    earliest_arrival as core_earliest_arrival, Footpaths as CoreFootpaths,
+    Itinerary as CoreItinerary, Leg, TimeExpanded as CoreTimeExpanded,
+    Timetable as CoreTimetable, Transfer,
 };
 use routelab_core::{
     astar as core_astar, bfs as core_bfs, dijkstra as core_dijkstra, EdgeId, Graph as CoreGraph,
@@ -826,6 +827,63 @@ impl PyFeed {
 /// Departures along one edge, as `(trip, departs, arrives)`.
 type Departures = Vec<(u32, u32, u32)>;
 
+/// Stop-to-stop walks a rider may take at any time, for a fixed duration.
+///
+/// The paper's foot-edges, closed under composition — see
+/// [`CoreFootpaths`]. Built from positions in a graph's input edge list, each
+/// named edge becoming a walk between its endpoints taking its weight.
+#[pyclass(name = "Footpaths", module = "routelab._routelab", frozen)]
+pub struct PyFootpaths {
+    inner: Arc<CoreFootpaths>,
+}
+
+#[pymethods]
+impl PyFootpaths {
+    /// Every edge at the given **positions in the graph's input edge list**
+    /// becomes a footpath between its endpoints, taking its weight.
+    #[staticmethod]
+    fn from_edges(graph: &PyGraph, positions: Vec<u32>) -> Self {
+        PyFootpaths {
+            inner: Arc::new(CoreFootpaths::from_input_edges(&graph.inner, positions)),
+        }
+    }
+
+    /// No footpaths at all: the paper's plain model.
+    #[staticmethod]
+    fn none() -> Self {
+        PyFootpaths {
+            inner: Arc::new(CoreFootpaths::none()),
+        }
+    }
+
+    /// How long the walk between two stops takes, if there is one — after
+    /// closure, so a two-hop walk answers too.
+    fn duration(&self, from: NodeId, to: NodeId) -> Option<u32> {
+        self.inner.duration(from, to)
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    #[getter]
+    fn footprint(&self) -> usize {
+        self.inner.footprint()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Footpaths({} walks)", self.inner.len())
+    }
+}
+
+/// The footpaths a query walks: the ones given, or none.
+fn footpaths_or_none(footpaths: Option<&PyFootpaths>) -> Arc<CoreFootpaths> {
+    footpaths.map_or_else(
+        || Arc::new(CoreFootpaths::none()),
+        |paths| Arc::clone(&paths.inner),
+    )
+}
+
 /// A day's connections, indexed for a search to read.
 ///
 /// Stops are a graph's nodes, and each connection is filed under the edge it
@@ -875,20 +933,26 @@ impl PyTimetable {
         self.inner.footprint()
     }
 
-    /// Earliest arrival at `to`, leaving `from` no earlier than `at`.
+    /// Earliest arrival at `to`, leaving `from` no earlier than `at`, walking
+    /// `footpaths` between stops if any are given.
     ///
     /// The time-dependent model: a node per stop, and a search that asks each
     /// edge what leaves next.
+    #[pyo3(signature = (from, at, to, footpaths = None))]
     fn earliest_arrival(
         &self,
         py: Python<'_>,
         from: NodeId,
         at: u32,
         to: NodeId,
+        footpaths: Option<&PyFootpaths>,
     ) -> Option<PyItinerary> {
         let timetable = Arc::clone(&self.inner);
-        py.detach(|| core_earliest_arrival(&timetable, from, at, to, Transfer::instant()))
-            .map(PyItinerary::from)
+        let footpaths = footpaths_or_none(footpaths);
+        py.detach(|| {
+            core_earliest_arrival(&timetable, from, at, to, Transfer::instant(), &footpaths)
+        })
+        .map(PyItinerary::from)
     }
 
     fn __repr__(&self) -> String {
@@ -908,11 +972,16 @@ pub struct PyTimeExpanded {
 
 #[pymethods]
 impl PyTimeExpanded {
-    /// Expand a timetable. Seconds on a city, paid once.
+    /// Expand a timetable, with `footpaths` between its stops if any are
+    /// given. Seconds on a city, paid once.
     #[staticmethod]
-    fn build(py: Python<'_>, timetable: &PyTimetable) -> Self {
+    #[pyo3(signature = (timetable, footpaths = None))]
+    fn build(py: Python<'_>, timetable: &PyTimetable, footpaths: Option<&PyFootpaths>) -> Self {
         let timetable = Arc::clone(&timetable.inner);
-        let expanded = py.detach(|| CoreTimeExpanded::build(&timetable, Transfer::instant()));
+        let footpaths = footpaths_or_none(footpaths);
+        let expanded = py.detach(|| {
+            CoreTimeExpanded::build(&timetable, Transfer::instant(), &footpaths)
+        });
         PyTimeExpanded {
             inner: Arc::new(expanded),
         }
@@ -983,20 +1052,35 @@ impl PyItinerary {
         self.inner.transfers()
     }
 
-    /// Each vehicle ridden, as `(trip, from_stop, to_stop, departs, arrives)`.
+    /// Each vehicle ridden, as `(trip, from_stop, to_stop, departs, arrives)`,
+    /// with the walks between them left out.
     fn rides(&self) -> Vec<(u32, NodeId, NodeId, u32, u32)> {
         self.inner
-            .rides
-            .iter()
+            .rides()
             .map(|r| (r.trip, r.from, r.to, r.departs, r.arrives))
+            .collect()
+    }
+
+    /// Every stretch of the journey in order, as
+    /// `(trip, from_stop, to_stop, departs, arrives)` — `trip` is `None` for
+    /// a stretch walked between stops.
+    fn legs(&self) -> Vec<(Option<u32>, NodeId, NodeId, u32, u32)> {
+        self.inner
+            .legs
+            .iter()
+            .map(|leg| match leg {
+                Leg::Ride(r) => (Some(r.trip), r.from, r.to, r.departs, r.arrives),
+                Leg::Walk(w) => (None, w.from, w.to, w.departs, w.arrives),
+            })
             .collect()
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "Itinerary(arrives={}, {} rides, {} transfers)",
+            "Itinerary(arrives={}, {} rides, {} walks, {} transfers)",
             self.inner.arrives,
-            self.inner.rides.len(),
+            self.inner.rides().count(),
+            self.inner.walks().count(),
             self.inner.transfers()
         )
     }
@@ -1271,9 +1355,19 @@ fn astar(
     Ok(PySearchResult { inner: result })
 }
 
+/// Great-circle metres between two `(lat, lon)` points, on the sphere every
+/// OSM edge length is measured on — so a layer that prices its own walks
+/// agrees with the streets about how long a metre is.
+#[pyfunction]
+fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    routelab_osm::haversine(lat1, lon1, lat2, lon2)
+}
+
 #[pymodule]
 fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add("EARTH_RADIUS", routelab_osm::EARTH_RADIUS)?;
+    m.add_function(wrap_pyfunction!(haversine, m)?)?;
     m.add_class::<PyCalendar>()?;
     m.add_class::<PyContractionHierarchy>()?;
     m.add_class::<PyFeed>()?;
@@ -1284,6 +1378,7 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyProgress>()?;
     m.add_class::<PySearchResult>()?;
     m.add_class::<PyItinerary>()?;
+    m.add_class::<PyFootpaths>()?;
     m.add_class::<PySearchTree>()?;
     m.add_class::<PyTimeExpanded>()?;
     m.add_class::<PyTimetable>()?;

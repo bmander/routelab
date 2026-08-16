@@ -16,6 +16,12 @@ one into something a shortest-path algorithm can read.
 They must return the same arrival time. That claim is the paper's thesis and
 this demo's point, so the two run side by side and the table prints both.
 
+Both are given the paper's *foot-edges* — walks between stops within
+``--walk`` metres of each other — because a real feed says nothing about the
+northbound stop and the southbound one across the street being the same place,
+and a model that cannot cross the street cannot make most real trips. Pass
+``--walk 0`` for the plain model and watch the trip fall apart.
+
     python demos/route_transit.py kcm.zip --date 2026-08-17 \\
         --from 47.6062,-122.3321 --to 47.6588,-122.3120 --departing 08:30
 """
@@ -63,6 +69,12 @@ def main(argv: "list[str] | None" = None) -> int:
     parser.add_argument("--from", dest="origin", type=coordinate, default=DOWNTOWN)
     parser.add_argument("--to", dest="target", type=coordinate, default=U_DISTRICT)
     parser.add_argument("--departing", type=service_time, default=datetime.time(8, 30))
+    parser.add_argument(
+        "--walk",
+        type=float,
+        default=200.0,
+        help="join stops within this many metres by a walk; 0 for none (default 200)",
+    )
     args = parser.parse_args(argv)
 
     if not args.feed.exists():
@@ -71,6 +83,8 @@ def main(argv: "list[str] | None" = None) -> int:
     started = time.perf_counter()
     feed = GTFS(args.feed, args.date)
     env = rl.Environment(feed)
+    if args.walk > 0:
+        env.register(rl.Footpaths(feed, within=args.walk))
     compiled = env.compile()
     read = time.perf_counter() - started
 
@@ -81,7 +95,7 @@ def main(argv: "list[str] | None" = None) -> int:
     )
     if feed.unimplemented:
         print(f"  {feed.unimplemented:,} trips this reader cannot represent, dropped")
-    if not compiled.timetable:
+    if rl.Departures.missing_from(compiled):
         print("  nothing runs on this date — try another, or check the calendar")
         return 1
 
@@ -128,29 +142,32 @@ def main(argv: "list[str] | None" = None) -> int:
 
     journey = journeys["TimeDependent"]
     print(
-        f"  {journey.cost // 60} minutes, {journey.moving // 60} riding and "
-        f"{journey.waiting // 60} waiting, {journey.transfers} transfers\n"
+        f"  {journey.cost // 60} minutes, {(journey.moving - journey.walking) // 60} riding, "
+        f"{journey.walking // 60} walking and {journey.waiting // 60} waiting, "
+        f"{journey.transfers} transfers\n"
     )
     for departs, arrives, route, boarded, alighted, _ in _rides(feed, journey):
         print(
-            f"  {clock(departs)}–{clock(arrives)}  route {route:<8} "
+            f"  {clock(departs)}–{clock(arrives)}  {route:<15} "
             f"{boarded} → {alighted}"
         )
     return 0
 
 
 def _rides(feed: GTFS, journey: rl.Journey) -> "list[list]":
-    """The journey's legs collapsed to the vehicles it boarded.
+    """The journey's legs collapsed to the vehicles it boarded and the walks
+    between them.
 
     A leg is one stop to the next, so a bus ridden for twelve stops is twelve
-    legs; what a rider wants is the four buses.
+    legs; what a rider wants is the four buses — and the walk across the street
+    between two of them, which is a leg with no trip.
     """
     trips = feed.trips()
     names = feed.names()
     rides: "list[list]" = []
     for leg in journey.legs:
-        route = trips[leg.trip][1]
-        if rides and rides[-1][2] == route and rides[-1][5] == leg.trip:
+        route = "walk" if leg.trip is None else f"route {trips[leg.trip][1]}"
+        if rides and rides[-1][5] == leg.trip:
             rides[-1][1] = leg.arrives
             rides[-1][4] = names[leg.head]
         else:

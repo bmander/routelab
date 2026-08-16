@@ -42,12 +42,15 @@ def test_guidance_skips_what_leads_away(corridor):
     assert len(guided_order) < len(plain_order)
 
 
-def test_an_environment_says_what_it_provides(corridor):
-    assert corridor.compile().provides == frozenset(
-        {"positions", "cost_per_distance"}
-    )
+def test_what_a_heuristic_derives_says_whether_it_can(corridor):
+    # The environment keeps no coordinates table and no rate; the two things
+    # a straight-line bound derives each answer for themselves.
+    compiled = corridor.compile()
+    assert rl.Plane.missing_from(compiled) == frozenset()
+    assert rl.Pace.missing_from(compiled) == frozenset()
     bare = rl.Environment(rl.ScalarEdges(("a", "b", 1))).compile()
-    assert bare.provides == frozenset()
+    assert rl.Plane.missing_from(bare) == {"positions"}
+    assert rl.Pace.missing_from(bare) == {"cost_per_distance"}
 
 
 def test_a_heuristic_says_what_it_needs_before_you_build_it(corridor):
@@ -119,7 +122,7 @@ def test_the_fastest_layer_sets_the_bound():
     walking = rl.ScalarEdges(("a", "b", 300), cost_per_distance=0.71)
     transit = rl.ScalarEdges(("b", "c", 120), cost_per_distance=0.04)
     env = rl.Environment(walking, transit, rl.Positions({"a": (0, 0), "b": (1, 0), "c": (2, 0)}))
-    assert env.compile().cost_per_distance == 0.04
+    assert rl.Pace().bind(env.compile()) == 0.04
 
 
 def test_an_explicit_rate_overrides_the_layers(corridor):

@@ -29,7 +29,7 @@ def ring() -> rl.Environment:
 def test_landmarks_need_no_geometry(ring):
     # The whole reason to reach for this on a network whose coordinates are
     # unknown, or whose costs have nothing to do with distance.
-    assert ring.compile().positions == (None,) * 4
+    assert rl.Plane.missing_from(ring.compile()) == {"positions"}
     with pytest.raises(ValueError, match="position for every node"):
         rl.AStar(rl.Euclidean()).bind(ring)
 

@@ -65,8 +65,8 @@ def main() -> int:
         f"({args.profile})"
     )
 
-    # A technique declares what it needs, and the environment declares what it
-    # has, so this is answerable before anything is built.
+    # A technique knows what it will derive from the layers, so it can say
+    # whether this extract has it before anything is built.
     technique = rl.TimeDependentDijkstra()
     missing = technique.missing_from(compiled)
     if missing:
@@ -74,14 +74,15 @@ def main() -> int:
         print("Try a profile whose access tags the ways actually carry.")
         return 1
 
+    # Binding is where the calendar gets derived; the planner holds it.
+    clock = technique.bind(env)
     print(
-        f"{len(compiled.calendar):,} of {compiled.graph.num_edges:,} edges are scheduled; "
+        f"{len(clock.calendar):,} of {compiled.graph.num_edges:,} edges are scheduled; "
         f"{layer.unreadable_schedules} schedules could not be read"
     )
 
     origin = layer.nearest(*args.origin)
     destination = layer.nearest(*args.destination)
-    clock = technique.bind(env)
     always_open = rl.Dijkstra().bind(env)
 
     baseline = always_open.route(origin, destination)
@@ -103,7 +104,7 @@ def main() -> int:
         # How many legs are scheduled is the number that explains the rest: a
         # route over edges nobody scheduled cannot care what time it is.
         scheduled = sum(
-            1 for leg in journey if compiled.calendar.is_restricted(leg.edge)
+            1 for leg in journey if clock.calendar.is_restricted(leg.edge)
         )
         print(
             f"{hour:>5}:00  {journey.moving / 60:>6.1f}m  {journey.waiting / 60:>7.0f}m  "

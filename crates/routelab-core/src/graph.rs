@@ -177,6 +177,22 @@ impl Graph {
         self.input_indices[edge as usize]
     }
 
+    /// The inverse of [`Graph::input_index`]: `edges_by_input()[i]` is the
+    /// edge id of the `i`-th edge in the list passed to [`Graph::from_edges`].
+    ///
+    /// Everything that produces edges — a reader, a layer — holds input
+    /// positions, and everything keyed by them (a calendar, a timetable, a
+    /// footpath table) needs this one pass to speak edge ids. Built on demand
+    /// rather than kept: one `u32` per edge, wanted only while a side table is
+    /// being constructed.
+    pub fn edges_by_input(&self) -> Vec<EdgeId> {
+        let mut to_edge = vec![0 as EdgeId; self.num_edges()];
+        for edge in 0..self.num_edges() as EdgeId {
+            to_edge[self.input_index(edge) as usize] = edge;
+        }
+        to_edge
+    }
+
     /// `(tail, head, weight)` of `edge`.
     pub fn edge(&self, edge: EdgeId) -> (NodeId, NodeId, Weight) {
         (self.tail(edge), self.head(edge), self.weight(edge))

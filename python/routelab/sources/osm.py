@@ -174,6 +174,7 @@ class OSM(EdgeSource):
             raise FileNotFoundError(f"no OSM extract at {self.path!r}")
         self._network: "Optional[_routelab.OsmNetwork]" = None
         self._coordinates: "Optional[Mapping[int, Tuple[float, float]]]" = None
+        self._positions: "Optional[Mapping[int, Tuple[float, float]]]" = None
         self._windows: "Optional[Mapping[int, List[Tuple[int, int]]]]" = None
 
     @property
@@ -207,15 +208,17 @@ class OSM(EdgeSource):
             yield node_ids[tail], node_ids[head], seconds
 
     def positions(self) -> Mapping[Hashable, "Tuple[float, float]"]:
-        """OSM node ids to local metres.
+        """OSM node ids to local metres, built once and kept.
 
         Projected in the loader rather than left as latitude and longitude,
         conservatively enough that projected distance never exceeds the ground
         it covers — which is what keeps :class:`~routelab.Euclidean` admissible.
         """
-        network = self.network
-        xs, ys = network.projected()
-        return dict(zip(network.node_ids, zip(xs, ys)))
+        if self._positions is None:
+            network = self.network
+            xs, ys = network.projected()
+            self._positions = dict(zip(network.node_ids, zip(xs, ys)))
+        return self._positions
 
     def coordinates(self) -> "Mapping[int, Tuple[float, float]]":
         """OSM node ids to `(lat, lon)`, for drawing rather than routing.
@@ -239,7 +242,8 @@ class OSM(EdgeSource):
         empty list would mean never, which the reader drops rather than emits.
 
         The hook mirrors :meth:`geometry`: indices are this layer's own, and
-        :class:`~routelab.CompiledEnvironment` does the translation.
+        :class:`~routelab.Schedule` — the derivation a clock-reading technique
+        binds — does the translation.
         """
         if self._windows is None:
             self._windows = dict(self.network.windows())

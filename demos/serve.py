@@ -87,6 +87,9 @@ PROFILES = {"walking": rl.Walking, "cycling": rl.Cycling, "driving": rl.Driving}
 #: which is the only promise being made.
 REMEMBERED = 8
 
+#: "No value passed", for a cache that may legitimately hold `None`.
+_UNSET = object()
+
 #: What each node type builds, and what has to be plugged into it first.
 #:
 #: This is the whole vocabulary of the board, and it is deliberately a
@@ -99,6 +102,13 @@ REMEMBERED = 8
 #: `inputs` maps a port name to the kind of value it accepts. `kind` is what a
 #: node is for, which decides how it is built; the two together are all the
 #: wiring rules there are, and a port takes what it says it takes.
+#:
+#: What is *not* a port is as deliberate as what is. A thing is a wire iff it
+#: is a choice: a heuristic or an ordering has alternatives and knobs, so it is
+#: wired in. The calendar a `TimeDependentDijkstra` reads, or the coordinates
+#: `Euclidean` prices, have one possible construction from the layers already
+#: plugged into the environment, so the technique derives them at bind and no
+#: wire is drawn — a wire that could not change anything would be decoration.
 #:
 #: Shipped to the page as-is (see `Router.catalogue`), which is why it is data
 #: rather than code: `static/board.js` adds titles, fields and colours to these
@@ -121,9 +131,21 @@ NODES: "dict[str, dict]" = {
         "kind": "planner",
         "inputs": {"environment": "environment", "ordering": "ordering"},
     },
-    "TimeDependentDijkstra": {"kind": "planner", "inputs": {"environment": "environment"}},
-    "TimeDependent": {"kind": "planner", "inputs": {"environment": "environment"}},
-    "TimeExpanded": {"kind": "planner", "inputs": {"environment": "environment"}},
+    # `clock` names the clock a technique's departure time is read on, for
+    # the ones that take one: "week" repeats (a street schedule), "day" is the
+    # service day a feed was read for. Absent for a technique that has no hour.
+    "TimeDependentDijkstra": {
+        "kind": "planner",
+        "inputs": {"environment": "environment"},
+        "clock": "week",
+    },
+    "TimeDependent": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
+    "TimeExpanded": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
+    # Walks between nearby stops, made from another layer's coordinates. A
+    # layer that takes a layer: its output is edges like any other layer's,
+    # and how far a rider will walk is the knob — which is why it is a node
+    # and not something the environment does behind your back.
+    "Footpaths": {"kind": "layer", "inputs": {"stops": "layer"}},
     # A query takes its endpoints from wires like everything else, so "where
     # from" is an argument rather than an ambient fact about the page. Its two
     # answers are separate outputs because they cost different amounts: the
@@ -147,24 +169,13 @@ NODES: "dict[str, dict]" = {
 }
 
 
-def wants_time(planner: rl.Planner) -> bool:
-    """Does this technique want a departure time?
-
-    Asked of the technique rather than hardcoded here: a planner that needs a
-    schedule or a timetable declares it, and that is the same declaration
-    `missing_from` uses to say a dataset cannot support it.
-    """
-    return bool(getattr(planner, "requires", frozenset()) & {"schedule", "timetable"})
-
-
 def rides_transit(planner: rl.Planner) -> bool:
     """Does this technique route a timetable rather than a network?
 
     The one question that decides which world a query happens in — street
-    corners or bus stops — and it is the technique's own declaration that
-    answers it.
+    corners or bus stops.
     """
-    return "timetable" in getattr(planner, "requires", frozenset())
+    return isinstance(planner, rl.planners.TimetablePlanner)
 
 
 class Board(NamedTuple):
@@ -272,6 +283,13 @@ class Router:
         #: identity key can hand one environment another's labels; a signature
         #: says what the environment is.
         self._reachable: "OrderedDict[tuple[str, object], tuple]" = OrderedDict()
+        #: Calendars derived from an environment, keyed by its signature. The
+        #: page reports how many edges are scheduled under *every* technique —
+        #: a schedule quietly ignored is the failure nobody can see — so the
+        #: calendar has to be had without a clock-reading planner in hand. The
+        #: library keeps no such table on the environment, deliberately; the
+        #: board is the one consumer that rebinds, so the board remembers.
+        self._calendars: "OrderedDict[str, object]" = OrderedDict()
         #: What is being built right now, by node id. Read by `/progress` from
         #: another request entirely, which is the whole reason the counter
         #: inside is an atomic rather than a callback.
@@ -380,8 +398,7 @@ class Router:
         """
         signature = self.signature(board, node_id)
         if signature in self._built:
-            self._built.move_to_end(signature)
-            return self._built[signature]
+            return self._remember(self._built, signature)
 
         node = board.nodes[node_id]
         kind = node["type"]
@@ -419,10 +436,18 @@ class Router:
         elapsed = time.perf_counter() - started
         if elapsed > 0.1:
             print(f"  {signature}: ready in {elapsed:.1f}s", flush=True)
-        self._built[signature] = value
-        while len(self._built) > REMEMBERED:
-            self._built.popitem(last=False)
-        return value
+        return self._remember(self._built, signature, value)
+
+    @staticmethod
+    def _remember(cache: "OrderedDict", key, value=_UNSET):
+        """Note `key` as freshly used in `cache` — storing `value` if given —
+        and forget the least recently used beyond `REMEMBERED`."""
+        if value is not _UNSET:
+            cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > REMEMBERED:
+            cache.popitem(last=False)
+        return cache[key]
 
     def _make(self, node_id, kind, params, one, wired, progress) -> object:
         """Build one node, having established what it depends on."""
@@ -441,6 +466,8 @@ class Router:
                     "--date YYYY-MM-DD to route a timetable",
                 )
             value = rl.GTFS(self.feed, self.date).load()
+        elif kind == "Footpaths":
+            value = rl.Footpaths(one("stops"), within=float(params.get("within", 200))).load()
         elif kind == "Environment":
             layers = wired("layers")
             if not layers:
@@ -563,9 +590,10 @@ class Router:
         # clocks are not the same: a timetable runs on the service day fixed
         # when its feed was loaded, and a street schedule repeats weekly.
         minute = int(params.get("minute", 480))
-        if not wants_time(planner):
+        clock = NODES[board.nodes[planners[0][0]]["type"]].get("clock")
+        if clock is None:
             when = {}
-        elif rides_transit(planner):
+        elif clock == "day":
             when = {"departing": minute * 60}
         else:
             when = {"departing": int(params.get("day", 0)) * 86400 + minute * 60}
@@ -613,6 +641,7 @@ class Router:
         journey = rl.Journey.from_result(compiled, result, end)
 
         coordinates = layer.coordinates()
+        calendar = self.calendar(board, planner_id)
         answer = {
             "route": journey.geometry,
             "snapped": [coordinates[start], coordinates[end]],
@@ -622,14 +651,14 @@ class Router:
             # How many edges this profile has a schedule for, and whether the
             # chosen technique is reading it. A schedule quietly ignored is the
             # failure nobody can see, so the page is told and says so.
-            "scheduled_edges": 0 if compiled.calendar is None else len(compiled.calendar),
+            "scheduled_edges": 0 if calendar is None else len(calendar),
             "reads_clock": bool(when),
             # How many legs of *this* route are scheduled. The number that
             # answers "why did changing the hour do nothing": a route over
             # edges nobody scheduled cannot care what time it is.
             "scheduled_legs": 0
-            if compiled.calendar is None
-            else sum(1 for leg in journey.legs if compiled.calendar.is_restricted(leg.edge)),
+            if calendar is None
+            else sum(1 for leg in journey.legs if calendar.is_restricted(leg.edge)),
             "settled_count": result.settled,
             "graph_nodes": compiled.graph.num_nodes,
             "ms": round(elapsed, 1),
@@ -646,6 +675,23 @@ class Router:
             answer["branch_count"] = len(space)
         return answer
 
+    def calendar(self, board: Board, planner_id: str) -> "_routelab.Calendar | None":
+        """The schedule under `planner_id`'s environment, or `None` if it has none.
+
+        Derived once per environment and remembered, capped like `_reachable`;
+        one walk of the layers, refused or not.
+        """
+        planner = self.build(board, planner_id)
+        environment_id = board.sources(planner_id, "environment")[0][0]
+        key = self.signature(board, environment_id)
+        if key in self._calendars:
+            return self._remember(self._calendars, key)
+        try:
+            calendar = rl.Schedule().bind(planner.compiled)
+        except ValueError:
+            calendar = None
+        return self._remember(self._calendars, key, calendar)
+
     def reachable(self, board: Board, planner_id: str, origin) -> tuple:
         """Labels reachable from `origin` — what a destination may snap to.
 
@@ -659,17 +705,16 @@ class Router:
         """
         environment = self.build(board, planner_id).environment
         key = (self.signature(board, planner_id), origin)
-        if key not in self._reachable:
-            compiled = environment.compile()
-            result = rl.Dijkstra().bind(environment).search(origin)
-            # `labels` is a list, so index it rather than calling `label` half a
-            # million times.
-            labels = compiled.labels
-            self._reachable[key] = tuple(labels[node] for node in result.order)
-        self._reachable.move_to_end(key)
-        while len(self._reachable) > REMEMBERED:
-            self._reachable.popitem(last=False)
-        return self._reachable[key]
+        if key in self._reachable:
+            return self._remember(self._reachable, key)
+        compiled = environment.compile()
+        result = rl.Dijkstra().bind(environment).search(origin)
+        # `labels` is a list, so index it rather than calling `label` half a
+        # million times.
+        labels = compiled.labels
+        return self._remember(
+            self._reachable, key, tuple(labels[node] for node in result.order)
+        )
 
     @staticmethod
     def _ride(planner, layer, start, end, when) -> dict:
@@ -694,13 +739,32 @@ class Router:
         # No `shapes.txt` yet, so a leg has no geometry and the route is drawn
         # stop to stop. Straight lines, and honestly so — a bus does not fly,
         # but neither does this claim to know which streets it took.
+        #
+        # Drawn in pieces rather than as one line: a piece per vehicle boarded
+        # and per walk between them, so the page can tell a change of bus from
+        # a stop passed through, and a walk across the street from either.
+        segments = []
+        for leg in journey.legs:
+            if segments and segments[-1]["trip"] == leg.trip:
+                segments[-1]["points"].append(coordinates[leg.head])
+            else:
+                segments.append({
+                    "trip": leg.trip,
+                    "walk": leg.trip is None,
+                    "points": [coordinates[leg.tail], coordinates[leg.head]],
+                })
         return {
             "route": [coordinates[label] for label in journey.nodes],
+            "segments": segments,
             "snapped": [coordinates[start], coordinates[end]],
             "seconds": journey.cost,
             "waiting": journey.waiting,
             "legs": len(journey.legs),
             "transfers": journey.transfers,
+            # Seconds on foot between stops — the footpaths doing their work,
+            # and the number that says a "transfer" was a walk across the
+            # street rather than a wait at the same pole.
+            "walked": journey.walking,
             "arrives": journey.arrives,
             "settled_count": journey.settled,
             # The model's own node set, not the environment's: the time-expanded

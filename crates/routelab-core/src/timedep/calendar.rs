@@ -149,12 +149,7 @@ impl Calendar {
         graph: &Graph,
         entries: impl IntoIterator<Item = (u32, Vec<Window>)>,
     ) -> Self {
-        // One pass to invert the permutation. `input_index` runs the other way,
-        // and there are as many edges as there are edges.
-        let mut to_edge = vec![0u32; graph.num_edges()];
-        for edge in 0..graph.num_edges() as EdgeId {
-            to_edge[graph.input_index(edge) as usize] = edge;
-        }
+        let to_edge = graph.edges_by_input();
         Calendar::from_windows(
             entries
                 .into_iter()

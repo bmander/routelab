@@ -110,14 +110,15 @@ def test_cost_models_are_collected_from_the_layers():
     assert env.cost_models == frozenset({"scalar", "timetable"})
 
 
-def test_a_timetable_layer_compiles_and_brings_its_departures():
+def test_a_timetable_layer_compiles_and_its_departures_can_be_derived():
     compiled = rl.Environment(Timetable()).compile()
-    assert "timetable" in compiled.provides
-    assert compiled.timetable.num_stops == 3
-    assert compiled.timetable.num_connections == 3
+    assert rl.Departures.missing_from(compiled) == frozenset()
+    timetable = rl.Departures().bind(compiled)
+    assert timetable.num_stops == 3
+    assert timetable.num_connections == 3
     # Two of the three run along the same pair of stops, so the timetable has
     # one fewer edge than it has connections.
-    assert compiled.timetable.num_edges == 2
+    assert timetable.num_edges == 2
 
 
 def test_departures_land_on_the_edge_they_were_filed_under():
@@ -126,19 +127,31 @@ def test_departures_land_on_the_edge_they_were_filed_under():
     # a → b. Leaving at 08:00 must therefore reach 'c' at 10:15 — catching the
     # 08:00 to 'b', waiting, then the only departure onward.
     compiled = rl.Environment(Timetable()).compile()
-    itinerary = compiled.timetable.earliest_arrival(
+    itinerary = rl.Departures().bind(compiled).earliest_arrival(
         compiled.node_id("a"), 8 * 3600, compiled.node_id("c")
     )
     assert itinerary.arrives == 10 * 3600 + 900
     assert [ride[0] for ride in itinerary.rides()] == [0, 2]
 
 
-def test_a_timetable_layer_with_no_departures_provides_no_timetable():
+def test_a_timetable_layer_with_no_departures_yields_no_timetable():
     # It compiles — the edges are real — but there is nothing to route over,
     # which is what `missing_from` is for rather than a failure at compile time.
     compiled = rl.Environment(Untimetabled()).compile()
-    assert compiled.timetable is None
-    assert "timetable" not in compiled.provides
+    assert rl.Departures.missing_from(compiled) == {"timetable"}
+    with pytest.raises(ValueError, match="needs a timetable"):
+        rl.Departures().bind(compiled)
+
+
+def test_the_compiled_form_is_the_merge_and_nothing_else():
+    # Labels, one graph, provenance — and the layers, so a technique can derive
+    # what it reads. No side-tables: the day one grows back here is the day
+    # every technique's needs are the environment's problem again.
+    compiled = rl.Environment(Timetable(), rl.Positions({"a": (0, 0)})).compile()
+    assert len(compiled.sources) == 2
+    assert [(start, stop) for start, stop, _ in compiled.spans] == [(0, 2)]
+    for absent in ("calendar", "timetable", "positions", "cost_per_distance", "provides"):
+        assert not hasattr(compiled, absent), absent
 
 
 def test_compiling_refuses_a_cost_model_nothing_can_carry():

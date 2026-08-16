@@ -15,14 +15,42 @@
 //! with the departure time rather than zero makes every settled cost the clock
 //! reading at that event, which is what a timetable query actually asks for and
 //! saves converting back at the end.
+//!
+//! ## Footpaths
+//!
+//! A walk is an edge like any other here, but it has to land on an event, and
+//! there is no event for "standing at B at *t + walk*". Making one — an
+//! arrival at B per vehicle arrival at A per footpath — is the obvious
+//! construction and it is ruinous: it multiplied a city's 838k events by ten.
+//! So a walk edge goes where an alighting edge goes: from the arrival at A
+//! straight to the **first departure at B** you could catch after walking,
+//! weighted by the whole gap. Nothing new is interned; the walk itself is
+//! remembered beside the edge so the answer can still say it was walked. One
+//! hop is enough because [`Footpaths`] are closed under composition.
+//!
+//! A walk edge is told from an alighting edge by its endpoints — arrival at
+//! one stop, departure at another — so nothing beyond the graph and the event
+//! kinds is needed to read an answer back.
+//!
+//! Two places a walk cannot be an edge in this graph, so the query handles
+//! them itself. The **origin** is a stop and a time rather than an event, so
+//! the search is seeded with the first departure at every stop the origin
+//! can walk to as well as its own. And a journey may **end** on foot — ride
+//! to A, walk to the target — which is an arrival at A plus a duration, not
+//! an arrival at the target. So the targets are the arrivals at the target
+//! *and* at every stop a footpath reaches it from. If the first of those the
+//! search settles is at the target itself, no walk can beat it (every walk
+//! candidate settles later and adds time); if it is at a neighbour, the true
+//! answer may still be a little later in the search than that first hit, and
+//! one bounded re-run up to *t + walk* finds it.
 
 use std::collections::HashMap;
 
 use crate::dijkstra::dijkstra;
 use crate::graph::{Graph, NodeId, Weight};
-use crate::search::SearchOptions;
+use crate::search::{SearchOptions, SearchResult};
 
-use super::{Itinerary, Ride, Time, Timetable, Transfer};
+use super::{Footpaths, Itinerary, Leg, Ride, Time, Timetable, Transfer, Walk};
 
 /// What an event node stands for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -52,6 +80,19 @@ fn intern(events: &mut Vec<Event>, index: &mut HashMap<Event, NodeId>, event: Ev
     })
 }
 
+/// The first departure at `stop` at or after `at`, if there is one, given the
+/// per-stop departure lists in time order.
+fn first_departure(
+    departures: &[Vec<NodeId>],
+    events: &[Event],
+    stop: NodeId,
+    at: Time,
+) -> Option<NodeId> {
+    let list = &departures[stop as usize];
+    let entry = list.partition_point(|&node| events[node as usize].time() < at);
+    list.get(entry).copied()
+}
+
 /// A timetable as a static graph of events.
 #[derive(Debug)]
 pub struct TimeExpanded {
@@ -65,11 +106,17 @@ pub struct TimeExpanded {
     /// come first, so an edge rides connection `i` exactly when its input index
     /// is `i` — no side table needed, only the CSR permutation undone.
     rides: Vec<Ride>,
+    /// Kept for the query, which walks from the origin before there is any
+    /// event to walk from, and to tell a walk as the hops it was made of.
+    footpaths: Footpaths,
+    /// The footpaths the other way round: for each stop, `(from, duration)`
+    /// of every walk that reaches it — how a journey can end on foot.
+    reached_by_foot: Vec<Vec<(NodeId, Time)>>,
 }
 
 impl TimeExpanded {
-    /// Expand `timetable` into its event graph.
-    pub fn build(timetable: &Timetable, _transfer: Transfer) -> Self {
+    /// Expand `timetable` into its event graph, with `footpaths` between stops.
+    pub fn build(timetable: &Timetable, _transfer: Transfer, footpaths: &Footpaths) -> Self {
         let stops = timetable.num_stops();
         let mut events: Vec<Event> = Vec::new();
         let mut index: HashMap<Event, NodeId> = HashMap::new();
@@ -97,9 +144,8 @@ impl TimeExpanded {
             edges.push((leaves, lands, connection.arrives - connection.departs));
         }
 
-        // Per stop, order the events and chain them. Waiting runs forward in
-        // time only, and an arrival joins the chain at the first departure at or
-        // after it — which with an instant transfer is the same instant.
+        // Per stop, order the events. That is the whole event set: nothing
+        // below interns anything.
         let mut departures: Vec<Vec<NodeId>> = vec![Vec::new(); stops];
         let mut arrivals: Vec<Vec<NodeId>> = vec![Vec::new(); stops];
         for (node, event) in events.iter().enumerate() {
@@ -112,22 +158,32 @@ impl TimeExpanded {
         for stop in 0..stops {
             departures[stop].sort_by_key(|&node| events[node as usize].time());
             arrivals[stop].sort_by_key(|&node| events[node as usize].time());
+        }
 
-            // Waiting: each departure to the next.
-            for pair in departures[stop].windows(2) {
+        // Then the edges that pass time at a stop or between stops. Waiting
+        // runs forward in time only; an arrival joins the chain at the first
+        // departure at or after it — at the same stop with an instant
+        // transfer, at another after the walk there. See the module docstring
+        // for why a walk is not an event of its own.
+        let mut reached_by_foot: Vec<Vec<(NodeId, Time)>> = vec![Vec::new(); stops];
+        for (stop, arriving) in arrivals.iter().enumerate() {
+            let stop = stop as NodeId;
+            for (next, duration) in footpaths.from(stop) {
+                reached_by_foot[next as usize].push((stop, duration));
+            }
+            for pair in departures[stop as usize].windows(2) {
                 let (here, next) = (pair[0], pair[1]);
                 let wait = events[next as usize].time() - events[here as usize].time();
                 edges.push((here, next, wait));
             }
-            // Alighting: each arrival to the first departure not before it. Both
-            // lists are sorted, so this is a binary search rather than a scan —
-            // a downtown stop has thousands of each.
-            for &arrival in &arrivals[stop] {
-                let ready = events[arrival as usize].time();
-                let next =
-                    departures[stop].partition_point(|&node| events[node as usize].time() < ready);
-                if let Some(&boarding) = departures[stop].get(next) {
-                    edges.push((arrival, boarding, events[boarding as usize].time() - ready));
+            for &arrival in arriving {
+                let time = events[arrival as usize].time();
+                let onward = std::iter::once((stop, 0)).chain(footpaths.from(stop));
+                for (next, duration) in onward {
+                    let ready = time.saturating_add(duration);
+                    if let Some(boarding) = first_departure(&departures, &events, next, ready) {
+                        edges.push((arrival, boarding, events[boarding as usize].time() - time));
+                    }
                 }
             }
         }
@@ -141,6 +197,8 @@ impl TimeExpanded {
             departures,
             arrivals,
             rides: timetable.connections().to_vec(),
+            footpaths: footpaths.clone(),
+            reached_by_foot,
         }
     }
 
@@ -156,6 +214,11 @@ impl TimeExpanded {
     pub fn footprint(&self) -> usize {
         self.events.len() * std::mem::size_of::<Event>()
             + self.rides.len() * std::mem::size_of::<Ride>()
+            + self.footpaths.footprint()
+            + self.reached_by_foot
+                .iter()
+                .map(|links| links.len() * std::mem::size_of::<(NodeId, Time)>())
+                .sum::<usize>()
             + self.graph.footprint()
     }
 
@@ -171,48 +234,186 @@ impl TimeExpanded {
             // to itself it would ride a loop back to where it started.
             return Some(Itinerary {
                 arrives: at,
-                rides: Vec::new(),
+                legs: Vec::new(),
                 settled: 0,
             });
         }
-        // Enter at the first departure you could catch. Every later one is
-        // reachable from it along the waiting chain, so one source is enough.
-        let entry = self.departures[from as usize]
-            .partition_point(|&node| self.events[node as usize].time() < at);
-        let start = *self.departures[from as usize].get(entry)?;
 
-        // Seeded with the clock rather than zero, so costs come out as times —
-        // which is also what makes the early exit right. Any arrival at `to`
-        // will do, and because the search settles in cost order the first one
-        // settled is the earliest. Asking for *all* of them instead runs the
-        // search to exhaustion: 608,611 events settled on a Seattle weekday
-        // against 18,956 for the first.
-        let sources = [(start, self.events[start as usize].time())];
-        let result = dijkstra(
-            &self.graph,
-            &sources,
-            &SearchOptions::default().with_any_target(self.arrivals[to as usize].iter().copied()),
-        )
-        .ok()?;
+        // Enter at the first departure you could catch — here, and at every
+        // stop you could walk to first. Every later departure at a stop is
+        // reachable from its first along the waiting chain, so one seed per
+        // stop is enough. Each seed remembers the walk that reached it, if
+        // one did, because that walk is not an edge in the graph. Walking
+        // straight to the target is an answer too, and one with no arrival
+        // event to find; it is compared at the end.
+        let mut seeds: Vec<(NodeId, Time)> = Vec::new();
+        let mut walked_to: HashMap<NodeId, Walk> = HashMap::new();
+        let mut on_foot: Option<Walk> = None;
+        if let Some(start) = first_departure(&self.departures, &self.events, from, at) {
+            seeds.push((start, self.events[start as usize].time()));
+        }
+        for (next, duration) in self.footpaths.from(from) {
+            let walk = Walk {
+                from,
+                to: next,
+                departs: at,
+                arrives: at.saturating_add(duration),
+            };
+            if next == to {
+                on_foot = Some(walk);
+            } else if let Some(start) =
+                first_departure(&self.departures, &self.events, next, walk.arrives)
+            {
+                seeds.push((start, self.events[start as usize].time()));
+                walked_to.insert(start, walk);
+            }
+        }
 
-        let (event, arrives) = self.arrivals[to as usize]
-            .iter()
-            .filter_map(|&event| result.cost(event).map(|time| (event, time)))
-            .min_by_key(|&(_, time)| time)?;
+        let ridden = self.ride(&seeds, to);
+        if let Some(walk) = on_foot {
+            if ridden.as_ref().is_none_or(|found| walk.arrives <= found.arrives) {
+                return Some(Itinerary {
+                    arrives: walk.arrives,
+                    legs: self.footpaths.expand(walk).into_iter().map(Leg::Walk).collect(),
+                    settled: 0,
+                });
+            }
+        }
+        let Found {
+            result,
+            settled,
+            event,
+            walk_in,
+            arrives,
+        } = ridden?;
 
-        let rides = result
-            .edge_path(event)?
-            .into_iter()
-            .filter_map(|edge| {
-                self.rides
-                    .get(self.graph.input_index(edge) as usize)
-                    .copied()
-            })
-            .collect();
+        // Read the legs back off the path: rides by input index, walks by
+        // their endpoints, and the walks at either end that were never edges.
+        let path = result.edge_path(event)?;
+        let mut legs = Vec::new();
+        let seed = path
+            .first()
+            .map(|&edge| self.graph.edge(edge).0)
+            .unwrap_or(event);
+        if let Some(&walk) = walked_to.get(&seed) {
+            legs.extend(self.footpaths.expand(walk).into_iter().map(Leg::Walk));
+        }
+        for edge in path {
+            let (tail, head, _) = self.graph.edge(edge);
+            match (self.events[tail as usize], self.events[head as usize]) {
+                (Event::Departure { .. }, Event::Arrival { .. }) => {
+                    let ride = self.rides[self.graph.input_index(edge) as usize];
+                    legs.push(Leg::Ride(ride));
+                }
+                (Event::Arrival { stop: from, time }, Event::Departure { stop: to, .. })
+                    if from != to =>
+                {
+                    let duration = self.footpaths.duration(from, to).unwrap_or(0);
+                    let walk = Walk {
+                        from,
+                        to,
+                        departs: time,
+                        arrives: time.saturating_add(duration),
+                    };
+                    legs.extend(self.footpaths.expand(walk).into_iter().map(Leg::Walk));
+                }
+                // Waiting, or alighting at the same stop: time passing, not a leg.
+                _ => {}
+            }
+        }
+        if let Some(walk) = walk_in {
+            legs.extend(self.footpaths.expand(walk).into_iter().map(Leg::Walk));
+        }
         Some(Itinerary {
             arrives,
-            rides,
-            settled: result.order.len(),
+            legs,
+            settled,
         })
     }
+
+    /// The best finish reachable by riding from `seeds`: the arrival event it
+    /// ends at, the walk from there to `to` if it ends on foot, and when.
+    ///
+    /// Any arrival at `to` will do, and because the search settles in cost
+    /// order the first one settled is the earliest — asking for *all* of them
+    /// runs the search to exhaustion: 608,611 events settled on a Seattle
+    /// weekday against 18,956 for the first. So the targets are the arrivals
+    /// at `to` and at every stop a walk reaches it from. If the first target
+    /// settled is at `to` itself, nothing can beat it: every walk-in
+    /// candidate settles later and adds time. If it is at a neighbour, the
+    /// answer is at most that arrival plus its walk, and may be anything
+    /// settled up to it — so run once more, bounded there, and take the best.
+    /// Only settled costs are trusted; the early exit leaves the rest of the
+    /// frontier tentative.
+    fn ride(&self, seeds: &[(NodeId, Time)], to: NodeId) -> Option<Found> {
+        if seeds.is_empty() {
+            return None;
+        }
+        let by_foot = &self.reached_by_foot[to as usize];
+        let finishes = self.arrivals[to as usize].iter().copied().chain(
+            by_foot
+                .iter()
+                .flat_map(|&(stop, _)| self.arrivals[stop as usize].iter().copied()),
+        );
+        let first = dijkstra(
+            &self.graph,
+            seeds,
+            &SearchOptions::default().with_any_target(finishes),
+        )
+        .ok()?;
+        let hit = *first.order.last()?;
+        let bound = match self.events[hit as usize] {
+            Event::Arrival { stop, time } if stop != to => by_foot
+                .iter()
+                .find(|&&(from, _)| from == stop)
+                .map(|&(_, duration)| time.saturating_add(duration)),
+            _ => None,
+        };
+        let (result, settled) = match bound {
+            None => {
+                let settled = first.order.len();
+                (first, settled)
+            }
+            Some(bound) => {
+                let again = dijkstra(&self.graph, seeds, &SearchOptions::default().with_max_cost(bound)).ok()?;
+                let settled = first.order.len() + again.order.len();
+                (again, settled)
+            }
+        };
+
+        let found = &result;
+        let direct = self.arrivals[to as usize]
+            .iter()
+            .filter_map(|&event| found.cost(event).map(|time| (event, None, time)));
+        let walked = by_foot.iter().flat_map(|&(stop, duration)| {
+            self.arrivals[stop as usize].iter().filter_map(move |&event| {
+                found.cost(event).map(|time| {
+                    let walk = Walk {
+                        from: stop,
+                        to,
+                        departs: time,
+                        arrives: time.saturating_add(duration),
+                    };
+                    (event, Some(walk), walk.arrives)
+                })
+            })
+        });
+        let (event, walk_in, arrives) = direct.chain(walked).min_by_key(|&(_, _, time)| time)?;
+        Some(Found {
+            result,
+            settled,
+            event,
+            walk_in,
+            arrives,
+        })
+    }
+}
+
+/// What [`TimeExpanded::ride`] found: the search, and the finish read off it.
+struct Found {
+    result: SearchResult,
+    settled: usize,
+    event: NodeId,
+    walk_in: Option<Walk>,
+    arrives: Time,
 }

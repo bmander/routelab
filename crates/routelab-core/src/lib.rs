@@ -42,5 +42,7 @@ pub use landmark::{Landmarks, Selection};
 pub use progress::Progress;
 pub use search::{SearchError, SearchOptions, SearchResult};
 pub use timedep::{time_dependent_dijkstra, Calendar, Clock, Departure, Waiting, Window, WEEK};
-pub use timetable::{Connection, Itinerary, Ride, TimeExpanded, Timetable, Transfer};
+pub use timetable::{
+    Connection, Footpaths, Itinerary, Leg, Ride, TimeExpanded, Timetable, Transfer, Walk,
+};
 pub use tree::{Magnitude, SearchTree};

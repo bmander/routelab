@@ -86,18 +86,28 @@ def test_a_departure_time_has_no_default(gated):
 
 
 def test_a_dataset_with_no_schedule_says_so_before_you_bind():
-    # The existing capability mechanism, doing its job: `requires` against
-    # `provides`, answered without building anything.
+    # The technique asks its own derivation, `Schedule`, and answers without
+    # building anything.
     bare = rl.Environment(rl.ScalarEdges([("a", "b", 1)]))
     assert rl.TimeDependentDijkstra().missing_from(bare.compile()) == {"schedule"}
     assert rl.Dijkstra().missing_from(bare.compile()) == frozenset()
 
 
-def test_an_environment_with_schedules_provides_one(gated):
+def test_an_environment_with_schedules_yields_a_calendar(gated):
     compiled = gated.compile()
-    assert "schedule" in compiled.provides
+    assert rl.Schedule.missing_from(compiled) == frozenset()
     assert rl.TimeDependentDijkstra().missing_from(compiled) == frozenset()
-    assert len(compiled.calendar) > 0
+    assert len(rl.TimeDependentDijkstra().bind(gated).calendar) > 0
+
+
+def test_a_clock_reader_refuses_an_unscheduled_network_at_bind():
+    # Refused where a heuristic would be refused — at bind, before any query —
+    # and in the derivation's own words.
+    bare = rl.Environment(rl.ScalarEdges([("a", "b", 1)]))
+    with pytest.raises(ValueError, match="nothing here is scheduled"):
+        rl.Schedule().bind(bare.compile())
+    with pytest.raises(ValueError, match="nothing here is scheduled"):
+        rl.TimeDependentDijkstra().bind(bare)
 
 
 def test_the_day_of_the_week_matters(gated):
@@ -132,6 +142,7 @@ def test_an_overnight_closure_is_the_other_tag_form(gated):
     # the gate's `yes @`, and the one that would break if the default were
     # read the same way for both.
     compiled = gated.compile()
+    calendar = rl.Schedule().bind(compiled)
     trail = [
         edge
         for edge in range(compiled.graph.num_edges)
@@ -139,8 +150,8 @@ def test_an_overnight_closure_is_the_other_tag_form(gated):
     ]
     assert trail, "the fixture has an overnight trail"
     for edge in trail:
-        assert compiled.calendar.is_open(edge, 12 * 3600), "open at noon"
-        assert not compiled.calendar.is_open(edge, 2 * 3600), "shut at 2am"
+        assert calendar.is_open(edge, 12 * 3600), "open at noon"
+        assert not calendar.is_open(edge, 2 * 3600), "shut at 2am"
 
 
 def test_a_walking_profile_reads_foot_tags_and_a_driving_one_does_not():

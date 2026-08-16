@@ -13,11 +13,24 @@ that translation so nothing above it has to.
 journey can later say "walk, then the 14 bus, then bike" rather than just naming
 a cost. This is what ``Graph.input_index`` exists for.
 
+And that is all the compiled form is: the *merge* — one numbering, one graph,
+and which layer each edge came from. Everything else a technique might want
+from the layers — a calendar of opening hours, a timetable of departures, a
+coordinates table, a rate to price a distance against — is not merged here.
+The technique that reads it derives it, from :attr:`CompiledEnvironment.spans`
+and :attr:`CompiledEnvironment.sources`, and refuses if the layers cannot
+supply it: see :class:`~routelab.Schedule`, :class:`~routelab.Departures`,
+:class:`~routelab.Plane` and :class:`~routelab.Pace`. That is what keeps the
+next technique from touching this file: it brings its own derivation, and the
+environment does not need to know what it is for.
+
 Layers declare a ``cost_model``, and planners declare which cost models they can
-route over. Today there is one — ``"scalar"``, a fixed cost per edge — so the
-check always passes. It is here because the interesting case is the one where it
-fails: Dijkstra cannot route over a timetable, and should say so when a timetable
-layer arrives rather than quietly returning a wrong answer.
+route over. Today there are two — ``"scalar"``, a fixed cost per edge, and
+``"timetable"``, edges that are lower bounds standing in for departures — and
+the check exists for the case where it fails: Dijkstra cannot route over a
+timetable, and should say so when a timetable layer arrives rather than quietly
+returning a wrong answer. This one *is* the environment's to carry, because it
+describes the graph's own weights.
 
 Compilation checks the same attribute for a different reason. Flattening every
 layer into one fixed-cost graph is what makes a scalar environment cheap, and it
@@ -31,7 +44,6 @@ from __future__ import annotations
 import bisect
 from typing import Any, Dict, Hashable, Iterable, Iterator, List, Mapping, Optional, Tuple
 
-from . import _routelab
 from .graph import Graph
 
 __all__ = [
@@ -55,29 +67,6 @@ LabelledEdge = Tuple[Hashable, Hashable, int]
 #: A cost model absent from here is one nothing could carry without lying about
 #: it, which is the seam a new schedule-based algorithm plugs into.
 COMPILABLE_COST_MODELS = frozenset({"scalar", "timetable"})
-
-
-def windows_of(source: "EdgeSource", index: int) -> "Optional[List[Tuple[int, int]]]":
-    """When a layer's ``index``-th edge may be travelled, or ``None`` for always.
-
-    The sibling of :func:`shape_of`, and optional in the same way: a layer that
-    knows nothing about time simply has no hook, and everything it contributes
-    is open at every hour.
-    """
-    getter = getattr(source, "windows", None)
-    return None if getter is None else getter(index)
-
-
-def connections_of(source: "EdgeSource", index: int) -> "Optional[List[Tuple[int, int, int]]]":
-    """What runs along a layer's ``index``-th edge, or ``None`` for a layer with
-    no timetable.
-
-    The sibling of :func:`windows_of`, and the distinction between them is the
-    distinction between the two ways a network can depend on the clock: a window
-    says *when an edge is open*, a connection says *when a vehicle leaves*.
-    """
-    getter = getattr(source, "connections", None)
-    return None if getter is None else getter(index)
 
 
 def shape_of(source: "EdgeSource", index: int) -> "Optional[List[Tuple[float, float]]]":
@@ -328,10 +317,10 @@ class CompiledEnvironment:
         self.graph = Graph(len(index), edges)
         self.labels: "Tuple[Hashable, ...]" = tuple(index)
         self._index = index
-        #: The cost models of the layers that went into this graph. Always
-        #: ``{"scalar"}`` today, since compilation refuses anything else — but
-        #: carried so that a technique can be asked whether it handles what is
-        #: actually here, rather than what used to be.
+        self._sources: "Tuple[EdgeSource, ...]" = tuple(sources)
+        #: The cost models of the layers that went into this graph, carried so
+        #: that a technique can be asked whether it handles what is actually
+        #: here, rather than what used to be.
         self.cost_models: "frozenset[str]" = frozenset(
             source.cost_model for source in sources
         )
@@ -340,135 +329,25 @@ class CompiledEnvironment:
         self._spans: "Tuple[Tuple[int, int, EdgeSource], ...]" = tuple(spans)
         self._span_starts: "Tuple[int, ...]" = tuple(start for start, _, _ in spans)
 
-        #: When each edge may be travelled, for the techniques that ask. Built
-        #: from the layers' own ``windows`` hooks and keyed by *input* position,
-        #: which the kernel translates — an edge id is a CSR position and the
-        #: two are not the same. ``None`` when no layer schedules anything.
-        self.calendar = self._gather_calendar(spans)
-
-        #: The departures along each edge, for the timetable techniques. Keyed
-        #: by *input* position and translated in the kernel, exactly as
-        #: :attr:`calendar` is, and ``None`` when no layer keeps a timetable.
-        self.timetable = self._gather_timetable(spans)
-
-        #: Coordinates per node id, ``None`` where a node has none.
-        self.positions: "Tuple[Optional[Tuple[float, float]], ...]" = self._gather_positions(
-            sources, index
-        )
-        #: The cheapest rate any edge-contributing layer charges per unit of
-        #: distance, or ``None`` if one of them did not say. See
-        #: :meth:`_gather_cost_per_distance` for why one silent layer spoils it.
-        self.cost_per_distance = self._gather_cost_per_distance(
-            [source for _, _, source in spans]
-        )
-
-    def _gather_calendar(
-        self, spans: "List[Tuple[int, int, EdgeSource]]"
-    ) -> "Optional[_routelab.Calendar]":
-        """Collect every layer's schedules into one calendar, or ``None``.
-
-        Walks the input edge list rather than the graph, because that is the
-        numbering a layer speaks: ``locate`` runs the other way and would need
-        the answer to ask the question.
-        """
-        windows = []
-        for start, stop, source in spans:
-            for position in range(stop - start):
-                schedule = windows_of(source, position)
-                if schedule:
-                    windows.append((start + position, schedule))
-        if not windows:
-            return None
-        return _routelab.Calendar.from_windows(self.graph, windows)
-
-    def _gather_timetable(
-        self, spans: "List[Tuple[int, int, EdgeSource]]"
-    ) -> "Optional[_routelab.Timetable]":
-        """Collect every layer's departures into one timetable, or ``None``.
-
-        The same walk as :meth:`_gather_calendar` and for the same reason: the
-        input edge list is the numbering a layer speaks. A connection's pair of
-        stops comes from the edge it is filed under rather than from the layer,
-        so there is nothing here to pair up wrongly.
-        """
-        connections = []
-        for start, stop, source in spans:
-            for position in range(stop - start):
-                running = connections_of(source, position)
-                if running:
-                    connections.append((start + position, running))
-        if not connections:
-            return None
-        return _routelab.Timetable.from_connections(self.graph, connections)
-
-    @staticmethod
-    def _gather_positions(
-        sources: "List[EdgeSource]", index: "Dict[Hashable, int]"
-    ) -> "Tuple[Optional[Tuple[float, float]], ...]":
-        """Collect every layer's coordinates into one node-indexed table.
-
-        Later layers win, so a dedicated geometry layer can correct coordinates a
-        topology layer guessed at.
-        """
-        positions: "List[Optional[Tuple[float, float]]]" = [None] * len(index)
-        for source in sources:
-            for label, point in source.positions().items():
-                node_id = index.get(label)
-                if node_id is not None:
-                    positions[node_id] = (float(point[0]), float(point[1]))
-        return tuple(positions)
-
-    @staticmethod
-    def _gather_cost_per_distance(
-        contributing: "List[EdgeSource]",
-    ) -> Optional[float]:
-        """The lower bound on cost per unit distance across the whole environment.
-
-        The *minimum*, because a bound has to hold for every path, and a path may
-        use the fastest layer for its whole length. Add a train to a walking
-        network and the bound has to drop to the train's rate, or a straight-line
-        estimate priced at walking speed starts overestimating — which is how an
-        admissible heuristic silently becomes an inadmissible one.
-
-        One layer that declares nothing means no bound at all: it might be
-        arbitrarily fast, so nothing can be ruled out. Only layers that actually
-        contributed edges count, which is what lets a geometry-only layer stay out
-        of the arithmetic without a special case.
-        """
-        rates: "List[float]" = []
-        for source in contributing:
-            if source.cost_per_distance is None:
-                return None
-            rates.append(source.cost_per_distance)
-        return min(rates) if rates else None
+    @property
+    def sources(self) -> "Tuple[EdgeSource, ...]":
+        """Every layer that went into this graph, in registration order —
+        including ones that contributed no edges, like :class:`Positions`."""
+        return self._sources
 
     @property
-    def provides(self) -> "frozenset[str]":
-        """What this environment can supply beyond a graph, by name.
+    def spans(self) -> "Tuple[Tuple[int, int, EdgeSource], ...]":
+        """``(start, stop, layer)`` runs in the *input* edge list, one per
+        edge-contributing layer.
 
-        The counterpart to :attr:`routelab.Heuristic.requires`: between them a
-        caller can ask which techniques a given dataset can support without
-        building any of them and reading the errors. An OSM extract provides all
-        three; a hand-written edge list usually provides none.
-
-        - ``"positions"`` — every node has coordinates
-        - ``"cost_per_distance"`` — every edge-contributing layer declared a rate
-        - ``"geometry"`` — at least one layer knows the shape of its edges
-        - ``"schedule"`` — some edge is open only at certain hours
-        - ``"timetable"`` — some edge is served by departures rather than open
+        This is the numbering a layer's own hooks speak — ``windows(i)``,
+        ``connections(i)``, ``geometry(i)`` count from ``start`` — and what the
+        kernel's ``Calendar.from_windows`` and ``Timetable.from_connections``
+        translate to edge ids. Public so that whatever a technique derives from
+        the layers can walk them without the environment having to know what
+        is being derived.
         """
-        provided = set()
-        if self.positions and all(point is not None for point in self.positions):
-            provided.add("positions")
-        if self.cost_per_distance is not None:
-            provided.add("cost_per_distance")
-        if any(source.geometry(0) is not None for _, _, source in self._spans):
-            provided.add("geometry")
-        if self.calendar is not None:
-            provided.add("schedule")
-        if self.timetable is not None:
-            provided.add("timetable")
-        return frozenset(provided)
+        return self._spans
 
     def node_id(self, label: Hashable) -> int:
         """The dense id of ``label``."""

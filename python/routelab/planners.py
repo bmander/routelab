@@ -34,8 +34,10 @@ from typing import Any, Dict, Hashable, Iterable, Mapping, Optional, Union
 
 from . import _routelab
 from .clock import service_seconds, weekly_seconds
+from .departures import Departures, Walks
 from .environment import CompiledEnvironment, Environment
 from .heuristics import Heuristic
+from .schedule import Schedule
 from .journey import Journey
 from .orderings import EdgeDifference, Ordering
 from .search import Result, SearchResult, astar, bfs, dijkstra
@@ -108,11 +110,13 @@ class Planner:
         so a study can skip what a dataset cannot support before spending the
         preprocessing to find out — which only holds if this covers everything
         ``bind`` checks, so it does: cost models the technique does not accept,
-        and (in subclasses) capabilities the environment does not provide.
+        and (in subclasses) whatever the technique derives from the environment
+        — a schedule, a timetable, coordinates — that the layers never supplied.
 
-        Entries are short names either way: ``"timetable"`` for a cost model
-        this algorithm cannot route over, ``"positions"`` for something the
-        layers never supplied.
+        Entries are short names either way, and each is owned by whoever
+        answers for it: ``"timetable"`` for a cost model this algorithm cannot
+        route over, ``"positions"`` from :class:`~routelab.Plane`, ``"schedule"``
+        from :class:`~routelab.Schedule`.
         """
         return compiled.cost_models - self.accepts
 
@@ -450,10 +454,6 @@ class TimeDependentDijkstra(Planner):
             that shows waiting is doing real work.
     """
 
-    #: A schedule to read. Without one this is Dijkstra with extra steps, and
-    #: `missing_from` says so before anything is built.
-    requires: "frozenset[str]" = frozenset({"schedule"})
-
     WAITING = ("unrestricted", "forbidden")
 
     def __init__(self, waiting: str = "unrestricted"):
@@ -465,7 +465,19 @@ class TimeDependentDijkstra(Planner):
         self.waiting = waiting
 
     def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
-        return super().missing_from(compiled) | (self.requires - compiled.provides)
+        """A schedule to read, on top of what any planner needs. Without one
+        this is Dijkstra with extra steps, and this says so before anything
+        is built."""
+        return super().missing_from(compiled) | Schedule.missing_from(compiled)
+
+    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
+        """Gather the layers' schedules into the calendar every query reads.
+
+        The environment does not keep one; this technique is what reads it,
+        so this technique derives it — and refuses here, at bind, if there is
+        nothing to derive.
+        """
+        self.calendar = Schedule().bind(self._bound())
 
     def search(self, origins: Origins, **options: Any) -> Result:
         """Run the search from a departure time. There is no default for it.
@@ -484,7 +496,7 @@ class TimeDependentDijkstra(Planner):
         compiled = self._bound()
         return _routelab.time_dependent_dijkstra(
             compiled.graph,
-            compiled.calendar,
+            self.calendar,
             list(self._origin_ids(origins).items()),
             weekly_seconds(departing),
             waiting=self.waiting,
@@ -506,28 +518,32 @@ class TimetablePlanner(Planner):
     nodes; :class:`TimeDependent` spends search. They must agree on every query,
     which is the paper's thesis and this library's test.
 
-    Both accept a ``"scalar"`` layer alongside the timetable so an environment
-    can carry stop geometry, and both **require** a timetable — bind one to a
-    plain road network and ``missing_from`` says so before anything is built.
+    Both accept a ``"scalar"`` layer alongside the timetable and read its edges
+    as **footpaths** — walks a rider may make between stops at any time, for
+    the edge's weight, which is what lets a real feed's two sides of a street
+    be one place (see :class:`~routelab.Footpaths`). Both **require** a
+    timetable — bind one to a plain road network and ``missing_from`` says so
+    before anything is built.
     """
 
     accepts: "frozenset[str]" = frozenset({"scalar", "timetable"})
 
-    #: Departures to read. Without them there is no timetable to route over.
-    requires: "frozenset[str]" = frozenset({"timetable"})
-
     def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
-        return super().missing_from(compiled) | (self.requires - compiled.provides)
+        """Departures to read, on top of what any planner needs. Without them
+        there is no timetable to route over."""
+        return super().missing_from(compiled) | Departures.missing_from(compiled)
 
-    def _timetable(self) -> "_routelab.Timetable":
-        timetable = self._bound().timetable
-        if timetable is None:
-            raise ValueError(
-                f"{self!r} needs a timetable and this environment has none. "
-                f"Register a layer that keeps departures — "
-                f"routelab.sources.gtfs.GTFS(path, date)."
-            )
-        return timetable
+    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
+        """Gather the layers' departures into the timetable both models read,
+        and their scalar edges into the footpaths both models walk.
+
+        Derived here rather than kept on the environment, for the reason
+        :class:`TimeDependentDijkstra` gives — and refused here, at bind, so
+        a technique that cannot route says so before it is asked to.
+        """
+        compiled = self._bound()
+        self.timetable = Departures().bind(compiled)
+        self.footpaths = Walks().bind(compiled)
 
     def _earliest_arrival(
         self, origin: Hashable, destination: Hashable, departing: int
@@ -604,8 +620,8 @@ class TimeDependent(TimetablePlanner):
     def _earliest_arrival(
         self, origin: Hashable, destination: Hashable, departing: int
     ) -> "Optional[_routelab.Itinerary]":
-        return self._timetable().earliest_arrival(
-            self.node_id(origin), departing, self.node_id(destination)
+        return self.timetable.earliest_arrival(
+            self.node_id(origin), departing, self.node_id(destination), self.footpaths
         )
 
 
@@ -625,7 +641,8 @@ class TimeExpanded(TimetablePlanner):
     """
 
     def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        self._expanded = _routelab.TimeExpanded.build(self._timetable())
+        super().preprocess(progress)
+        self._expanded = _routelab.TimeExpanded.build(self.timetable, self.footpaths)
 
     def _footprint(self) -> int:
         return self._expanded.footprint

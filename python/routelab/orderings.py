@@ -6,9 +6,9 @@ across town needs a shortcut to stand in for it; contract the cul-de-sacs first
 and most of them cost nothing at all.
 
 Ordering is a policy, so it is a spec, the same shape as
-:mod:`routelab.heuristics` member for member: declare what it needs with
-``requires``, check it against an environment with ``missing_from``, and turn it
-into the artifact with ``bind``. The parallel is exact — ``Landmarks(16,
+:mod:`routelab.heuristics` member for member: say what it cannot get from an
+environment with ``missing_from``, and turn it into the artifact with ``bind``.
+The parallel is exact — ``Landmarks(16,
 selection="farthest")`` is also a policy for choosing nodes, and binding it runs
 the selection and hands back the table. Here binding runs the contraction and
 hands back the hierarchy.
@@ -32,13 +32,6 @@ __all__ = ["EdgeDifference", "Ordering", "RandomOrder"]
 class Ordering:
     """A specification for a contraction order, not yet applied to a graph."""
 
-    #: What this ordering needs an environment to supply, by name. Empty for
-    #: both orderings here, which measure the graph itself — but an ordering
-    #: that cut the map geometrically would want ``"positions"``, and this is
-    #: where it would say so. The mirror of
-    #: :attr:`routelab.heuristics.Heuristic.requires`.
-    requires: "frozenset[str]" = frozenset()
-
     def __init__(self, max_settled: int = 500, max_hops: int = 5):
         """
         Args:
@@ -55,8 +48,13 @@ class Ordering:
 
     @classmethod
     def missing_from(cls, compiled: CompiledEnvironment) -> "frozenset[str]":
-        """What this ordering needs that ``compiled`` does not provide."""
-        return cls.requires - compiled.provides
+        """What this ordering needs that ``compiled`` cannot supply, by name.
+
+        Nothing, for both orderings here, which measure the graph itself. An
+        ordering that cut the map geometrically would answer
+        ``Plane.missing_from(compiled)`` — the same shape a heuristic uses.
+        """
+        return frozenset()
 
     def bind(
         self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None

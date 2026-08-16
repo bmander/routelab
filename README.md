@@ -108,7 +108,7 @@ rl.AStar(rl.Euclidean()).bind(env).route("home", "stop_b")
 ```
 
 `cost_per_distance` is the least a layer can charge to cover one unit of ground.
-The environment takes the **minimum** across layers, because a path may ride the
+`Euclidean` takes the **minimum** across layers, because a path may ride the
 fastest one the whole way — add a train to a walking network and a bound priced
 at walking speed starts overestimating, which turns an admissible heuristic into
 one that quietly returns paths that are not the cheapest. A layer that declares
@@ -119,6 +119,12 @@ cannot be built says so instead of falling back:
 rl.AStar(rl.Euclidean()).bind(env)
 # ValueError: Euclidean needs a position for every node; 2 have none ...
 ```
+
+The environment does not keep a coordinates table or a rate. `Euclidean` derives
+both when it binds — `rl.Plane` and `rl.Pace`, two small specifications with the
+same `missing_from`/`bind` shape as a heuristic — and refuses if the layers
+cannot supply them. That is what keeps the environment a merge of labels, edges
+and provenance rather than a place every technique's needs accumulate.
 
 There is no default heuristic. A* whose guidance silently became zero is Dijkstra
 wearing its name — the one failure a benchmark cannot see — so `rl.Zero()` has to
@@ -403,6 +409,11 @@ planner.route(ballard, magnolia, departing=time(8, 0))    # 30.0 min
 planner.route(ballard, magnolia, departing=time(22, 0))   # 61.6 min
 ```
 
+Binding is where the calendar is built: `rl.Schedule` walks the layers' opening
+hours into one kernel calendar, and the planner keeps it — `planner.calendar`
+— rather than the environment. Bind to a network with no schedule and it says
+so, in the same breath a heuristic would.
+
 `python demos/route_by_clock.py seattle.osm.pbf` prints the same trip at every
 hour. 354 of Seattle's 1,480,122 walking edges carry a schedule — a rounding
 error that changes the answer completely for the trips that meet one:
@@ -475,7 +486,54 @@ A GTFS layer contributes one edge per pair of adjacent stops weighted by the
 every stop a label and to snap a coordinate to one, and not enough to route on.
 Routing it as though those weights told the whole story is a wrong answer that
 looks like a right one, so `Dijkstra` refuses it and `missing_from` says so
-before anything is built.
+before anything is built. The departures themselves are what the two timetable
+techniques derive from the layer at bind — `rl.Departures`, kept as
+`planner.timetable` — which is the pattern every clock-reading technique here
+follows, and the one the next one should.
+
+#### Crossing the street
+
+A feed says where its stops are and what leaves them. It rarely says that the
+northbound stop and the southbound one across the street are, for a rider, the
+same place — King County Metro's has no `transfers.txt` and no parent stations
+at all — and a timetable technique that cannot cross the street cannot make
+most real trips. Downtown to the U District at 08:30 came back at 09:20 with
+four changes because every change had to happen at one pole; 39 of 200 random
+stop pairs had no answer at all.
+
+The paper's *foot-edges* are the fix: a walk between two stops that a rider may
+take at any time, for a fixed duration. Here they are a layer, and an ordinary
+`"scalar"` one:
+
+```python
+feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
+env = rl.Environment(feed, rl.Footpaths(feed, within=200))     # 13,908 walks
+journey = rl.TimeDependent().bind(env).route(origin, target, departing=time(8, 30))
+journey.arrives, journey.transfers                          # 09:04, 1
+[leg for leg in journey.legs if leg.trip is None]           # the walk across 3rd Ave
+```
+
+A timetable technique always accepted a scalar layer beside its timetable; now
+it reads one, as the links a rider may walk — `rl.Walks`, derived at bind like
+the departures are. Nothing about the environment changed to carry them, and a
+walk leg has provenance and geometry through the same machinery as every other
+leg. How far a rider will walk is a modelling choice, which is why it is a
+knob on a layer you register and not something the environment does for you.
+Two hundred metres joins the two sides of a street and the bays of a transit
+centre: 197 of the same 200 pairs now route, every one of them using a walk,
+and the models still agree on all of them.
+
+Two things worth knowing about how they are carried. The kernel **closes the
+set under composition** — walk A→B and B→C and you may walk A→C — because the
+time-dependent search chains walks on its own and the time-expanded graph must
+not, or a pair of opposite footpaths would spawn events for ever; closing the
+set is what lets one model take a walk one hop at a time and the other in one
+and still agree. Seattle's 13,908 walks close to 74,636. And in the
+time-expanded graph a walk is not a new event but an edge from the arrival at
+one stop to the first departure you could catch at the other, which keeps the
+event count where it was; the walk edges themselves are 5.2 million, and the
+model's memory goes from 37 MB to 136 MB. That is the paper's trade again, and
+worth having a number for.
 
 Two limits worth stating. Changing vehicles is **instantaneous**, which is the
 paper's *simple* model; its *realistic* one charges a minimum change time and is
@@ -490,7 +548,8 @@ share one environment. That is the multimodal problem, and the conversion needs 
 service-day-to-calendar anchor: exactly the thing that must not be implicit.
 
 `python demos/route_transit.py kcm.zip --date 2026-08-17` runs both models and
-prints the itinerary.
+prints the itinerary, walks included; `--walk 0` is the plain model, and the
+quickest way to see what the footpaths buy.
 
 ### Underneath
 
@@ -583,6 +642,19 @@ usefully diffing them becomes impossible. Every search is deterministic; not all
 of them agree with each other, because a rule about settle order says nothing
 across algorithms that do not settle in one order — a bidirectional search picks
 its own equally-cheap winner among ties.
+
+**The environment is a merge, not a bag.** Compiling layers produces exactly
+three things: a numbering of labels, one graph, and which layer each edge came
+from. A calendar, a timetable, a coordinates table, a rate — anything a
+technique reads beyond the graph — is derived by that technique at bind time
+from the compiled layers (`rl.Schedule`, `rl.Departures`, `rl.Plane`,
+`rl.Pace`), and refused there if the layers cannot supply it. The rule that
+falls out is worth stating: a thing is an *argument* — a constructor parameter,
+a wire on the demo's board — if and only if it is a choice. A heuristic is a
+choice; a calendar assembled from the layers has one possible construction and
+no knobs, so it is derived rather than passed. This is what lets the next
+schedule-based algorithm arrive without touching `environment.py`: it brings
+its own derivation, and the environment need not know what it is for.
 
 **Multi-source with initial costs.** The one-to-all search takes
 `(node, initial_cost)` pairs rather than a single origin. Every multimodal

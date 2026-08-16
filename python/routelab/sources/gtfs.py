@@ -13,7 +13,9 @@ What the layer *does* contribute as edges is one per pair of adjacent stops,
 weighted by the shortest ride anyone makes along it. That is a genuine lower
 bound rather than a cost — enough to give every stop a label, to snap a
 coordinate to one, and to price a distance heuristic — and the schedule itself
-travels alongside it as a :class:`~routelab._routelab.Timetable`, keyed by edge.
+is what a timetable technique derives from this layer at bind, as a
+:class:`~routelab._routelab.Timetable` keyed by edge (see
+:class:`~routelab.Departures`).
 
 One service day at a time. GTFS writes ``25:30:00`` for a bus that leaves before
 midnight and arrives after it, so a service day is a line rather than a cycle,
@@ -93,8 +95,8 @@ class GTFS(EdgeSource):
         ``(trip, departs, arrives)``, with times in seconds since the service
         day's midnight and possibly past 86400. The hook mirrors
         :meth:`~routelab.sources.osm.OSM.windows`: indices are this layer's own,
-        and :class:`~routelab.CompiledEnvironment` does the translation into
-        the graph's numbering.
+        and :class:`~routelab.Departures` — the derivation the timetable
+        techniques bind — does the translation into the graph's numbering.
         """
         return self.feed.connections(index)
 

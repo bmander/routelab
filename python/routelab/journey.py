@@ -109,6 +109,13 @@ class Journey:
         return self.cost - self.waiting
 
     @property
+    def walking(self) -> int:
+        """Seconds of :attr:`moving` spent on foot between stops — the legs
+        that ride no vehicle. Zero for a journey with no clock, whose legs
+        have no trip to be without."""
+        return sum(leg.weight for leg in self.legs if leg.trip is None)
+
+    @property
     def geometry(self) -> "List[Point]":
         """The whole route as one polyline, origin first.
 
@@ -142,13 +149,12 @@ class Journey:
 
         Zero for a journey you never get off and for one with no vehicles at
         all. Counted from the legs rather than carried, because it is a fact
-        about them: a leg knows its trip, so nothing else has to be told.
+        about them: a leg knows its trip, so nothing else has to be told. A
+        walk between two vehicles is how the change is made, not a second one,
+        so only the rides are compared.
         """
-        return sum(
-            1
-            for here, then in zip(self.legs, self.legs[1:])
-            if here.trip is not None and then.trip is not None and here.trip != then.trip
-        )
+        trips = [leg.trip for leg in self.legs if leg.trip is not None]
+        return sum(1 for here, then in zip(trips, trips[1:]) if here != then)
 
     @classmethod
     def from_itinerary(
@@ -166,23 +172,19 @@ class Journey:
         which for a transit journey is the number a rider cares about and the
         static case can only ever report as a residual.
         """
-        legs = []
-        for trip, tail, head, departs, arrives in itinerary.rides():
-            edge_id = _edge_between(compiled, tail, head)
-            source, position = compiled.locate(edge_id)
-            legs.append(
-                Leg(
-                    tail=compiled.label(tail),
-                    head=compiled.label(head),
-                    weight=arrives - departs,
-                    source=source,
-                    edge=edge_id,
-                    position=position,
-                    departs=departs,
-                    arrives=arrives,
-                    trip=trip,
-                )
+        # A ride's edge and a walk's edge may join the same two stops; the cost
+        # model tells them apart, and a walk comes back hop by hop already —
+        # the kernel tells a closed walk as the given links it chains.
+        legs = [
+            _leg(
+                compiled,
+                _edge_between(compiled, tail, head, "scalar" if trip is None else "timetable"),
+                departs,
+                arrives,
+                trip,
             )
+            for trip, tail, head, departs, arrives in itinerary.legs()
+        ]
         return cls(
             origin=origin,
             destination=legs[-1].head if legs else origin,
@@ -239,19 +241,48 @@ class Journey:
         return f"Journey({arrow}, cost={self.cost})"
 
 
-def _edge_between(compiled: CompiledEnvironment, tail: int, head: int) -> int:
-    """The graph edge from ``tail`` to ``head``.
+def _edge_between(
+    compiled: CompiledEnvironment, tail: int, head: int, cost_model: Optional[str] = None
+) -> int:
+    """The graph edge from ``tail`` to ``head``, from a layer of ``cost_model``
+    if one is named.
 
     A timetable query answers in stops, not in edges, and a leg needs an edge to
     trace its own provenance. Scanned rather than indexed: an itinerary has
     tens of legs and a stop has a handful of neighbours, so a table over the
-    whole graph would cost more to build than every query it ever served.
+    whole graph would cost more to build than every query it ever served. The
+    cost model tells a ride's edge from a walk's when both join the same stops.
     """
     graph = compiled.graph
     for edge_id in graph.out_edges(tail):
-        if graph.edge(edge_id)[1] == head:
+        if graph.edge(edge_id)[1] != head:
+            continue
+        if cost_model is None or compiled.source_of(edge_id).cost_model == cost_model:
             return edge_id
     raise KeyError(
         f"{compiled.label(tail)!r} → {compiled.label(head)!r} is not an edge in "
         f"this environment, so the itinerary did not come from it"
+    )
+
+
+def _leg(
+    compiled: CompiledEnvironment,
+    edge_id: int,
+    departs: int,
+    arrives: int,
+    trip: Optional[int],
+) -> Leg:
+    """A scheduled leg over ``edge_id``, with its provenance looked up."""
+    tail, head, _ = compiled.graph.edge(edge_id)
+    source, position = compiled.locate(edge_id)
+    return Leg(
+        tail=compiled.label(tail),
+        head=compiled.label(head),
+        weight=arrives - departs,
+        source=source,
+        edge=edge_id,
+        position=position,
+        departs=departs,
+        arrives=arrives,
+        trip=trip,
     )

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from . import _routelab, heuristics, orderings, reference, sources
 from ._args import Nodes, Sources
+from .departures import Departures, Walks
 from .environment import (
     CompiledEnvironment,
     EdgeSource,
@@ -36,10 +37,11 @@ from .environment import (
     ScalarEdges,
 )
 from .graph import Graph
-from .heuristics import Euclidean, Heuristic, Landmarks, Zero
+from .heuristics import Euclidean, Heuristic, Landmarks, Pace, Plane, Zero
 from .journey import Journey, Leg
 from .orderings import EdgeDifference, Ordering, RandomOrder
 from .clock import WEEK, weekly_seconds
+from .schedule import Schedule
 from .planners import (
     BFS,
     AStar,
@@ -53,7 +55,7 @@ from .planners import (
 )
 from .search import Result, SearchResult, astar, bfs, dijkstra
 from .searchspace import Branch, MeetingTrees, SearchSpace, ShortestPathTree
-from .sources import GTFS, OSM, Cycling, Driving, Profile, Walking
+from .sources import GTFS, OSM, Cycling, Driving, Footpaths, Profile, Walking
 
 __all__ = [
     "AStar",
@@ -62,12 +64,14 @@ __all__ = [
     "CompiledEnvironment",
     "ContractionHierarchy",
     "Cycling",
+    "Departures",
     "Dijkstra",
     "Driving",
     "EdgeSource",
     "EdgeDifference",
     "Environment",
     "Euclidean",
+    "Footpaths",
     "Graph",
     "Heuristic",
     "Journey",
@@ -78,12 +82,15 @@ __all__ = [
     "GTFS",
     "OSM",
     "Ordering",
+    "Pace",
     "Planner",
+    "Plane",
     "Positions",
     "Profile",
     "RandomOrder",
     "Result",
     "ScalarEdges",
+    "Schedule",
     "SearchResult",
     "SearchSpace",
     "ShortestPathTree",
@@ -92,6 +99,7 @@ __all__ = [
     "TimeExpanded",
     "Sources",
     "WEEK",
+    "Walks",
     "Walking",
     "Zero",
     "astar",
