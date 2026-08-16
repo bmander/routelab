@@ -5,8 +5,6 @@ use std::sync::Arc;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use routelab_core::util::progress::Progress as CoreProgress;
-
 use routelab_core::{
     Heuristic as _, Landmarks as CoreLandmarks, NodeId, Selection, StandardHeuristic, Weight,
 };
@@ -73,7 +71,7 @@ impl PyHeuristic {
         let graph = Arc::clone(&graph.inner);
         // Two full searches per landmark: seconds on a city, and the reason
         // this is preprocessing rather than something a query can afford.
-        let counter = progress.map_or_else(CoreProgress::new, |p| p.inner.clone());
+        let counter = counter(progress);
         let landmarks =
             py.detach(|| CoreLandmarks::build_reporting(&graph, count, selection, seed, &counter));
         Ok(PyHeuristic {

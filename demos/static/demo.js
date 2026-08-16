@@ -27,21 +27,42 @@ const LEG_COLOURS = ['#d1495b', '#1d7fbf', '#e09f3e', '#4f9d69', '#8e5ea2'];
 // One per round of a round-based search, darkest first: where you start, then
 // one bus away, then two. Past the sixth every round shares the last colour.
 const ROUNDS = ['#1d3557', '#1d6fa5', '#3aa6a6', '#7fc46a', '#e0b23e', '#e07b3e'];
-// The spaces made of points rather than branches: a timetable technique labels
-// stops, and a stop is a place, not a road. Every one of them ships `peak` on
-// the collection and a per-stop number to divide by it, so one drawing rule
-// covers them all and a kind's entry here is the only thing that differs —
-// which property carries the number, how it colours, and what to say about it.
-const POINTS = {
+// The search spaces a timetable technique reports, keyed by the `kind` the
+// library gives them. None of them is a road network: a stop is a place and a
+// trip segment is a vehicle, so each says how to draw one feature and what to
+// call the collection. Everything else — the `peak` on the collection that a
+// per-feature number is divided by, the GeoJSON itself — is the same for all
+// of them, which is why one table covers them and a kind's entry is the only
+// thing that differs. A kind with no entry falls back to the tree drawing.
+const SPACES = {
   rounds: {
-    share: props => props.round,
-    colour: props => ROUNDS[Math.min(props.round, ROUNDS.length - 1)],
+    noun: 'stops',
     note: 'coloured by the round that first reached them',
+    marker: (latlng, props, share) => L.circleMarker(latlng, {
+      radius: 3.5 - 1.5 * share,
+      fillColor: ROUNDS[Math.min(props.round, ROUNDS.length - 1)],
+      stroke: false, fillOpacity: 0.85,
+    }),
+    share: props => props.round,
   },
   scan: {
-    share: props => props.after,
-    colour: (props, share) => `hsl(${210 + 40 * share} 70% ${30 + 45 * share}%)`,
+    noun: 'stops',
     note: 'coloured by how long after departure the sweep reached them',
+    marker: (latlng, props, share) => L.circleMarker(latlng, {
+      radius: 3.5 - 1.5 * share,
+      fillColor: `hsl(${210 + 40 * share} 70% ${30 + 45 * share}%)`,
+      stroke: false, fillOpacity: 0.85,
+    }),
+    share: props => props.after,
+  },
+  segments: {
+    noun: 'trip segments',
+    note: 'coloured by the number of changes each was reached with',
+    style: props => ({
+      color: ROUNDS[Math.min(props.round, ROUNDS.length - 1)],
+      weight: Math.max(1, 3.5 - props.round),
+      opacity: 0.7,
+    }),
   },
 };
 const PIN = L.divIcon({className: 'pin', iconSize: [14, 14], iconAnchor: [7, 7]});
@@ -156,6 +177,13 @@ const PRESETS = [
     layer: ['GTFS', {}],
     walks: ['Footpaths', {within: 200}],
     technique: ['CSA', {}],
+  },
+  {
+    id: 'transit-tripbased',
+    label: 'Transit · TripBased',
+    layer: ['GTFS', {}],
+    walks: ['Footpaths', {within: 200}],
+    technique: ['TripBased', {}],
   },
 ];
 
@@ -583,26 +611,23 @@ async function request(explore) {
   // either a route-only refresh mid-drag, which must leave what is drawn
   // alone, or a query whose `space` output goes nowhere, which must not.
   //
-  // A timetable technique's search has no branches at all — a stop is a place,
-  // not a road — so its space is points: the round that first reached each, or
-  // how long after departure the scan did. Either way the origin's
-  // neighbourhood is dark and near and the far side of the network pale.
+  // A timetable technique's search is not a road network at all — a stop is a
+  // place and a trip segment is a vehicle — so `SPACES` says how to draw one,
+  // by the kind the library gave it. Either way the origin's neighbourhood is
+  // dark and near and the far side of the network pale.
   const halves = {forward: '#1d6fa5', backward: '#7a3b9c'};
   if (explore) { space.clearLayers(); }
-  const look = answer.space ? POINTS[answer.space_kind] : undefined;
+  const look = answer.space ? SPACES[answer.space_kind] : undefined;
   if (look) {
-    // `peak` rides on the collection, not on every stop: one division here
+    // `peak` rides on the collection, not on every feature: one division here
     // rather than a float per feature down the wire.
     const peak = answer.space.peak || 1;
+    // A kind draws points or lines, never both: whichever it declares is the
+    // hook Leaflet gets, and the other stays unset.
     L.geoJSON(answer.space, {
-      pointToLayer: (feature, latlng) => {
-        const share = look.share(feature.properties) / peak;
-        return L.circleMarker(latlng, {
-          radius: 3.5 - 1.5 * share,
-          fillColor: look.colour(feature.properties, share),
-          stroke: false, fillOpacity: 0.85,
-        });
-      },
+      pointToLayer: look.marker && ((feature, latlng) =>
+        look.marker(latlng, feature.properties, look.share(feature.properties) / peak)),
+      style: look.style && (feature => look.style(feature.properties)),
     }).addTo(space);
   } else if (answer.space) {
     L.geoJSON(answer.space, {
@@ -671,7 +696,8 @@ async function request(explore) {
 }
 
 // The other journeys worth having, when the technique keeps them: RAPTOR's
-// front over arrival and changes, one entry per number of changes.
+// and TripBased's front over arrival and changes, one entry per number of
+// changes.
 function frontierNote(answer) {
   if (!answer.frontier || answer.frontier.length < 2) { return ''; }
   const others = answer.frontier
@@ -686,9 +712,10 @@ function spaceNote(answer) {
     // The technique's own sentence for having nothing to draw.
     return `<br><span class="hint">${answer.space_note}</span>`;
   }
-  if (answer.space && POINTS[answer.space_kind]) {
+  if (answer.space && SPACES[answer.space_kind]) {
+    const look = SPACES[answer.space_kind];
     return `<br><span class="hint">${answer.space_kind}: ${answer.space_size.toLocaleString()} ` +
-           `stops, ${POINTS[answer.space_kind].note}</span>`;
+           `${look.noun}, ${look.note}</span>`;
   }
   if (answer.space) {
     return `<br><span class="hint">tree: ${answer.space_size.toLocaleString()} ` +

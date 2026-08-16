@@ -86,6 +86,11 @@ const LOOKS = {
     sub: () => 'one array, one scan',
     available: () => Boolean(SETUP.feed),
   },
+  TripBased: {
+    title: 'TripBased', group: 'techniques',
+    sub: () => 'trips and transfers',
+    available: () => Boolean(SETUP.feed),
+  },
   // The query's fields are the options its wired technique takes, and only
   // those: a `shown` predicate reads the technique's declaration (`clock` and
   // `options`, both from the library) so the board never shows a knob the

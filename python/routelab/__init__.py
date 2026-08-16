@@ -54,6 +54,7 @@ from .kernels import (
     TimeDependent,
     TimeDependentDijkstra,
     TimeExpanded,
+    TripBased,
     TimetablePlanner,
     astar,
     bfs,
@@ -71,6 +72,8 @@ from .model.searchspace import (
     Rounds,
     Scan,
     SearchSpace,
+    Segment,
+    Segments,
     ShortestPathTree,
 )
 from .data import GTFS, OSM, Cycling, Driving, Footpaths, Profile, Walking
@@ -117,6 +120,7 @@ __all__ = [
     "TimeDependent",
     "TimeDependentDijkstra",
     "TimeExpanded",
+    "TripBased",
     "Sources",
     "WEEK",
     "Walks",
@@ -138,6 +142,8 @@ __all__ = [
     "Reach",
     "Rounds",
     "Scan",
+    "Segment",
+    "Segments",
     "clock_readers",
     "kernels",
     "service_seconds",

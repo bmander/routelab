@@ -12,3 +12,4 @@ __pycache__/
 *.osm.pbf
 route.html
 route.geojson
+.claude/

@@ -14,7 +14,7 @@ from datetime import time
 import pytest
 
 import routelab as rl
-MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA]
+MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA, rl.TripBased]
 
 
 # --- The layer -----------------------------------------------------------------

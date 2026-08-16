@@ -15,13 +15,15 @@ one into something a shortest-path algorithm can read.
 
 They must return the same arrival time. That claim is the paper's thesis and
 this demo's point — and RAPTOR (Delling, Pajor & Werneck, 2012), which builds
-no graph at all, and CSA (Dibbelt, Pajor, Strasser & Wagner, 2013), which
-sorts the connections into one array and scans it, must agree with both. The
-four run side by side and the table prints each; RAPTOR also prints its whole
-front, one journey per number of changes, and CSA its profile for the next two
-hours, one journey per departure worth taking.
+no graph at all, CSA (Dibbelt, Pajor, Strasser & Wagner, 2013), which sorts
+the connections into one array and scans it, and TripBased (Witt, 2015), which
+precomputes the transfers between trips and sweeps those, must agree with
+both. The five run side by side and the table prints each; RAPTOR and
+TripBased also print their whole front, one journey per number of changes,
+and CSA and TripBased their profile for the next two hours, one journey per
+departure worth taking.
 
-All four are given the paper's *foot-edges* — walks between stops within
+All five are given the paper's *foot-edges* — walks between stops within
 ``--walk`` metres of each other — because a real feed says nothing about the
 northbound stop and the southbound one across the street being the same place,
 and a model that cannot cross the street cannot make most real trips. Pass
@@ -43,7 +45,7 @@ import routelab as rl
 from routelab import GTFS
 
 #: Every timetable technique, in the order the literature produced them.
-MODELS = [rl.TimeDependent(), rl.TimeExpanded(), rl.RAPTOR(), rl.CSA()]
+MODELS = [rl.TimeDependent(), rl.TimeExpanded(), rl.RAPTOR(), rl.CSA(), rl.TripBased()]
 
 #: Downtown Seattle to the University District, which is a real trip somebody
 #: takes. Any two coordinates in the feed's area will do.
@@ -153,25 +155,36 @@ def main(argv: "list[str] | None" = None) -> int:
         if len(arrivals) == 1
         else f"\n  THE TECHNIQUES DISAGREE: {arrivals} — one of them is wrong"
     )
-    # The two extra readouts, each asked of the technique that has the verb.
-    raptor = planners.get("RAPTOR")
-    front = raptor.frontier(origin, target, departing=args.departing) if raptor else []
-    if len(front) > 1:
-        print("  RAPTOR's front: " + " · ".join(
-            f"{j.transfers} change{'' if j.transfers == 1 else 's'} arrives {clock(j.arrives)}"
-            for j in front
-        ))
+    # The extra readouts, each asked of the techniques that have the verb.
+    for name in ("RAPTOR", "TripBased"):
+        planner = planners.get(name)
+        if planner is None:
+            continue
+        front = planner.frontier(origin, target, departing=args.departing)
+        if len(front) > 1:
+            print(f"  {name}'s front: " + " · ".join(
+                f"{j.transfers} change{'' if j.transfers == 1 else 's'} arrives {clock(j.arrives)}"
+                for j in front
+            ))
 
-    csa = planners.get("CSA")
-    if csa is not None:
+    # CSA's profile is over departure and arrival; TripBased's over changes as
+    # well, so the same window holds more and each of its steps says how many.
+    def step(journey: rl.Journey, changes: bool) -> str:
+        leg = f"leave {clock(journey.departs)}, arrive {clock(journey.arrives)}"
+        return f"{leg} ({journey.transfers} ch.)" if changes else leg
+
+    for name in ("CSA", "TripBased"):
+        planner = planners.get(name)
+        if planner is None:
+            continue
         # Two hours on the service-day clock, which runs past midnight rather
         # than wrapping at it — a 23:30 departure asks about 25:30.
         until = rl.service_seconds(args.departing) + 2 * 3600
-        profile = csa.profile(origin, target, departing=args.departing, until=until)
+        profile = planner.profile(origin, target, departing=args.departing, until=until)
         print(
-            f"  CSA's profile to {clock(until)}: "
+            f"  {name}'s profile to {clock(until)}: "
             f"{len(profile)} departures worth taking — "
-            + " · ".join(f"leave {clock(j.departs)}, arrive {clock(j.arrives)}" for j in profile[:4])
+            + " · ".join(step(j, name != "CSA") for j in profile[:4])
             + (" · …" if len(profile) > 4 else "")
         )
 

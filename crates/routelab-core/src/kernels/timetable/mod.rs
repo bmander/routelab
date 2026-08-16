@@ -28,9 +28,10 @@
 //! Both answer with the same verb — `earliest_arrival` — because comparing them
 //! is the point. The two must agree on every query; that is the paper's thesis
 //! and it is also this module's main test, since neither model is the reference
-//! implementation. Each is the other's — and the two kernels that came after,
-//! [`crate::kernels::raptor`] and [`crate::kernels::csa`], are held to the
-//! same agreement in the same tests.
+//! implementation. Each is the other's — and the three kernels that came
+//! after, [`crate::kernels::raptor`], [`crate::kernels::csa`] and
+//! [`crate::kernels::tripbased`], are held to the same agreement in the same
+//! tests.
 
 mod dependent;
 mod expanded;

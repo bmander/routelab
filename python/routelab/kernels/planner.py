@@ -43,6 +43,7 @@ from .schedule import Schedule
 
 __all__ = [
     "OPTIONS",
+    "Front",
     "Origins",
     "Planner",
     "TimetablePlanner",
@@ -490,8 +491,10 @@ class TimetablePlanner(Planner):
     something a shortest-path algorithm can read. :class:`TimeExpanded` spends
     nodes; :class:`TimeDependent` spends search. :class:`RAPTOR` came five
     years later and builds no graph at all; :class:`CSA` a year after that and
-    keeps only the departures, sorted. All four must agree on every query,
-    which is the paper's thesis and this library's test.
+    keeps only the departures, sorted; :class:`TripBased` two years on again
+    and labels trips, with the changes between them computed once. All five
+    must agree on every query, which is the paper's thesis and this library's
+    test.
 
     Each accepts a ``"scalar"`` layer alongside the timetable and reads its
     edges between stops as **footpaths** — walks a rider may make at any time,
@@ -541,6 +544,45 @@ class TimetablePlanner(Planner):
         the departure everything is elapsed from."""
         at = service_seconds(options["departing"])
         return [(stop, at + head_start) for stop, head_start in starts.items()], at
+
+    def _window(self, departing: Any, until: Any) -> "Tuple[int, int]":
+        """A departure window as ``(opens, closes)`` on the service-day clock.
+
+        Shared because more than one technique here answers over a range of
+        departures rather than from one moment, and a window is refused the
+        same way whoever asked: a missing end is a question that was not
+        finished, and one that closes before it opens is not a window.
+        """
+        if departing is None or until is None:
+            raise ValueError(
+                f"{type(self).__name__}.profile needs a departure window: pass "
+                f"departing=time(8, 30), until=time(10, 30) — times, datetimes, "
+                f"or seconds on the service-day clock."
+            )
+        opens, closes = service_seconds(departing), service_seconds(until)
+        if closes < opens:
+            raise ValueError(
+                f"a departure window cannot close before it opens: "
+                f"departing={opens} is after until={closes}"
+            )
+        return opens, closes
+
+    @staticmethod
+    def _changes(max_transfers: Optional[int]) -> Optional[int]:
+        """``max_transfers`` as a checked count of changes.
+
+        Shared because the cap means the same thing to every technique that
+        takes it — and because a technique that counts something else from it
+        should still refuse a negative one in the same words. RAPTOR counts
+        rounds, so it adds the one that a change of vehicle costs.
+        """
+        if max_transfers is None:
+            return None
+        if max_transfers < 0:
+            raise ValueError(
+                f"max_transfers counts changes of vehicle, so it cannot be {max_transfers}"
+            )
+        return int(max_transfers)
 
     def _earliest_arrival(
         self, sources: "List[Tuple[int, int]]", target: int, options: "Dict[str, Any]"
@@ -599,6 +641,53 @@ class TimetablePlanner(Planner):
             f"space, so there is nothing to draw. The techniques that keep a "
             f"table report one: ask {drawers}."
         )
+
+
+class Front:
+    """Answers with a Pareto front, not just its best entry.
+
+    What a technique whose search counts changes as it goes can hand back: one
+    journey per number of changes that arrives strictly earlier than any
+    journey with fewer. :class:`RAPTOR` gets it from its rounds and
+    :class:`TripBased` from its transfer counts, and both read it off a result
+    the same way — so the two verbs are written here rather than twice.
+
+    Not on :class:`TimetablePlanner`, because it is not the family's: a
+    connection scan counts nothing but time, and :class:`CSA` has no front to
+    read off a search that never distinguished one journey from another by
+    changes. A mixin is what says *these* techniques, rather than widening the
+    base until a technique inherits a verb it cannot honour.
+    """
+
+    def journeys(self, result: Result, destination: Hashable) -> "List[Journey]":
+        """Every journey a kept search holds for ``destination``: the earliest
+        arrival for each number of changes, fewest changes first, none
+        dominated by another.
+
+        The counterpart to :meth:`Planner.journey`, and what :meth:`frontier`
+        is in terms of — so a caller holding a search never pays for a second
+        one.
+        """
+        compiled = self._bound()  # type: ignore[attr-defined]
+        target = self.node_id(destination)  # type: ignore[attr-defined]
+        return [
+            Journey.from_itinerary(compiled, itinerary, destination, result.departing)
+            for itinerary in result.itineraries(target)  # type: ignore[attr-defined]
+        ]
+
+    def frontier(
+        self, origin: Origins, destination: Hashable, **options: Any
+    ) -> "List[Journey]":
+        """Every journey worth having, in one call: the Pareto front over
+        arrival time and changes, where :meth:`Planner.route` returns only its
+        last entry.
+        """
+        options = self._options(options)  # type: ignore[attr-defined]
+        starts = self._origin_ids(origin)  # type: ignore[attr-defined]
+        result = self._search(  # type: ignore[attr-defined]
+            starts, targets=[self.node_id(destination)], **options  # type: ignore[attr-defined]
+        )
+        return self.journeys(result, destination)
 
 
 def route(

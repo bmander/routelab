@@ -26,6 +26,8 @@ from .searchspace import (
     Rounds,
     Scan,
     SearchSpace,
+    Segment,
+    Segments,
     ShortestPathTree,
 )
 
@@ -50,5 +52,7 @@ __all__ = [
     "Scan",
     "SearchResult",
     "SearchSpace",
+    "Segment",
+    "Segments",
     "ShortestPathTree",
 ]

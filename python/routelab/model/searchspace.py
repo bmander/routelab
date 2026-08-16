@@ -38,6 +38,8 @@ __all__ = [
     "Rounds",
     "Scan",
     "SearchSpace",
+    "Segment",
+    "Segments",
     "ShortestPathTree",
 ]
 
@@ -157,6 +159,19 @@ class Arrival(NamedTuple):
     stop: Hashable
     #: The earliest arrival, on the service-day clock.
     arrives: int
+
+
+class Segment(NamedTuple):
+    """One trip segment a trip-based sweep scanned: a vehicle, from the stop
+    it was boarded at to the last stop whose transfers were read."""
+
+    #: The trip, as the layer numbers it.
+    trip: int
+    #: The stops covered, boarded first.
+    stops: Tuple[Hashable, ...]
+    #: The number of changes it was reached with: 0 for a trip boarded at
+    #: the origin or a walk from it.
+    round: int
 
 
 class ShortestPathTree(SearchSpace):
@@ -518,3 +533,74 @@ class Scan(SearchSpace):
 
     def __repr__(self) -> str:
         return f"Scan({len(self):,} stops within {self._peak // 60} min)"
+
+
+class Segments(SearchSpace):
+    """Every trip segment a trip-based sweep scanned, by the round it was
+    reached in.
+
+    Not stops: Witt's search labels trips, and what it can honestly report is
+    the vehicles it looked at — each from the stop it was boarded at to the
+    last stop whose transfers were followed. Drawn as lines along the stops,
+    coloured by round the way :class:`Rounds` colours its stops: the trips a
+    rider could board first, then everything one change away, then two.
+    """
+
+    kind = "segments"
+
+    def __init__(self, compiled, result):
+        self._compiled = compiled
+        self._reached = result.reached()
+        self._points = _coordinates(compiled)
+
+    def __len__(self) -> int:
+        return len(self._reached)
+
+    @property
+    def peak(self) -> int:
+        """The last round any segment was reached in."""
+        return max((round for round, _, _ in self._reached), default=0)
+
+    def branches(self, *, min_round: int = 0) -> "Iterator[Segment]":
+        """Every segment scanned as a :class:`Segment`, in labels."""
+        label = self._compiled.label
+        for round, trip, stops in self._reached:
+            if round >= min_round:
+                yield Segment(trip, tuple(label(stop) for stop in stops), round)
+
+    def geometry(self, segment: "Segment") -> "Optional[List[Point]]":
+        """The segment as a polyline through its stops, or ``None`` if no
+        layer places every one of them."""
+        points = [self._points.get(stop) for stop in segment.stops]
+        if any(point is None for point in points):
+            return None
+        return points  # type: ignore[return-value]
+
+    def geojson(self, *, min_round: int = 0, limit: Optional[int] = None) -> dict:
+        """The segments as GeoJSON ``LineString`` features, each with the
+        ``round`` it was reached in and its ``trip``.
+
+        ``peak`` rides on the collection, as it does for :class:`Rounds`, so a
+        renderer divides once rather than reading a float per segment.
+
+        Args:
+            min_round: Drop segments reached before this round.
+            limit: Keep only this many, the latest-reached first — the edge of
+                the sweep, which is the part a crowded map can still show.
+        """
+        label, points = self._compiled.label, self._points
+        selected = _heaviest(
+            [reach for reach in self._reached if reach[0] >= min_round],
+            lambda reach: reach[0],
+            limit,
+        )
+        features = []
+        for round, trip, stops in selected:
+            shape = [points.get(label(stop)) for stop in stops]
+            if any(point is None for point in shape):
+                continue
+            features.append(_feature(shape, {"round": round, "trip": trip}))
+        return {"type": "FeatureCollection", "features": features, "peak": self.peak}
+
+    def __repr__(self) -> str:
+        return f"Segments({len(self):,} trip segments over {self.peak} rounds)"

@@ -4,8 +4,6 @@ use std::sync::{Arc, OnceLock};
 
 use pyo3::prelude::*;
 
-use routelab_core::util::progress::Progress as CoreProgress;
-
 use routelab_core::kernels::contraction::{
     ContractionHierarchy as CoreHierarchy, MeetingSearch as CoreMeetingSearch,
     Ordering as CoreOrdering, Policy,
@@ -256,7 +254,7 @@ impl PyContractionHierarchy {
             max_hops,
         };
         let graph = Arc::clone(&graph.inner);
-        let counter = progress.map_or_else(CoreProgress::new, |p| p.inner.clone());
+        let counter = counter(progress);
         let built = py.detach(|| CoreHierarchy::build_reporting(&graph, ordering, &counter));
         Ok(PyContractionHierarchy {
             inner: Arc::new(built.map_err(value_err)?),

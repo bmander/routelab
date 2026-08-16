@@ -35,6 +35,7 @@ pub mod raptor;
 pub mod search;
 pub mod timedep;
 pub mod timetable;
+pub mod tripbased;
 
 use crate::contraction::*;
 use crate::csa::*;
@@ -47,6 +48,7 @@ use crate::raptor::*;
 use crate::search::*;
 use crate::timedep::*;
 use crate::timetable::*;
+use crate::tripbased::*;
 
 #[pymodule]
 fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -72,6 +74,9 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySearchTree>()?;
     m.add_class::<PyTimeExpanded>()?;
     m.add_class::<PyTimetable>()?;
+    m.add_class::<PyTripBased>()?;
+    m.add_class::<PyTripBasedProfile>()?;
+    m.add_class::<PyTripBasedSearch>()?;
     m.add_function(wrap_pyfunction!(astar, m)?)?;
     m.add_function(wrap_pyfunction!(time_dependent_dijkstra, m)?)?;
     m.add_function(wrap_pyfunction!(load_gtfs, m)?)?;

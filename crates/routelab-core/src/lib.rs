@@ -36,8 +36,10 @@ pub use kernels::timedep::{
     time_dependent_dijkstra, Calendar, Clock, Departure, Waiting, Window, WEEK,
 };
 pub use kernels::timetable::TimeExpanded;
+pub use kernels::tripbased::{TripBased, TripBasedProfile, TripBasedSearch};
 pub use model::graph::{EdgeId, Graph, GraphError, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
 pub use model::heuristic::Heuristic;
+pub use model::lines::{Lines, StopTime};
 pub use model::search::{SearchError, SearchOptions, SearchResult};
 pub use model::timetable::{
     Connection, Footpaths, Itinerary, Leg, Ride, Timetable, Transfer, Walk,

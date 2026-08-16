@@ -43,7 +43,7 @@
 //! variant with Pareto arrays evaluated by a scan from the back, footpaths at
 //! the departure stop inserted along incoming links, footpaths to the target
 //! folded into evaluation, and its one-to-one pruning against the source's
-//! profile. Changing vehicles is instantaneous, so the four timetable kernels
+//! profile. Changing vehicles is instantaneous, so the five timetable kernels
 //! answer the same question and check each other; a minimum change time is a
 //! new [`Transfer`] constructor, which this kernel would honour by subtracting
 //! it from a departure as the paper does. Not here: pseudoconnections and time

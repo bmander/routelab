@@ -2,20 +2,21 @@
 
     python benchmarks/bench_transit.py data/kcm.zip --date 2026-08-17
 
-Four rows, one per technique, and the numbers that matter: what binding cost,
+Five rows, one per technique, and the numbers that matter: what binding cost,
 what it holds, how much of the timetable a query settles, and how long it
 takes. Every arrival is checked against every other technique's on every trip
 — the paper's thesis for the two Pyrga models, and RAPTOR's only oracle — so a
 row that got faster by getting a different answer fails here rather than
 looking good.
 
-The point of running them side by side is that they are not four speeds of
+The point of running them side by side is that they are not five speeds of
 the same thing. The time-dependent model keeps one node per stop and pays in
 the search; the time-expanded one spends nodes to make the search plain
 Dijkstra; RAPTOR builds no graph at all and scans routes in rounds; CSA sorts
-every connection into one array and scans that. The
-settled column is where that shows — read it against the `nodes` column,
-because they do not count the same thing.
+every connection into one array and scans that; TripBased precomputes the
+transfers between trips at bind and sweeps those. The settled column is where
+that shows — read it against the `nodes` column, because they do not count
+the same thing.
 
     python benchmarks/bench_transit.py data/kcm.zip --date 2026-08-17 --pairs 50
     python benchmarks/bench_transit.py data/kcm.zip --date 2026-08-17 --walk 0
@@ -37,6 +38,7 @@ TECHNIQUES = [
     ("TimeExpanded", rl.TimeExpanded()),
     ("RAPTOR", rl.RAPTOR()),
     ("CSA", rl.CSA()),
+    ("TripBased", rl.TripBased()),
 ]
 
 

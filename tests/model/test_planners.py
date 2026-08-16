@@ -259,7 +259,7 @@ def test_a_departure_time_on_an_unscheduled_network_says_so(env):
 def test_who_owns_an_option_is_read_off_the_techniques(env):
     # Not a table of sentences that goes stale: the refusal names whoever
     # declares the option, so a new technique joins the sentence by existing.
-    assert rl.kernels.owners("max_transfers") == [rl.RAPTOR]
+    assert rl.kernels.owners("max_transfers") == [rl.RAPTOR, rl.TripBased]
     assert set(rl.kernels.owners("max_cost")) == {rl.Dijkstra, rl.AStar, rl.TimeDependentDijkstra}
     assert rl.kernels.names(rl.kernels.owners("max_depth")) == "BFS()"
     assert rl.kernels.owners("nonsense") == []
@@ -267,11 +267,13 @@ def test_who_owns_an_option_is_read_off_the_techniques(env):
     assert set(rl.kernels.techniques()) == {
         rl.Dijkstra, rl.BFS, rl.AStar, rl.ContractionHierarchy,
         rl.TimeDependentDijkstra, rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA,
+        rl.TripBased,
     }
 
 
 def test_the_package_exports_the_whole_onramp():
-    for name in ("RAPTOR", "CSA", "TimetablePlanner", "Rounds", "Reach", "Scan", "Arrival", "Leap", "EdgeResult",
+    for name in ("RAPTOR", "CSA", "TripBased", "TimetablePlanner", "Rounds", "Reach", "Scan", "Arrival",
+                 "Segments", "Segment", "Leap", "EdgeResult",
                  "service_seconds", "clock_readers", "kernels"):
         assert hasattr(rl, name), name
 

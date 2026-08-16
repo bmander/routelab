@@ -21,7 +21,7 @@ from conftest import TINY_GTFS
 #: Every timetable technique. Every behavioural test runs against each, because "these two
 #: agree" is the paper's thesis and a test that only asked one would not notice
 #: the day they stopped.
-MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA]
+MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA, rl.TripBased]
 
 #: The two Pyrga models — the ones that answer with an itinerary and nothing
 #: else, so a cost table and a search space are things they refuse.
@@ -160,8 +160,8 @@ def test_a_pyrga_model_answers_with_a_journey_and_nothing_else(model, env: rl.En
     with pytest.raises(NotImplementedError, match="journey rather than a cost per node"):
         planner.search("A", departing=time(8, 0))
     # Who to ask is derived from the shelf, so the test holds the derivation
-    # to naming both kernels that keep a table — not the sentence around it.
-    with pytest.raises(NotImplementedError, match=r"nothing to draw\..*CSA\(\) or RAPTOR\(\)"):
+    # to naming every kernel that keeps a table — not the sentence around it.
+    with pytest.raises(NotImplementedError, match=r"nothing to draw\..*CSA\(\), RAPTOR\(\) or TripBased\(\)"):
         planner.explored(None)
 
 
@@ -170,11 +170,16 @@ def test_an_option_a_model_cannot_honour_names_the_one_that_can(model, env: rl.E
     planner = model().bind(env)
     with pytest.raises(ValueError, match="takes no max_cost; a cost bound belongs to"):
         planner.route("A", "C", departing=time(8, 0), max_cost=10)
-    if model is not rl.RAPTOR:
-        with pytest.raises(ValueError, match="takes no max_transfers; a cap on changes belongs to RAPTOR"):
+    if model not in (rl.RAPTOR, rl.TripBased):
+        with pytest.raises(
+            ValueError,
+            match=r"takes no max_transfers; a cap on changes belongs to RAPTOR\(\) or TripBased\(\)",
+        ):
             planner.route("A", "C", departing=time(8, 0), max_transfers=1)
-    if model is not rl.CSA:
-        with pytest.raises(ValueError, match="takes no until; .*profile\\(\\) on CSA"):
+    if model not in (rl.CSA, rl.TripBased):
+        with pytest.raises(
+            ValueError, match=r"takes no until; .*profile\(\) on CSA\(\) or TripBased\(\)"
+        ):
             planner.route("A", "C", departing=time(8, 0), until=time(9, 0))
 
 

@@ -9,7 +9,6 @@ from .. import _routelab
 from ..model.journey import Journey
 from ..model.search import Result
 from ..model.searchspace import Scan, SearchSpace
-from ..util.clock import service_seconds
 from .planner import Origins, Planner, TimetablePlanner
 
 __all__ = ["CSA"]
@@ -35,9 +34,9 @@ class CSA(TimetablePlanner):
     a flexible morning asks, and the one rRAPTOR would answer for the
     round-based technique; here it is the paper's §4.
 
-    Changing vehicles is instantaneous, as it is for the three techniques it
+    Changing vehicles is instantaneous, as it is for the four techniques it
     is checked against; a minimum change time is a new kernel ``Transfer``
-    constructor and would land in all four at once, so it is not a knob here.
+    constructor and would land in all five at once, so it is not a knob here.
     """
 
     options = frozenset({"departing"})
@@ -97,18 +96,7 @@ class CSA(TimetablePlanner):
         destination would beat is left out, since a walk leaves whenever you
         do and a profile of pairs cannot hold it.
         """
-        if departing is None or until is None:
-            raise ValueError(
-                f"{type(self).__name__}.profile needs a departure window: pass "
-                f"departing=time(8, 30), until=time(10, 30) — times, datetimes, "
-                f"or seconds on the service-day clock."
-            )
-        opens, closes = service_seconds(departing), service_seconds(until)
-        if closes < opens:
-            raise ValueError(
-                f"a departure window cannot close before it opens: "
-                f"departing={opens} is after until={closes}"
-            )
+        opens, closes = self._window(departing, until)
         compiled = self._bound()
         starts = self._origin_ids(origin)
         target = self.node_id(destination)

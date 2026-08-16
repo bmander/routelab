@@ -17,6 +17,16 @@ pub struct PyProgress {
     pub(crate) inner: CoreProgress,
 }
 
+/// The counter a preprocessing call should write into: the one that was
+/// handed in, or a fresh one nobody reads.
+///
+/// The same shape as `footpaths_or_none`, and for the same reason: every
+/// binding that takes an optional argument unwraps it the same way, so the
+/// unwrapping is written once.
+pub(crate) fn counter(progress: Option<&PyProgress>) -> CoreProgress {
+    progress.map_or_else(CoreProgress::new, |held| held.inner.clone())
+}
+
 #[pymethods]
 impl PyProgress {
     #[new]

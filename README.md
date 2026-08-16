@@ -19,8 +19,9 @@ correct.
 **Status: early.** Today it has a static graph, the searches everything else
 builds on (Dijkstra, BFS, A*), two heuristics, contraction hierarchies,
 time-dependent search over OpenStreetMap's scheduled restrictions, both of
-Pyrga et al.'s timetable models over GTFS, RAPTOR, and CSA. The path from here
-runs on through the multimodal and multicriteria layers above them.
+Pyrga et al.'s timetable models over GTFS, RAPTOR, CSA, and trip-based
+routing. The path from here runs on through the multimodal and multicriteria
+layers above them.
 
 ## What is implemented
 
@@ -42,14 +43,15 @@ each one buys and what it costs.
 | Bast, Carlsson, Eigenwillig, Geisberger, Harrelson, Raychev & Viger, *Fast routing in very large public transportation networks using transfer patterns* (2010) | *not yet implemented* | |
 | Delling, Pajor & Werneck, *Round-based public transit routing* (2012) — RAPTOR | `RAPTOR()` | [Not building a graph at all](#not-building-a-graph-at-all) |
 | Dibbelt, Pajor, Strasser & Wagner, *Intriguingly simple and fast transit routing* (2013) — CSA | `CSA()`, `CSA().bind(env).profile(...)` | [One array, scanned once](#one-array-scanned-once) |
-| Witt, *Trip-based public transit routing* (2015) | *not yet implemented* | |
+| Witt, *Trip-based public transit routing* (2015) | `TripBased()`, `TripBased().bind(env).profile(...)` | [Trips, and the transfers between them](#trips-and-the-transfers-between-them) |
 | Delling, Dibbelt, Pajor & Werneck, *Public transit labeling* (2015) | *not yet implemented* | |
 | Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for multi-modal route planning: an efficient solution* (2019) — ULTRA | *not yet implemented* | |
 
 The rows marked *not yet implemented* are the shelf's gaps, in the order the
 literature filled them: after Pyrga et al. the timetable graphs were engineered
 harder, then RAPTOR and CSA — both here — stopped building a graph at all,
-and the rest are what came after. Every kernel that is here is checked against something that
+Witt's trip-based search — here too — stopped labelling stops, and the rest
+are what came after. Every kernel that is here is checked against something that
 cannot be wrong in the same direction — a pure-Python reference, a brute-force
 oracle, or the paper's own second model — see [The contract](#the-contract).
 
@@ -493,9 +495,9 @@ journey.arrives, journey.transfers, journey.waiting   # 33600, 4, 1200
 ```
 
 Both models answer with the same verb, `route(..., departing=)`, because
-comparing them is the point — and so do RAPTOR and CSA, below. Twenty-five
-random stop pairs at 08:30 with 200 m footpaths (`benchmarks/bench_transit.py`),
-all four agreeing on every one:
+comparing them is the point — and so do RAPTOR, CSA and TripBased, below.
+Twenty-five random stop pairs at 08:30 with 200 m footpaths
+(`benchmarks/bench_transit.py`), all five agreeing on every one:
 
 | technique | nodes | bind | memory | settled | query |
 |---|---|---|---|---|---|
@@ -503,6 +505,7 @@ all four agreeing on every one:
 | `TimeExpanded` | 837,924 events | 1.1 s | 150 MB | 66,447 | 14.9 ms |
 | `RAPTOR` | 6,313 stops | 0.4 s | 16 MB | 4,126 | 1.5 ms |
 | `CSA` | 6,313 stops | 0.4 s | 23 MB | 3,411 | 0.6 ms |
+| `TripBased` | 12,482 trips | 10.5 s | 28 MB | 8,455 | 1.0 ms |
 
 King County Metro plus Sound Transit on a Monday: 6,313 stops, 421,604
 connections, 7,038 stop pairs, 0 trips the reader could not represent. The
@@ -591,7 +594,7 @@ deliberately not interchangeable, which means walking and transit cannot yet
 share one environment. That is the multimodal problem, and the conversion needs a
 service-day-to-calendar anchor: exactly the thing that must not be implicit.
 
-`python demos/route_transit.py kcm.zip --date 2026-08-17` runs all four and
+`python demos/route_transit.py kcm.zip --date 2026-08-17` runs all five and
 prints the itinerary, walks included; `--walk 0` is the plain model, and the
 quickest way to see what the footpaths buy.
 
@@ -650,8 +653,9 @@ overtakes another — so `planner.num_routes` is larger than the feed's
 `routes.txt`; on the KCM feed's Monday, 139 GTFS routes become 410. What
 is not here: McRAPTOR (more criteria than changes), rRAPTOR (a range of
 departure times — the question CSA's `profile`, next, answers), and a minimum
-change time — a new kernel `Transfer` constructor that all four timetable
-techniques would take at once, and this is the one that could honour it.
+change time — a new kernel `Transfer` constructor that all five timetable
+techniques would take at once, and this and TripBased are the two that could
+honour it.
 
 ### One array, scanned once
 
@@ -719,7 +723,89 @@ expected arrival time problem (§5) — each its own increment. Journey
 extraction is not spelled out in the paper; the pointers here are the obvious
 ones (the connection that reached each stop, the connection each trip was
 entered with) and every itinerary is checked against the same
-`is_valid` the other three answer to.
+`is_valid` the other four answer to.
+
+### Trips, and the transfers between them
+
+Witt, *Trip-Based Public Transit Routing* (2015). RAPTOR labels stops and
+scans routes; CSA labels stops and scans connections. Witt's observation is
+that once a rider is aboard a trip at a known stop, everything that can
+happen next is already written in the timetable — every stop the trip
+reaches, and every other trip they could change onto — so it is **trips**
+that should carry labels, and the changes between them can be worked out
+once, ahead of any query. Binding computes that **transfer set**: for every
+trip and every stop it reaches, the earliest trip of every line at that stop
+or a footpath away, minus the ones that stay on your own line and the
+U-turns; then a *reduction* walks each trip backwards keeping the earliest it
+can reach every stop with and without each transfer, and drops the transfers
+that improve nothing. A query is then a breadth-first sweep with no priority
+queue: round *n* scans every *trip segment* reached with *n* changes, checks
+whether the trip reaches the target, prunes it if it cannot beat the best
+arrival so far, and follows its transfers into round *n+1*.
+
+```python
+feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
+env = rl.Environment(feed, rl.Footpaths(feed, within=200))
+
+planner = rl.TripBased().bind(env)                       # 35,213,140 transfers computed, 1,216,322 kept: 11 s, 28 MB
+planner.route(downtown, juanita, departing=time(8, 30))  # Journey(... cost=4116): 09:38, 2 changes, 0.9 ms
+planner.frontier(downtown, juanita, departing=time(8, 30))
+# [Journey(1 change, arrives 16:30), Journey(2 changes, 09:38)]     — RAPTOR's front, exactly
+
+result = planner.search(downtown, targets=[planner.node_id(juanita)], departing=time(8, 30))
+result.settled, result.scanned                           # 9,807 trips labelled, 2,533 segments scanned
+planner.explored(result)                                 # Segments(2,533 trip segments over 4 rounds)
+```
+
+Two things are different in kind here, and both show in the numbers. Binding
+is **the expensive half** — seconds where the others take a fraction of one,
+which is why it reports progress as it works, the way contraction and a
+landmark table do, and why the transfer set is the thing worth measuring:
+KCM's 12,482 trips make 35 million transfers and reduction keeps 3.5% of
+them (the paper keeps 16% of London's). Almost all of that time is the
+reduction, which is why both algorithms are parallel over trips — a thread
+per core drawing blocks until there are none. `TripBased(reduce=False)` is the
+paper's own control (its Table 3): identical answers, 300 MB instead of 28,
+and 8.9 ms a query instead of 0.9. Reduction is a policy and never a
+correctness choice, on the same footing as `RandomOrder()` for a hierarchy —
+the tests hold the reduced and unreduced sets to the same front on every
+query. And `settled` counts **trips**, since that is what this kernel labels
+(the paper's own footnote on how to compare it): 9,807 of 12,482 sounds like
+most of the network until you see that only 2,533 segments were scanned. The
+rest were labelled to say *don't bother* — reaching a trip at a stop settles
+every later trip of its line at once, which is the trick, and the segments
+the sweep actually read are what `Segments` draws: each vehicle from the stop
+it was boarded at, coloured by the changes it took to get aboard.
+
+The same sweep, run once per moment the origin offers a departure in a
+window — latest first, keeping the labels between runs, since whatever an
+earlier departure would find on a trip a later one already reached is
+dominated — is the paper's **profile** (§3.3):
+
+```python
+planner.profile(downtown, juanita, departing=time(8, 30), until=time(10, 30))
+# [Journey(leave 08:35, arrive 09:38, 2 changes), Journey(09:07 → 10:32, 3), Journey(09:37 → 10:38, 2), ...]   107 ms
+```
+
+Nine journeys where CSA's profile of the same window holds four, because
+this one is Pareto over three criteria — departure, arrival *and* changes —
+and a journey that leaves later, or changes less, for the same arrival is a
+different answer. A departure is the latest moment you can leave and still
+make that journey, walk included, and a window holds a journey by when it
+leaves: the tests hold every triple to RAPTOR's front asked at every second
+of a window, and every itinerary to `is_valid`.
+
+The refusals are the library's. `search()` without a target is refused the
+way A\* and a hierarchy refuse it — the paper's query is point-to-point, its
+target is what the lines are checked against and what prunes the rest, and
+there is no one-to-all form to fall back on. `max_transfers` names RAPTOR and
+TripBased; `until` names `profile()` on CSA and TripBased. What is not here:
+the paper's SIMD and three-loop query layout (§3.4) and its transfer
+preferences — each its own increment. Preprocessing is parallel over trips,
+which is the one place the paper's "trivially parallelized" is taken up: both
+algorithms judge each trip on its own, so a thread per core does. Changing vehicles is instantaneous, and this is the
+second kernel — a transfer knows both trips — that a minimum change time could
+land in.
 
 ### Underneath
 
@@ -788,9 +874,11 @@ plumbing with no routing content.
 ```
 crates/routelab-core/     Rust. No Python.
   kernels/                Dijkstra, BFS, A*, ALT landmarks, contraction,
-                          time-dependent, Pyrga's two timetable models, RAPTOR, CSA.
+                          time-dependent, Pyrga's two timetable models, RAPTOR, CSA,
+                          trip-based.
   model/                  CSR graph, search options and results, search trees,
-                          the heuristic trait, the timetable structures.
+                          the heuristic trait, the timetable structures, and the
+                          lines-and-trips layout RAPTOR and trip-based both read.
                           Names nothing above it: the dependency runs one way.
   util/                   Progress counters, seeded RNG.
 crates/routelab-osm/      Reading OpenStreetMap extracts. Kernel-free; wraps `osmpbf`.

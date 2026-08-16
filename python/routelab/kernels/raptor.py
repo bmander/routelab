@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Hashable, List, Optional
+from typing import Any, Dict, Optional
 
 from .. import _routelab
-from ..model.journey import Journey
 from ..model.search import Result
 from ..model.searchspace import Rounds, SearchSpace
-from .planner import Origins, Planner, TimetablePlanner
+from .planner import Front, Planner, TimetablePlanner
 
 __all__ = ["RAPTOR"]
 
 
-class RAPTOR(TimetablePlanner):
+class RAPTOR(Front, TimetablePlanner):
     """Round-based public transit routing (Delling, Pajor & Werneck, 2012).
 
         RAPTOR().bind(env).route(origin, target, departing=time(8, 30))
@@ -29,10 +28,10 @@ class RAPTOR(TimetablePlanner):
 
     ``max_transfers`` is a query option, not a constructor argument, for the
     reason ``max_cost`` is: it bounds one question, not the technique.
-    Changing vehicles is instantaneous, as it is for the two Pyrga models and
-    CSA it is checked against; a minimum change time is a new kernel
-    ``Transfer`` constructor and would land in all four at once, so it is not
-    a knob here.
+    Changing vehicles is instantaneous, as it is for the two Pyrga models,
+    CSA and TripBased it is checked against; a minimum change time is a new
+    kernel ``Transfer`` constructor and would land in all five at once, so it
+    is not a knob here.
     """
 
     options = frozenset({"departing", "max_transfers"})
@@ -56,16 +55,11 @@ class RAPTOR(TimetablePlanner):
         self._bound()
         return self._raptor.num_trips
 
-    @staticmethod
-    def _rounds(max_transfers: Optional[int]) -> Optional[int]:
+    @classmethod
+    def _rounds(cls, max_transfers: Optional[int]) -> Optional[int]:
         """`k` changes is `k + 1` trips is `k + 1` rounds."""
-        if max_transfers is None:
-            return None
-        if max_transfers < 0:
-            raise ValueError(
-                f"max_transfers counts changes of vehicle, so it cannot be {max_transfers}"
-            )
-        return int(max_transfers) + 1
+        changes = cls._changes(max_transfers)
+        return None if changes is None else changes + 1
 
     # RAPTOR keeps a label per stop per round, so it has a cost table like any
     # graph search and `Planner.route` — search, then read the journey off the
@@ -83,33 +77,6 @@ class RAPTOR(TimetablePlanner):
         return self._raptor.search(
             sources, target, self._rounds(options.get("max_transfers")), at
         )
-
-    def journeys(self, result: Result, destination: Hashable) -> "List[Journey]":
-        """Every journey a kept search holds for ``destination``: the earliest
-        arrival for each number of changes, fewest changes first, none
-        dominated by another.
-
-        The counterpart to :meth:`journey`, and what :meth:`frontier` is in
-        terms of — so a caller holding a search never pays for a second one.
-        """
-        compiled = self._bound()
-        target = self.node_id(destination)
-        return [
-            Journey.from_itinerary(compiled, itinerary, destination, result.departing)
-            for itinerary in result.itineraries(target)  # type: ignore[attr-defined]
-        ]
-
-    def frontier(
-        self, origin: Origins, destination: Hashable, **options: Any
-    ) -> "List[Journey]":
-        """Every journey worth having, in one call: the Pareto front over
-        arrival time and changes, where :meth:`route` returns only its last
-        entry.
-        """
-        options = self._options(options)
-        starts = self._origin_ids(origin)
-        result = self._search(starts, targets=[self.node_id(destination)], **options)
-        return self.journeys(result, destination)
 
     def explored(self, result: Result, **options: Any) -> SearchSpace:
         """Every stop the rounds reached, by the round that first got there."""

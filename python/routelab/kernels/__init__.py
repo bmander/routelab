@@ -30,6 +30,7 @@ from .dijkstra import Dijkstra, dijkstra
 from .raptor import RAPTOR
 from .timedep import TimeDependentDijkstra
 from .timetable import TimeDependent, TimeExpanded
+from .tripbased import TripBased
 
 __all__ = [
     "AStar",
@@ -44,6 +45,7 @@ __all__ = [
     "TimeDependent",
     "TimeDependentDijkstra",
     "TimeExpanded",
+    "TripBased",
     "TimetablePlanner",
     "astar",
     "bfs",
