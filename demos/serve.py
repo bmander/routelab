@@ -10,12 +10,20 @@ asks it something. Drag the nodes, unplug the wires, plug them in somewhere
 else. There is no second representation of what the controls mean — the board
 *is* the query, so a wire that goes nowhere is a missing argument and says so.
 
-Which is also what makes the refusals visible. Wire a GTFS layer into Dijkstra
-and the board turns red with the library's own words: *Dijkstra cannot route
-over timetable layers; it accepts scalar*. Wire `A* (euclidean)` into a
-timetable and the heuristic says it has no rate to price a distance against.
-Those are the errors this project exists to raise, and they are easier to
-believe when you cause one yourself.
+The map is a node too, and the graph runs through it and back: it hands the
+query an `origin` and a `destination`, and takes a `route` and a `space` in
+return. Which makes those wires worth pulling on. Cross the two points and the
+trip really does reverse. Unplug `space` and no search space is built at all —
+it is ten megabytes of GeoJSON that nothing was listening for. Unplug `route`
+and the query still runs and still reports what it cost; there is simply
+nothing drawing it.
+
+Wiring is also what makes the refusals visible. Put a GTFS layer into Dijkstra
+and the node turns red with the library's own words: *Dijkstra cannot route
+over timetable layers; it accepts scalar*. Put `A* (euclidean)` on a timetable
+and the heuristic says it has no rate to price a distance against. Those are the
+errors this project exists to raise, and they are easier to believe when you
+cause one yourself.
 
 Click once on the map to drop an origin, again for a destination, and the route
 draws over the search tree that found it — the part a routing engine normally
@@ -63,9 +71,9 @@ PROFILES = {"walking": rl.Walking, "cycling": rl.Cycling, "driving": rl.Driving}
 #: its shape in `static/board.js` — nothing between the two knows what the nodes
 #: mean.
 #:
-#: `inputs` maps a port name to the kind of value it accepts. `kind` is what the
-#: node produces, and the two together are all the wiring rules there are: a
-#: port takes what it says it takes.
+#: `inputs` maps a port name to the kind of value it accepts. `kind` is what a
+#: node is for, which decides how it is built; the two together are all the
+#: wiring rules there are, and a port takes what it says it takes.
 NODES: "dict[str, dict]" = {
     "OSM": {"kind": "layer", "inputs": {}},
     "GTFS": {"kind": "layer", "inputs": {}},
@@ -87,7 +95,22 @@ NODES: "dict[str, dict]" = {
     "TimeDependentDijkstra": {"kind": "planner", "inputs": {"environment": "environment"}},
     "TimeDependent": {"kind": "planner", "inputs": {"environment": "environment"}},
     "TimeExpanded": {"kind": "planner", "inputs": {"environment": "environment"}},
-    "Query": {"kind": "query", "inputs": {"planner": "planner"}},
+    # A query takes its endpoints from wires like everything else, so "where
+    # from" is an argument rather than an ambient fact about the page. Its two
+    # answers are separate outputs because they cost different amounts: the
+    # route is a few hundred points, the search space up to ten megabytes.
+    "Query": {
+        "kind": "query",
+        "inputs": {"planner": "planner", "origin": "point", "destination": "point"},
+        "outputs": {"route": "route", "space": "space"},
+    },
+    # The map, as a node. A source of two points and a sink for two answers —
+    # and not a cycle, because where the pins are owes nothing to what is drawn.
+    "Map": {
+        "kind": "map",
+        "inputs": {"route": "route", "space": "space"},
+        "outputs": {"origin": "point", "destination": "point"},
+    },
 }
 
 
@@ -130,12 +153,24 @@ class Board(NamedTuple):
         links = [dict(link) for link in raw.get("links", [])]
         return cls(nodes, links)
 
-    def sources(self, node_id: str, port: str) -> "list[str]":
-        """Ids feeding one input port, in the order they were wired."""
+    def sources(self, node_id: str, port: str) -> "list[tuple[str, str]]":
+        """`(id, output port)` feeding one input, in the order they were wired."""
         return [
-            link["from"]
+            (link["from"], link.get("fromPort", ""))
             for link in self.links
-            if link.get("to") == node_id and link.get("port") == port
+            if link.get("to") == node_id and link.get("toPort", link.get("port")) == port
+        ]
+
+    def listeners(self, node_id: str, port: str) -> "list[str]":
+        """Ids wired to one *output* — who is listening for it, if anyone.
+
+        Which is a question worth being able to ask: nothing is listening for a
+        search space means nothing has to build one.
+        """
+        return [
+            link["to"]
+            for link in self.links
+            if link.get("from") == node_id and link.get("fromPort") == port
         ]
 
     def only(self, kind: str) -> "str | None":
@@ -209,8 +244,12 @@ class Router:
         kind = node["type"]
         params = node.get("params", {})
         shown = ", ".join(f"{key}={params[key]!r}" for key in sorted(params))
+        # Only ports that are arguments: everything a value depends on is
+        # upstream of it, and a node with more than one output is never
+        # upstream of anything (see `NODES`), so which socket a wire left by
+        # cannot change what gets built.
         wired = ", ".join(
-            f"{port}=[{', '.join(self.signature(board, s) for s in board.sources(node_id, port))}]"
+            f"{port}=[{', '.join(self.signature(board, s) for s, _ in board.sources(node_id, port))}]"
             for port in sorted(NODES[kind]["inputs"])
         )
         inner = ", ".join(part for part in (shown, wired) if part)
@@ -232,7 +271,7 @@ class Router:
         params = node.get("params", {})
 
         def wired(port: str) -> list:
-            return [self.build(board, source) for source in board.sources(node_id, port)]
+            return [self.build(board, source) for source, _ in board.sources(node_id, port)]
 
         def one(port: str) -> object:
             values = wired(port)
@@ -330,23 +369,39 @@ class Router:
         `explore` is what makes dragging an endpoint feel live. The route is a
         few hundred points; the search space behind it is up to sixty thousand
         branches and ten megabytes of GeoJSON, which is worth building once when
-        the drag stops and not sixty times a second while it is moving.
+        the drag stops and not sixty times a second while it is moving. It is a
+        second answer for a second reason too: nobody wired to the query's
+        `space` output is nobody who needs one built, and the wire says so.
         """
         query = board.only("query")
         if query is None:
             return {"error": "the board needs exactly one Query node"}
         planners = board.sources(query, "planner")
         if not planners:
-            return {
-                "error": "nothing is plugged into the query",
-                "node": query,
-            }
-        planner = self.build(board, planners[0])
+            return {"error": "nothing is plugged into the query", "node": query}
+        planner = self.build(board, planners[0][0])
         params = board.nodes[query].get("params", {})
 
+        # Where from and where to are arguments now, wired in like everything
+        # else — which means they can be crossed, and crossing them really does
+        # reverse the trip.
+        pins = {"origin": origin, "destination": destination}
+        ends = []
+        for port in ("origin", "destination"):
+            wires = board.sources(query, port)
+            if not wires:
+                return {
+                    "error": f"the query has no {port} plugged into it — wire one "
+                             f"in from a Map",
+                    "node": query,
+                }
+            ends.append(pins.get(wires[0][1], origin))
+
         layer = self._snappable(planner)
-        start = layer.nearest(*origin)
-        end = layer.nearest(*destination)
+        start = layer.nearest(*ends[0])
+        end = layer.nearest(*ends[1])
+        explore = explore and bool(board.listeners(query, "space"))
+        drawn = bool(board.listeners(query, "route"))
 
         # Only the clock-reading techniques understand a departure, and the
         # others rightly refuse one, so it goes to whoever asked for it. The two
@@ -360,9 +415,16 @@ class Router:
         else:
             when = {"departing": int(params.get("day", 0)) * 86400 + minute * 60}
 
-        if rides_transit(planner):
-            return self._ride(planner, layer, start, end, when)
-        return self._search(planner, layer, start, end, when, branches, explore)
+        answer = (
+            self._ride(planner, layer, start, end, when)
+            if rides_transit(planner)
+            else self._search(planner, layer, start, end, when, branches, explore)
+        )
+        # Nothing is listening for the route, so there is nothing to draw. Said
+        # rather than silently drawn anyway: a wire that changes nothing is not
+        # a wire, it is decoration.
+        answer["drawn"] = drawn
+        return answer
 
     def _search(self, planner, layer, start, end, when, branches, explore) -> dict:
         """A static or time-dependent search over a network, and its search space."""

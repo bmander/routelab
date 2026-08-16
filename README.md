@@ -225,6 +225,13 @@ somewhere else. There is no second representation of what the controls mean —
 the board *is* the query, so unplugging a wire really does remove an argument
 and the page says which one.
 
+The map is a node in it, and the graph runs out through the map and back: it
+gives the query an `origin` and a `destination` and takes a `route` and a
+`space` in return. Cross the two points and the trip reverses. Unplug `space`
+and no search space gets built — ten megabytes of GeoJSON that nothing was
+listening for. Unplug `route` and the query still runs and still reports what it
+cost, with nothing drawing it.
+
 Which is what makes the refusals worth causing on purpose. Wire a GTFS layer
 into `Dijkstra` and the node turns red with the library's own sentence:
 

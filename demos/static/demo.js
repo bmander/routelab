@@ -75,16 +75,21 @@ function defaultGraph() {
   board.nodes = new Map();
   board.links = [];
   board.next = 1;
-  const osm = board.add('OSM', 20, 10);
-  const env = board.add('Environment', 250, 10);
-  const heuristic = board.add('Landmarks', 20, 135);
-  const technique = board.add('AStar', 480, 10);
-  const query = board.add('Query', 720, 10);
+  const map_node = board.add('Map', 20, 10);
+  const osm = board.add('OSM', 232, 10);
+  const env = board.add('Environment', 444, 10);
+  const heuristic = board.add('Landmarks', 232, 148);
+  const technique = board.add('AStar', 656, 10);
+  const query = board.add('Query', 868, 10);
   board.links = [
-    {from: osm, to: env, port: 'layers'},
-    {from: env, to: technique, port: 'environment'},
-    {from: heuristic, to: technique, port: 'heuristic'},
-    {from: technique, to: query, port: 'planner'},
+    {from: osm, fromPort: 'layer', to: env, toPort: 'layers'},
+    {from: env, fromPort: 'environment', to: technique, toPort: 'environment'},
+    {from: heuristic, fromPort: 'heuristic', to: technique, toPort: 'heuristic'},
+    {from: technique, fromPort: 'planner', to: query, toPort: 'planner'},
+    {from: map_node, fromPort: 'origin', to: query, toPort: 'origin'},
+    {from: map_node, fromPort: 'destination', to: query, toPort: 'destination'},
+    {from: query, fromPort: 'route', to: map_node, toPort: 'route'},
+    {from: query, fromPort: 'space', to: map_node, toPort: 'space'},
   ];
   board.draw();
 }
@@ -272,8 +277,8 @@ async function request(explore) {
   // hierarchy's two halves, climbing away from either end — and colouring by it
   // is what makes them tell apart. One colour when it is absent.
   const halves = {forward: '#1d6fa5', backward: '#7a3b9c'};
+  space.clearLayers();
   if (answer.tree) {
-    space.clearLayers();
     L.geoJSON(answer.tree, {
       style: feature => ({
         color: halves[feature.properties.direction] || '#1d6fa5',
@@ -283,8 +288,14 @@ async function request(explore) {
     }).addTo(space);
   }
 
+  // Only if something is listening for it. A wire that changes nothing is not
+  // a wire, so unplugging `route` from the map really does stop drawing it —
+  // and the readout still reports what the search cost, because the query was
+  // asked either way.
   route.clearLayers();
-  L.polyline(answer.route, {color: '#d1495b', weight: 4}).addTo(route);
+  if (answer.drawn) {
+    L.polyline(answer.route, {color: '#d1495b', weight: 4}).addTo(route);
+  }
   answer.snapped.forEach(p => L.circleMarker(p, {radius: 4, stroke: false,
     fillOpacity: 1, fillColor: '#1d3557'}).addTo(route));
 
@@ -311,14 +322,24 @@ async function request(explore) {
     `${headline}<br>` +
     `settled <b>${answer.settled_count.toLocaleString()}</b> ${answer.nodes_are || 'nodes'} ` +
     `(${share}% of ${answer.graph_nodes.toLocaleString()}) in <b>${answer.ms}</b> ms` +
-    (answer.transit
-      ? `<br><span class="hint">a timetable query answers with an itinerary, ` +
-        `so there is no search space to draw</span>`
-      : answer.tree
-      ? `<br><span class="hint">tree: ${answer.branch_count.toLocaleString()} branches, ` +
-        `${answer.tree.features.length.toLocaleString()} drawn</span>`
-      : `<br><span class="hint">drop the pin to draw the search</span>`) +
-    scheduleNote(answer);
+    spaceNote(answer) + scheduleNote(answer);
+}
+
+// What the query's second output did, or why it did nothing.
+function spaceNote(answer) {
+  if (answer.transit) {
+    return `<br><span class="hint">a timetable query answers with an itinerary, ` +
+           `so there is no search space to draw</span>`;
+  }
+  if (answer.tree) {
+    return `<br><span class="hint">tree: ${answer.branch_count.toLocaleString()} ` +
+           `branches, ${answer.tree.features.length.toLocaleString()} drawn</span>`;
+  }
+  if (!board.links.some(l => l.fromPort === 'space')) {
+    return `<br><span class="hint">nothing is wired to the query's ` +
+           `<b>space</b> output, so no search space was built</span>`;
+  }
+  return `<br><span class="hint">drop the pin to draw the search</span>`;
 }
 
 function humanise(seconds) {

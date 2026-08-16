@@ -9,10 +9,15 @@
 // an `Environment`, a technique binds to one and becomes a planner, and a
 // `Query` asks it something. `TYPES` below is the whole language.
 
-// What each node looks like and what it produces. `kind` is the type of value
-// on its output; `inputs` names each socket and the kind it accepts. Those two
-// facts are all the wiring rules there are — a port takes what it says it
-// takes, which is the same contract `Planner.accepts` states one level down.
+// What each node looks like and what it produces. `inputs` and `outputs` name
+// each socket and the kind of value it carries, and those two tables are all
+// the wiring rules there are — a port takes what it says it takes, which is the
+// same contract `Planner.accepts` states one level down. `kind` is what a node
+// is *for*, which is only used to colour its header.
+//
+// A node with one output does not spell it out: it produces one value of its
+// own kind, on a socket named after that kind. Only `Query` and `Map` have more
+// than one, and they say so.
 const TYPES = {
   OSM: {
     kind: 'layer', title: 'OSM', group: 'layers',
@@ -79,7 +84,11 @@ const TYPES = {
   Query: {
     kind: 'query', title: 'Query', group: 'query',
     sub: () => 'route(a, b)',
-    inputs: {planner: 'planner'},
+    inputs: {planner: 'planner', origin: 'point', destination: 'point'},
+    // Two answers, not one, and the difference is real: the route is a few
+    // hundred points and the search space is up to ten megabytes, so the
+    // second is only computed when something is listening for it.
+    outputs: {route: 'route', space: 'space'},
     fields: [
       {id: 'day', label: 'weekday', type: 'select', value: '0',
        options: () => [['0', 'Mon'], ['1', 'Tue'], ['2', 'Wed'], ['3', 'Thu'],
@@ -87,14 +96,35 @@ const TYPES = {
       {id: 'minute', label: 'departing', type: 'time', value: 480},
     ],
   },
+  Map: {
+    kind: 'map', title: 'Map', group: 'map',
+    sub: () => 'click to place',
+    // Where the pins are, and where the answers go.
+    inputs: {route: 'route', space: 'space'},
+    outputs: {origin: 'point', destination: 'point'},
+    // Its outputs do not depend on its inputs — the pins are where you put
+    // them, whatever gets drawn — so a graph that runs Map -> Query -> Map is
+    // not a cycle, and `reaches` must not walk through it as though it were.
+    terminal: true,
+  },
 };
+
+/** A node's sockets, in the order they are drawn: inputs first, then outputs. */
+function ports(type, direction) {
+  const spec = TYPES[type];
+  if (direction === 'in') { return Object.entries(spec.inputs || {}); }
+  return Object.entries(spec.outputs || {[spec.kind]: spec.kind});
+}
 
 // One colour per kind, shared by a port's dot and the wire leaving it — which
 // is what lets you see at a glance that a heuristic cannot go where an
 // environment belongs.
+// `route` and `space` are deliberately the colours those things are drawn in on
+// the map above, so a wire and what comes out of it are the same colour.
 const COLOURS = {
   layer: '#8ec07c', environment: '#83a9d1', heuristic: '#d5a05a',
-  ordering: '#d5a05a', planner: '#c08ac4', query: '#d1495b',
+  ordering: '#d5a05a', planner: '#c08ac4', query: '#d99a9a',
+  point: '#7ec8c8', route: '#d1495b', space: '#1d6fa5', map: '#9aa7b4',
 };
 
 const HEADER = 26, ROW = 22, WIDTH = 176;
@@ -141,30 +171,37 @@ class Board {
     this.onchange();
   }
 
-  connect(from, to, port) {
-    if (from === to || !this.compatible(from, to, port)) { return false; }
+  connect(from, fromPort, to, toPort) {
+    if (!this.compatible(from, fromPort, to, toPort)) { return false; }
     // One wire per socket, except a bag of layers: an `Environment` takes as
-    // many as you give it, and everything else takes one argument.
-    const many = to === null ? false : TYPES[this.nodes.get(to).type].inputs[port] === 'layer'
-      && this.nodes.get(to).type === 'Environment';
+    // many as you give it, and everything else takes one argument. Even then a
+    // second wire from the same source replaces rather than duplicates.
+    const many = TYPES[this.nodes.get(to).type].inputs[toPort] === 'layer';
     this.links = this.links.filter(l =>
-      !(l.to === to && l.port === port && (!many || l.from === from)));
-    this.links.push({from, to, port});
+      !(l.to === to && l.toPort === toPort && (!many || l.from === from)));
+    this.links.push({from, fromPort, to, toPort});
     this.draw();
     this.onchange();
     return true;
   }
 
-  compatible(from, to, port) {
+  compatible(from, fromPort, to, toPort) {
     const source = this.nodes.get(from), target = this.nodes.get(to);
-    if (!source || !target) { return false; }
-    const wants = (TYPES[target.type].inputs || {})[port];
-    return wants === TYPES[source.type].kind && !this.reaches(to, from);
+    if (!source || !target || from === to) { return false; }
+    const gives = Object.fromEntries(ports(source.type, 'out'))[fromPort];
+    const wants = Object.fromEntries(ports(target.type, 'in'))[toPort];
+    return Boolean(gives) && gives === wants && !this.reaches(to, from);
   }
 
-  /** Is `goal` downstream of `start`? The check that keeps a graph a graph. */
+  /** Is `goal` downstream of `start`? The check that keeps a graph a graph.
+   *
+   * Stops at a terminal node, whose outputs owe nothing to its inputs. Without
+   * that the obvious wiring — the map hands the query two points and gets a
+   * route back — would look like a loop and be refused.
+   */
   reaches(start, goal) {
     if (start === goal) { return true; }
+    if (TYPES[this.nodes.get(start).type].terminal) { return false; }
     return this.links.filter(l => l.from === start)
       .some(l => this.reaches(l.to, goal));
   }
@@ -173,7 +210,8 @@ class Board {
     return {
       nodes: [...this.nodes.values()].map(n =>
         ({id: n.id, type: n.type, params: n.params, x: Math.round(n.x), y: Math.round(n.y)})),
-      links: this.links.map(l => ({from: l.from, to: l.to, port: l.port})),
+      links: this.links.map(l =>
+        ({from: l.from, fromPort: l.fromPort, to: l.to, toPort: l.toPort})),
     };
   }
 
@@ -185,28 +223,37 @@ class Board {
       this.nodes.set(node.id, {...node, params: {...node.params}});
       this.next = Math.max(this.next, Number(String(node.id).slice(1)) + 1 || 1);
     }
-    this.links = (spec.links || []).filter(l =>
-      this.nodes.has(l.from) && this.nodes.has(l.to));
+    this.links = (spec.links || [])
+      .filter(l => this.nodes.has(l.from) && this.nodes.has(l.to))
+      // A link saved before nodes had more than one output named only its
+      // target socket. There was one source socket then, so it is not
+      // ambiguous — fill it in rather than drop the wire.
+      .map(l => ({
+        from: l.from,
+        fromPort: l.fromPort || ports(this.nodes.get(l.from).type, 'out')[0][0],
+        to: l.to,
+        toPort: l.toPort || l.port,
+      }))
+      .filter(l => this.compatible(l.from, l.fromPort, l.to, l.toPort));
     this.draw();
   }
 
   // --- geometry -------------------------------------------------------
 
   /** Where a port's dot sits, in board coordinates. */
-  socket(id, direction, index) {
+  socket(id, direction, port) {
     const node = this.nodes.get(id);
     return {
       x: node.x + (direction === 'in' ? 0 : WIDTH),
-      y: node.y + HEADER + index * ROW + ROW / 2,
+      y: node.y + HEADER + this.portIndex(node.type, direction, port) * ROW + ROW / 2,
     };
   }
 
-  inputIndex(type, port) {
-    return Object.keys(TYPES[type].inputs || {}).indexOf(port);
-  }
-
-  outputIndex(type) {
-    return Object.keys(TYPES[type].inputs || {}).length;
+  /** A port's row within its node — inputs first, then outputs. */
+  portIndex(type, direction, port) {
+    const inputs = ports(type, 'in');
+    if (direction === 'in') { return inputs.findIndex(([name]) => name === port); }
+    return inputs.length + ports(type, 'out').findIndex(([name]) => name === port);
   }
 
   // --- rendering ------------------------------------------------------
@@ -251,13 +298,11 @@ class Board {
 
     const body = document.createElement('div');
     body.className = 'body';
-    for (const [port, kind] of Object.entries(spec.inputs || {})) {
+    for (const [port, kind] of ports(node.type, 'in')) {
       body.append(this.renderPort(node.id, 'in', port, kind));
     }
-    // A query is where the graph ends, so it has nothing on its right edge. A
-    // port that could never be connected to is a promise the board cannot keep.
-    if (spec.kind !== 'query') {
-      body.append(this.renderPort(node.id, 'out', node.type, spec.kind));
+    for (const [port, kind] of ports(node.type, 'out')) {
+      body.append(this.renderPort(node.id, 'out', port, kind));
     }
     for (const field of spec.fields || []) {
       body.append(this.renderField(node, field));
@@ -276,7 +321,10 @@ class Board {
     const dot = document.createElement('span');
     dot.className = 'dot';
     dot.style.background = COLOURS[kind];
-    row.append(dot, document.createTextNode(direction === 'in' ? port : kind));
+    // Named, not typed. For a node with one output the two are the same word,
+    // which is why it read fine until a node had two of the same kind and the
+    // map grew a pair of sockets both labelled "point".
+    row.append(dot, document.createTextNode(port));
     return row;
   }
 
@@ -340,20 +388,23 @@ class Board {
     this.wires.textContent = '';
     for (const link of this.links) {
       const from = this.nodes.get(link.from), to = this.nodes.get(link.to);
-      const a = this.socket(link.from, 'out', this.outputIndex(from.type));
-      const b = this.socket(link.to, 'in', this.inputIndex(to.type, link.port));
-      this.wires.append(...this.wire(a, b, COLOURS[TYPES[from.type].kind], link));
+      const a = this.socket(link.from, 'out', link.fromPort);
+      const b = this.socket(link.to, 'in', link.toPort);
+      const kind = Object.fromEntries(ports(from.type, 'out'))[link.fromPort];
+      this.wires.append(...this.wire(a, b, COLOURS[kind], link));
     }
     if (this.dragging && this.dragging.what === 'wire') {
-      const {from, kind, cursor} = this.dragging;
-      this.wires.append(this.wire(from, cursor, COLOURS[kind])[1]);
+      const {from, kind, cursor, origin} = this.dragging;
+      // Drawn the way it will look once it lands: a wire dragged leftwards from
+      // an output is a backward wire even before it has anywhere to go.
+      const [head, tail] = origin.direction === 'out' ? [from, cursor] : [cursor, from];
+      this.wires.append(this.wire(head, tail, COLOURS[kind])[1]);
     }
   }
 
   /** A bezier, plus a fat invisible copy of it that is easy to click. */
   wire(a, b, colour, link) {
-    const bend = Math.max(30, Math.abs(b.x - a.x) * 0.45);
-    const d = `M ${a.x} ${a.y} C ${a.x + bend} ${a.y}, ${b.x - bend} ${b.y}, ${b.x} ${b.y}`;
+    const d = this.path(a, b);
 
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     line.setAttribute('d', d);
@@ -373,6 +424,24 @@ class Board {
     return [hit, line];
   }
 
+  /** The curve between two sockets.
+   *
+   * Forward is the ordinary S-bend. Backward — an answer returning to the map
+   * it will be drawn on — sags underneath the row instead, because the same
+   * S-bend run in reverse throws its control points far off to either side and
+   * the wire disappears past the edge of the board. Nodes paint over the wires,
+   * so a sagging wire passes behind them.
+   */
+  path(a, b) {
+    const dx = b.x - a.x;
+    if (dx > -20) {
+      const bend = Math.max(30, dx * 0.45);
+      return `M ${a.x} ${a.y} C ${a.x + bend} ${a.y}, ${b.x - bend} ${b.y}, ${b.x} ${b.y}`;
+    }
+    const sag = Math.min(190, 70 + Math.abs(dx) * 0.1);
+    return `M ${a.x} ${a.y} C ${a.x + 70} ${a.y + sag}, ${b.x - 70} ${b.y + sag}, ${b.x} ${b.y}`;
+  }
+
   // --- interaction ----------------------------------------------------
 
   /** A page point in board coordinates. */
@@ -388,26 +457,22 @@ class Board {
     const port = event.target.closest('.port');
     if (port) {
       event.preventDefault();
-      const index = port.dataset.direction === 'in'
-        ? this.inputIndex(this.nodes.get(port.dataset.node).type, port.dataset.port)
-        : this.outputIndex(this.nodes.get(port.dataset.node).type);
-      const anchor = this.socket(port.dataset.node, port.dataset.direction, index);
       // Grabbing a connected input takes the wire off it rather than adding a
-      // second, which is how you re-plug something without cutting it first.
-      let origin = {node: port.dataset.node, direction: port.dataset.direction};
+      // second, which is how you re-plug something without cutting it first —
+      // the far end comes with you.
+      let origin = {node: port.dataset.node, port: port.dataset.port,
+                    direction: port.dataset.direction};
       if (port.dataset.direction === 'in') {
         const held = this.links.find(l =>
-          l.to === port.dataset.node && l.port === port.dataset.port);
+          l.to === port.dataset.node && l.toPort === port.dataset.port);
         if (held) {
           this.links = this.links.filter(l => l !== held);
-          origin = {node: held.from, direction: 'out'};
+          origin = {node: held.from, port: held.fromPort, direction: 'out'};
         }
       }
       this.dragging = {
         what: 'wire', origin, kind: port.dataset.kind,
-        from: origin.direction === 'out'
-          ? this.socket(origin.node, 'out', this.outputIndex(this.nodes.get(origin.node).type))
-          : anchor,
+        from: this.socket(origin.node, origin.direction, origin.port),
         cursor: this.where(event),
       };
       this.highlight(this.dragging.kind, origin.direction);
@@ -459,11 +524,10 @@ class Board {
     if (drag.what === 'wire') {
       const port = event.target.closest('.port');
       if (port && port.dataset.direction !== drag.origin.direction) {
-        if (drag.origin.direction === 'out') {
-          this.connect(drag.origin.node, port.dataset.node, port.dataset.port);
-        } else {
-          this.connect(port.dataset.node, drag.origin.node, drag.origin.port);
-        }
+        const [source, target] = drag.origin.direction === 'out'
+          ? [drag.origin, {node: port.dataset.node, port: port.dataset.port}]
+          : [{node: port.dataset.node, port: port.dataset.port}, drag.origin];
+        this.connect(source.node, source.port, target.node, target.port);
       }
       this.draw();
       // A wire pulled off and dropped on nothing really is disconnected.
