@@ -36,7 +36,8 @@
 //! fixed number of searches. Reading a file through a parser that yields no
 //! counts does not, and inventing a number for it would be worse than showing
 //! none: a bar that lies about being nearly finished is a bar nobody believes
-//! again. Those report [`Progress::unknown`], which says so.
+//! again. Work like that is simply never handed a counter, and a counter nobody
+//! wrote to reports [`Progress::fraction`] as `None`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -82,7 +83,7 @@ impl Progress {
     }
 
     /// Steps finished, and how many there are. `total` is zero when the work
-    /// never said, which is [`Progress::unknown`].
+    /// never said, which is a counter nothing wrote to.
     pub fn read(&self) -> (u64, u64) {
         (
             self.done.load(Ordering::Relaxed),
@@ -100,13 +101,6 @@ impl Progress {
         let (done, total) = self.read();
         (total > 0).then(|| (done as f64 / total as f64).min(1.0))
     }
-
-    /// A counter nothing will ever write to — what work with no honest measure
-    /// of its own progress reports, so that a caller can tell "not started"
-    /// from "cannot say".
-    pub fn unknown() -> Self {
-        Progress::default()
-    }
 }
 
 #[cfg(test)]
@@ -118,8 +112,10 @@ mod tests {
 
     #[test]
     fn a_counter_nobody_wrote_to_cannot_say() {
-        assert_eq!(Progress::unknown().fraction(), None);
-        assert_eq!(Progress::unknown().read(), (0, 0));
+        // Which is what work with no honest measure of its own reports: the
+        // plain entry points pass one of these and never touch it.
+        assert_eq!(Progress::new().fraction(), None);
+        assert_eq!(Progress::new().read(), (0, 0));
     }
 
     #[test]

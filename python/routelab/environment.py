@@ -126,6 +126,20 @@ class EdgeSource:
         """Yield ``(tail, head, weight)`` with labelled endpoints."""
         raise NotImplementedError
 
+    def load(self) -> "EdgeSource":
+        """Read whatever this layer defers, now, and return it.
+
+        Layers read lazily: an OSM extract is six seconds and nobody should pay
+        for one they never route over. But laziness moves *when* the cost lands
+        as well as whether, and something timing the steps — or drawing a
+        spinner over the one it is waiting on — needs to be able to say "not
+        later, now" without knowing which attribute happens to trigger it.
+
+        Nothing to do for a layer that was never lazy, which is why this is
+        here and not on each subclass.
+        """
+        return self
+
     def positions(self) -> Mapping[Hashable, "Tuple[float, float]"]:
         """Where this layer's nodes are, as ``{label: (x, y)}``.
 

@@ -18,77 +18,59 @@
 // A node with one output does not spell it out: it produces one value of its
 // own kind, on a socket named after that kind. Only `Query` and `Map` have more
 // than one, and they say so.
-const TYPES = {
+// How each node looks. The *wiring* — what each port accepts, what a node
+// produces, what depends on what — is not here: it arrives from the server in
+// `SETUP.nodes`, because it is one fact and the board's whole claim is that
+// what it draws is what the server does. A second copy could drift, and a
+// drifted copy fails silently: the client would predict rebuilds the server
+// never does, or miss ones it does.
+const LOOKS = {
   OSM: {
-    kind: 'layer', title: 'OSM', group: 'layers',
+    title: 'OSM', group: 'layers',
     sub: () => SETUP.extract,
     fields: [{id: 'profile', label: 'profile', type: 'select',
               options: () => SETUP.profiles, value: 'driving'}],
   },
   GTFS: {
-    kind: 'layer', title: 'GTFS', group: 'layers',
+    title: 'GTFS', group: 'layers',
     sub: () => SETUP.feed,
     available: () => Boolean(SETUP.feed),
     fields: [{id: '_date', label: 'service day', type: 'note',
               text: () => SETUP.date}],
   },
-  Environment: {
-    kind: 'environment', title: 'Environment', group: 'environment',
-    inputs: {layers: 'layer'},
-  },
-  Euclidean: {kind: 'heuristic', title: 'Euclidean', group: 'heuristics'},
+  Environment: {title: 'Environment', group: 'environment'},
+  Euclidean: {title: 'Euclidean', group: 'heuristics'},
   Landmarks: {
-    kind: 'heuristic', title: 'Landmarks', group: 'heuristics',
+    title: 'Landmarks', group: 'heuristics',
     fields: [{id: 'count', label: 'landmarks', type: 'number',
               value: 16, min: 1, max: 64}],
   },
-  EdgeDifference: {kind: 'ordering', title: 'EdgeDifference', group: 'orderings'},
+  EdgeDifference: {title: 'EdgeDifference', group: 'orderings'},
   RandomOrder: {
-    kind: 'ordering', title: 'RandomOrder', group: 'orderings',
+    title: 'RandomOrder', group: 'orderings',
     fields: [{id: 'seed', label: 'seed', type: 'number', value: 0, min: 0, max: 999}],
   },
-  Dijkstra: {
-    kind: 'planner', title: 'Dijkstra', group: 'techniques',
-    inputs: {environment: 'environment'},
-  },
-  BFS: {
-    kind: 'planner', title: 'BFS', group: 'techniques', sub: () => 'fewest hops',
-    inputs: {environment: 'environment'},
-  },
-  AStar: {
-    kind: 'planner', title: 'AStar', group: 'techniques',
-    inputs: {environment: 'environment', heuristic: 'heuristic'},
-  },
-  ContractionHierarchy: {
-    kind: 'planner', title: 'ContractionHierarchy', group: 'techniques',
-    inputs: {environment: 'environment', ordering: 'ordering'},
-  },
+  Dijkstra: {title: 'Dijkstra', group: 'techniques'},
+  BFS: {title: 'BFS', group: 'techniques', sub: () => 'fewest hops'},
+  AStar: {title: 'AStar', group: 'techniques'},
+  ContractionHierarchy: {title: 'ContractionHierarchy', group: 'techniques'},
   TimeDependentDijkstra: {
-    kind: 'planner', title: 'TimeDependentDijkstra', group: 'techniques',
-    inputs: {environment: 'environment'},
+    title: 'TimeDependentDijkstra', group: 'techniques',
     fields: [{id: 'waiting', label: 'waiting', type: 'select',
               options: () => ['unrestricted', 'forbidden'], value: 'unrestricted'}],
   },
   TimeDependent: {
-    kind: 'planner', title: 'TimeDependent', group: 'techniques',
+    title: 'TimeDependent', group: 'techniques',
     sub: () => 'a node per stop',
     available: () => Boolean(SETUP.feed),
-    inputs: {environment: 'environment'},
   },
   TimeExpanded: {
-    kind: 'planner', title: 'TimeExpanded', group: 'techniques',
+    title: 'TimeExpanded', group: 'techniques',
     sub: () => 'a node per event',
     available: () => Boolean(SETUP.feed),
-    inputs: {environment: 'environment'},
   },
   Query: {
-    kind: 'query', title: 'Query', group: 'query',
-    sub: () => 'route(a, b)',
-    inputs: {planner: 'planner', origin: 'point', destination: 'point'},
-    // Two answers, not one, and the difference is real: the route is a few
-    // hundred points and the search space is up to ten megabytes, so the
-    // second is only computed when something is listening for it.
-    outputs: {route: 'route', space: 'space'},
+    title: 'Query', group: 'query', sub: () => 'route(a, b)',
     fields: [
       {id: 'day', label: 'weekday', type: 'select', value: '0',
        options: () => [['0', 'Mon'], ['1', 'Tue'], ['2', 'Wed'], ['3', 'Thu'],
@@ -96,18 +78,20 @@ const TYPES = {
       {id: 'minute', label: 'departing', type: 'time', value: 480},
     ],
   },
-  Map: {
-    kind: 'map', title: 'Map', group: 'map',
-    sub: () => 'click to place',
-    // Where the pins are, and where the answers go.
-    inputs: {route: 'route', space: 'space'},
-    outputs: {origin: 'point', destination: 'point'},
-    // Its outputs do not depend on its inputs — the pins are where you put
-    // them, whatever gets drawn — so a graph that runs Map -> Query -> Map is
-    // not a cycle, and `reaches` must not walk through it as though it were.
-    terminal: true,
-  },
+  Map: {title: 'Map', group: 'map', sub: () => 'click to place'},
 };
+
+// Wiring from the server, looks from here. One entry per node type, and a type
+// the server does not know about cannot be drawn — which is the point.
+const TYPES = Object.fromEntries(
+  Object.entries(SETUP.nodes).map(([name, wiring]) => [name, {...wiring, ...LOOKS[name]}]));
+
+/** What a node's settings start as, before anything has been chosen. */
+function defaults(type) {
+  return Object.fromEntries((TYPES[type].fields || [])
+    .filter(field => field.type !== 'note')
+    .map(field => [field.id, field.value]));
+}
 
 /** A node's sockets, in the order they are drawn: inputs first, then outputs. */
 function ports(type, direction) {
@@ -123,21 +107,29 @@ function ports(type, direction) {
 // the map above, so a wire and what comes out of it are the same colour.
 const COLOURS = {
   layer: '#8ec07c', environment: '#83a9d1', heuristic: '#d5a05a',
-  ordering: '#d5a05a', planner: '#c08ac4', query: '#d99a9a',
-  point: '#7ec8c8', route: '#d1495b', space: '#1d6fa5', map: '#9aa7b4',
+  ordering: '#d5a05a', planner: '#c08ac4',
+  point: '#7ec8c8', route: '#d1495b', space: '#1d6fa5',
 };
 
-const HEADER = 26, ROW = 22, WIDTH = 176;
+// Node geometry. Wires are drawn from these, and the stylesheet lays nodes out
+// from them too — handed over as custom properties rather than restated there,
+// because a padding changed in one place and not the other detaches every wire
+// from its dot and nothing catches it.
+const HEADER = 26, ROW = 22, WIDTH = 176, BODY_TOP = 4;
 
 class Board {
   constructor(host, onchange) {
-    this.host = host;
     this.onchange = onchange;
     this.nodes = new Map();
     this.links = [];
     this.pan = {x: 40, y: 16};
     this.zoom = 1;
     this.next = 1;
+
+    host.style.setProperty('--node-width', `${WIDTH}px`);
+    host.style.setProperty('--node-header', `${HEADER}px`);
+    host.style.setProperty('--port-row', `${ROW}px`);
+    host.style.setProperty('--body-top', `${BODY_TOP}px`);
 
     this.layer = host.querySelector('#nodes');
     this.wires = host.querySelector('#wiregroup');
@@ -153,13 +145,8 @@ class Board {
   // --- the model ------------------------------------------------------
 
   add(type, x, y) {
-    const spec = TYPES[type];
-    const params = {};
-    for (const field of spec.fields || []) {
-      if (field.type !== 'note') { params[field.id] = field.value; }
-    }
     const id = 'n' + this.next++;
-    this.nodes.set(id, {id, type, params, x, y});
+    this.nodes.set(id, {id, type, params: defaults(type), x, y});
     this.draw();
     return id;
   }
@@ -168,7 +155,7 @@ class Board {
     this.nodes.delete(id);
     this.links = this.links.filter(l => l.from !== id && l.to !== id);
     this.draw();
-    this.onchange();
+    this.onchange(true);
   }
 
   connect(from, fromPort, to, toPort) {
@@ -181,7 +168,7 @@ class Board {
       !(l.to === to && l.toPort === toPort && (!many || l.from === from)));
     this.links.push({from, fromPort, to, toPort});
     this.draw();
-    this.onchange();
+    this.onchange(true);
     return true;
   }
 
@@ -220,7 +207,9 @@ class Board {
     this.links = [];
     for (const node of spec.nodes || []) {
       if (!TYPES[node.type]) { continue; }
-      this.nodes.set(node.id, {...node, params: {...node.params}});
+      // Defaults under whatever was saved, so a board written before a field
+      // existed still opens with that field set to something.
+      this.nodes.set(node.id, {...node, params: {...defaults(node.type), ...node.params}});
       this.next = Math.max(this.next, Number(String(node.id).slice(1)) + 1 || 1);
     }
     this.links = (spec.links || [])
@@ -346,7 +335,8 @@ class Board {
     const node = this.nodes.get(id);
     return {
       x: node.x + (direction === 'in' ? 0 : WIDTH),
-      y: node.y + HEADER + this.portIndex(node.type, direction, port) * ROW + ROW / 2,
+      y: node.y + HEADER + BODY_TOP
+         + this.portIndex(node.type, direction, port) * ROW + ROW / 2,
     };
   }
 
@@ -479,15 +469,20 @@ class Board {
       input.value = node.params[field.id];
     }
 
-    // Two events, because they mean different things while dragging a slider:
-    // `input` fires continuously and re-routes live, `change` fires when you
-    // let go and is when the expensive picture is worth redrawing.
-    input.addEventListener('input', () => {
+    const read = () => {
       node.params[field.id] = field.type === 'number' || field.type === 'time'
         ? Number(input.value) : input.value;
-      this.onchange(false);
-    });
-    input.addEventListener('change', () => this.onchange(true));
+    };
+    // A slider wants both events: `input` fires continuously and re-routes
+    // live, `change` fires when you let go and is when the expensive picture is
+    // worth redrawing. Nothing else does. A dropdown answers `input` and
+    // `change` for one choice, and when that choice is a profile the first of
+    // them starts a six-second read of an extract the second immediately
+    // starts again.
+    if (field.type === 'time') {
+      input.addEventListener('input', () => { read(); this.onchange(false); });
+    }
+    input.addEventListener('change', () => { read(); this.onchange(true); });
     // Otherwise a click on a select starts dragging the node under it.
     input.addEventListener('mousedown', event => event.stopPropagation());
     wrap.append(input);
@@ -497,7 +492,7 @@ class Board {
   drawWires() {
     this.wires.textContent = '';
     for (const link of this.links) {
-      const from = this.nodes.get(link.from), to = this.nodes.get(link.to);
+      const from = this.nodes.get(link.from);
       const a = this.socket(link.from, 'out', link.fromPort);
       const b = this.socket(link.to, 'in', link.toPort);
       const kind = Object.fromEntries(ports(from.type, 'out'))[link.fromPort];
@@ -508,7 +503,7 @@ class Board {
       // Drawn the way it will look once it lands: a wire dragged leftwards from
       // an output is a backward wire even before it has anywhere to go.
       const [head, tail] = origin.direction === 'out' ? [from, cursor] : [cursor, from];
-      this.wires.append(this.wire(head, tail, COLOURS[kind])[1]);
+      this.wires.append(...this.wire(head, tail, COLOURS[kind]));
     }
   }
 
@@ -521,7 +516,7 @@ class Board {
     line.setAttribute('class', link ? 'wire' : 'wire dangling');
     line.setAttribute('stroke', colour);
 
-    if (!link) { return [line, line]; }
+    if (!link) { return [line]; }
     const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     hit.setAttribute('d', d);
     hit.setAttribute('class', 'wire hit');
@@ -529,7 +524,7 @@ class Board {
       event.stopPropagation();
       this.links = this.links.filter(l => l !== link);
       this.draw();
-      this.onchange();
+      this.onchange(true);
     });
     return [hit, line];
   }
@@ -633,15 +628,21 @@ class Board {
 
     if (drag.what === 'wire') {
       const port = event.target.closest('.port');
+      let landed = false;
       if (port && port.dataset.direction !== drag.origin.direction) {
         const [source, target] = drag.origin.direction === 'out'
           ? [drag.origin, {node: port.dataset.node, port: port.dataset.port}]
           : [{node: port.dataset.node, port: port.dataset.port}, drag.origin];
-        this.connect(source.node, source.port, target.node, target.port);
+        landed = this.connect(source.node, source.port, target.node, target.port);
       }
-      this.draw();
-      // A wire pulled off and dropped on nothing really is disconnected.
-      this.onchange();
+      // `connect` has already drawn and told, so only the miss is left to
+      // report — and a wire pulled off and dropped on nothing really is
+      // disconnected. Telling twice ran the whole query twice, which on this
+      // board is two searches and two ten-megabyte search spaces.
+      if (!landed) {
+        this.draw();
+        this.onchange(true);
+      }
     } else if (drag.what === 'node') {
       this.onchange(true);
     }

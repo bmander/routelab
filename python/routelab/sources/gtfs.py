@@ -70,6 +70,11 @@ class GTFS(EdgeSource):
             )
         return self._feed
 
+    def load(self) -> "GTFS":
+        """Read the feed now. See :meth:`~routelab.EdgeSource.load`."""
+        self.feed
+        return self
+
     def _pairs(self) -> "List[Tuple[int, int, int]]":
         """The stop pairs, in the order :meth:`edges` yields them."""
         edges = self._edges

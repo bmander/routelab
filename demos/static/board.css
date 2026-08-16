@@ -62,13 +62,12 @@ body { display: flex; flex-direction: column; }
 
 .wire { fill: none; stroke-width: 2.5; pointer-events: none; }
 .wire.hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: crosshair; }
-.wire.hit:hover + .wire, .wire.hit:hover { stroke-opacity: 1; }
 .wire.dangling { stroke-dasharray: 5 4; }
 
 /* --- nodes ---------------------------------------------------------- */
 
 .node {
-  position: absolute; width: 176px; box-sizing: border-box;
+  position: absolute; width: var(--node-width); box-sizing: border-box;
   background: #2b2f35; border: 1px solid #454b54; border-radius: 6px;
   box-shadow: 0 2px 10px rgba(0,0,0,.45); user-select: none;
 }
@@ -80,9 +79,7 @@ body { display: flex; flex-direction: column; }
    stays opaque — fading the whole node lets the wires behind it show through,
    and a wire running through a node reads as a wire attached to it. */
 .node.busy .body { opacity: .4; }
-.node.busy .progress { opacity: 1; }
 .node.busy header { opacity: .75; }
-.node.busy .field { pointer-events: none; }
 .node.busy header::after {
   content: ''; margin-left: 6px; flex: 0 0 auto;
   width: 11px; height: 11px; border-radius: 50%;
@@ -92,9 +89,9 @@ body { display: flex; flex-direction: column; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .node header {
-  padding: 5px 9px; border-radius: 5px 5px 0 0; cursor: grab;
+  height: var(--node-header); padding: 0 9px; border-radius: 5px 5px 0 0; cursor: grab;
   font-size: 12px; font-weight: 600; letter-spacing: .2px;
-  display: flex; align-items: baseline; gap: 6px;
+  display: flex; align-items: center; gap: 6px; box-sizing: border-box;
 }
 .node header .sub { font-weight: 400; opacity: .75; font-size: 11px; }
 .node header .tick {
@@ -118,17 +115,17 @@ body { display: flex; flex-direction: column; }
    type: you can see the shape of the pipeline before reading a word of it. */
 .node[data-kind="layer"]       header { background: #4d6b3f; }
 .node[data-kind="environment"] header { background: #3d5c78; }
-.node[data-kind="heuristic"],
-.node[data-kind="ordering"]           { }
-.node[data-kind="heuristic"]   header { background: #6b5330; }
-.node[data-kind="ordering"]    header { background: #6b5330; }
+/* Heuristics and orderings share a colour: both are a technique's second
+   argument rather than a stage of their own. */
+.node[data-kind="heuristic"] header,
+.node[data-kind="ordering"]  header { background: #6b5330; }
 .node[data-kind="planner"]     header { background: #6a3f6e; }
 .node[data-kind="query"]       header { background: #7a3a3a; }
 
-.node .body { padding: 4px 0 7px; }
+.node .body { padding: var(--body-top) 0 7px; }
 
 .port {
-  position: relative; height: 22px; display: flex; align-items: center;
+  position: relative; height: var(--port-row); display: flex; align-items: center;
   font-size: 11px; color: #aab0b9; padding: 0 9px;
 }
 .port.out { justify-content: flex-end; }

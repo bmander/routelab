@@ -108,53 +108,64 @@ const PRESETS = [
   {
     id: 'transit-dependent',
     label: 'Transit · time-dependent',
-    needs: 'feed',
     layer: ['GTFS', {}],
     technique: ['TimeDependent', {}],
   },
   {
     id: 'transit-expanded',
     label: 'Transit · time-expanded',
-    needs: 'feed',
     layer: ['GTFS', {}],
     technique: ['TimeExpanded', {}],
   },
 ];
 
-/** Lay a preset out on the board, replacing whatever was there. */
+/** Lay a preset out on the board, replacing whatever was there.
+ *
+ * Assembled as a spec and handed to `Board.load`, which is the same door a
+ * pasted URL comes through: the reset, the port back-filling and the
+ * compatibility check all happen once, in one place, and a preset that names a
+ * port wrongly is refused here rather than sent to the server.
+ */
 function load(preset) {
-  board.nodes = new Map();
-  board.links = [];
-  board.next = 1;
-  const map_node = board.add('Map', 20, 10);
-  const layer = board.add(preset.layer[0], 232, 10);
-  const env = board.add('Environment', 444, 10);
-  const technique = board.add(preset.technique[0], 656, 10);
-  const query = board.add('Query', 868, 10);
-  Object.assign(board.nodes.get(layer).params, preset.layer[1]);
-  Object.assign(board.nodes.get(technique).params, preset.technique[1]);
-
-  board.links = [
-    {from: layer, fromPort: 'layer', to: env, toPort: 'layers'},
-    {from: env, fromPort: 'environment', to: technique, toPort: 'environment'},
-    {from: technique, fromPort: 'planner', to: query, toPort: 'planner'},
-    // The map, on both sides of it.
-    {from: map_node, fromPort: 'origin', to: query, toPort: 'origin'},
-    {from: map_node, fromPort: 'destination', to: query, toPort: 'destination'},
-    {from: query, fromPort: 'route', to: map_node, toPort: 'route'},
-    {from: query, fromPort: 'space', to: map_node, toPort: 'space'},
-  ];
+  const out = type => ports(type, 'out')[0][0];
+  const [layer, layerParams] = preset.layer;
+  const [technique, techniqueParams] = preset.technique;
+  const spec = {
+    nodes: [
+      {id: 'map', type: 'Map', x: 20, y: 10},
+      {id: 'layer', type: layer, x: 232, y: 10, params: layerParams},
+      {id: 'env', type: 'Environment', x: 444, y: 10},
+      {id: 'technique', type: technique, x: 656, y: 10, params: techniqueParams},
+      {id: 'query', type: 'Query', x: 868, y: 10},
+    ],
+    links: [
+      {from: 'layer', fromPort: out(layer), to: 'env', toPort: 'layers'},
+      {from: 'env', fromPort: 'environment', to: 'technique', toPort: 'environment'},
+      {from: 'technique', fromPort: 'planner', to: 'query', toPort: 'planner'},
+      // The map, on both sides of it.
+      {from: 'map', fromPort: 'origin', to: 'query', toPort: 'origin'},
+      {from: 'map', fromPort: 'destination', to: 'query', toPort: 'destination'},
+      {from: 'query', fromPort: 'route', to: 'map', toPort: 'route'},
+      {from: 'query', fromPort: 'space', to: 'map', toPort: 'space'},
+    ],
+  };
   if (preset.config) {
     const [port, type, params] = preset.config;
-    const node = board.add(type, 232, 148);
-    Object.assign(board.nodes.get(node).params, params);
-    board.links.push({from: node, fromPort: TYPES[type].kind, to: technique, toPort: port});
+    spec.nodes.push({id: 'config', type, x: 232, y: 148, params});
+    spec.links.push({from: 'config', fromPort: out(type), to: 'technique', toPort: port});
   }
-  board.draw();
+  board.load(spec);
 }
 
+/** Can this demo offer this preset, given what it was started with?
+ *
+ * Asked of the node types it uses, which already declare it — one answer, and
+ * a preset cannot claim to work when a node it needs is greyed out.
+ */
 function available(preset) {
-  return preset.needs !== 'feed' || Boolean(SETUP.feed);
+  return [preset.layer[0], preset.technique[0], preset.config && preset.config[1]]
+    .filter(Boolean)
+    .every(type => !TYPES[type].available || TYPES[type].available());
 }
 
 /** What the demo opens with, and what `reset` goes back to. */
@@ -279,8 +290,8 @@ grip.addEventListener('mousedown', event => {
 // the wiring that reproduces it" a link rather than a paragraph.
 // `replaceState`, not `pushState`: dragging a pin would otherwise fill the back
 // button with a hundred near-identical steps.
-function syncUrl() {
-  const query = new URLSearchParams({board: JSON.stringify(board.serialise())});
+function syncUrl(spec) {
+  const query = new URLSearchParams({board: spec || JSON.stringify(board.serialise())});
   if (pins.length === 2) {
     query.set('from', at(pins[0]));
     query.set('to', at(pins[1]));
@@ -327,6 +338,19 @@ const built = new Set();
 const SETTLE = 150;
 let pending = null;
 
+/** What every node upstream of the query is, right now. The board's record of
+ * what has been built is keyed by these, and a request carries the ones it was
+ * sent with so the answer is filed under the right board. */
+function signatures() {
+  const query = [...board.nodes.values()].find(node => node.type === 'Query');
+  const planner = query && board.sources(query.id, 'planner')[0];
+  const taken = new Map();
+  if (planner) {
+    for (const id of board.upstream(planner)) { taken.set(id, board.signature(id)); }
+  }
+  return taken;
+}
+
 /** Spin whatever this request will have to build, once it is clear it is slow.
  *
  * Two different reasons to spin, and both are true. A node upstream of the
@@ -335,28 +359,31 @@ let pending = null;
  * whenever it is waiting, because unlike everything else it is never cached:
  * the search runs again every time.
  */
-function markStale() {
-  const query = [...board.nodes.values()].find(n => n.type === 'Query');
-  if (!query) { return []; }
-  const planner = board.sources(query.id, 'planner')[0];
-  const needed = planner
-    ? [...board.upstream(planner)].filter(id => !built.has(board.signature(id)))
-    : [];
+function markStale(sent) {
+  const query = [...board.nodes.values()].find(node => node.type === 'Query');
+  if (!query) { return; }
+  const needed = [...sent].filter(([, spelling]) => !built.has(spelling)).map(([id]) => id);
   clearTimeout(pending);
   pending = setTimeout(() => {
     [...needed, query.id].forEach(id => board.busy(id, true));
     watch();
   }, SETTLE);
-  return needed;
 }
 
-/** Record what came back, and let the board go still. */
-function settle(answer) {
+/** Record what came back, and let the board go still.
+ *
+ * `sent` is what each node's signature was when the request left, not what it
+ * is now. Rewire while an answer is in flight and the two differ — and stamping
+ * the server's "I built these" onto today's board would record a signature for
+ * something nobody built, so the next genuinely expensive rebuild would show no
+ * spinner. Which is the one thing the spinners exist to rule out.
+ */
+function settle(answer, sent) {
   clearTimeout(pending);
   clearInterval(watching);
   watching = null;
-  for (const id of answer.built || []) {
-    if (board.nodes.has(id)) { built.add(board.signature(id)); }
+  for (const id of Object.keys(answer.built || {})) {
+    if (sent.has(id)) { built.add(sent.get(id)); }
   }
   board.idle();
 }
@@ -423,15 +450,15 @@ function ask(explore) {
 }
 
 async function drain() {
-  while (waiting !== null) {
-    const {explore} = waiting;
-    waiting = null;
-    inFlight = true;
-    try {
+  inFlight = true;
+  try {
+    while (waiting !== null) {
+      const {explore} = waiting;
+      waiting = null;
       await request(explore);
-    } finally {
-      inFlight = false;
     }
+  } finally {
+    inFlight = false;
   }
 }
 
@@ -441,27 +468,29 @@ async function request(explore) {
     readout.className = 'hint';
     readout.textContent = 'routing…';
   }
-  markStale();
+  const sent = signatures();
+  markStale(sent);
 
-  const query = new URLSearchParams({
-    from: at(pins[0]), to: at(pins[1]),
-    board: JSON.stringify(board.serialise()),
-  });
+  const spec = JSON.stringify(board.serialise());
+  const query = new URLSearchParams({from: at(pins[0]), to: at(pins[1]), board: spec});
   if (!explore) { query.set('explore', '0'); }
 
-  syncUrl();
+  // Recorded when the drag stops, not on every frame of it. Safari throws past
+  // roughly a hundred `replaceState` calls in thirty seconds, and a hierarchy
+  // answering in a millisecond makes a hundred of them in two seconds.
+  if (explore) { syncUrl(spec); }
   let answer;
   try {
     answer = await (await fetch('/route?' + query)).json();
   } catch (error) {
     // Anything thrown here used to leave the board spinning for ever with no
     // word of why, which is precisely the state the spinners exist to rule out.
-    settle({});
+    settle({}, sent);
     readout.className = 'hint';
     readout.textContent = `the server did not answer: ${error}`;
     return;
   }
-  settle(answer);
+  settle(answer, sent);
   board.blame(answer.node);
   if (answer.error) {
     readout.className = 'hint';

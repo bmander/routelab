@@ -66,6 +66,7 @@ import argparse
 import datetime
 import json
 import time
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import NamedTuple
@@ -75,6 +76,16 @@ import routelab as rl
 from routelab import _routelab
 
 PROFILES = {"walking": rl.Walking, "cycling": rl.Cycling, "driving": rl.Driving}
+
+#: How many built things to keep, and how many reachable-label sets.
+#:
+#: A cap rather than none. The cache is keyed by signature, and
+#: `Landmarks(count=…)` and `RandomOrder(seed=…)` are each a whole family of
+#: keys worth tens of megabytes apiece — nudge a spinbox through a dozen values
+#: and an uncapped cache holds every one of them for the life of the process.
+#: Eight is enough that rewiring back to a shape you had a moment ago is free,
+#: which is the only promise being made.
+REMEMBERED = 8
 
 #: What each node type builds, and what has to be plugged into it first.
 #:
@@ -88,6 +99,10 @@ PROFILES = {"walking": rl.Walking, "cycling": rl.Cycling, "driving": rl.Driving}
 #: `inputs` maps a port name to the kind of value it accepts. `kind` is what a
 #: node is for, which decides how it is built; the two together are all the
 #: wiring rules there are, and a port takes what it says it takes.
+#:
+#: Shipped to the page as-is (see `Router.catalogue`), which is why it is data
+#: rather than code: `static/board.js` adds titles, fields and colours to these
+#: entries and never restates the wiring.
 NODES: "dict[str, dict]" = {
     "OSM": {"kind": "layer", "inputs": {}},
     "GTFS": {"kind": "layer", "inputs": {}},
@@ -168,8 +183,7 @@ class Board(NamedTuple):
     def parse(cls, text: str) -> "Board":
         raw = json.loads(text)
         nodes = {str(node["id"]): node for node in raw.get("nodes", [])}
-        links = [dict(link) for link in raw.get("links", [])]
-        return cls(nodes, links)
+        return cls(nodes, raw.get("links", []))
 
     def sources(self, node_id: str, port: str) -> "list[tuple[str, str]]":
         """`(id, output port)` feeding one input, in the order they were wired."""
@@ -191,6 +205,25 @@ class Board(NamedTuple):
             if link.get("from") == node_id and link.get("fromPort") == port
         ]
 
+    def upstream(self, node_id: str, found: "list[str] | None" = None) -> "list[str]":
+        """`node_id` and everything it takes as an argument, transitively.
+
+        The one place the argument-port rule is written: a terminal node has no
+        arguments — what comes out of the map does not depend on what is drawn
+        on it — which is both what stops Map -> Query -> Map recurring for ever
+        and what `signature` and `settled` are agreeing about when they agree.
+        """
+        found = [] if found is None else found
+        if node_id in found:
+            return found
+        found.append(node_id)
+        kind = self.nodes[node_id]["type"]
+        if not NODES[kind].get("terminal"):
+            for port in NODES[kind]["inputs"]:
+                for source, _ in self.sources(node_id, port):
+                    self.upstream(source, found)
+        return found
+
     def only(self, kind: str) -> "str | None":
         """The one node of a kind, if there is exactly one. How the query is found."""
         found = [
@@ -199,20 +232,6 @@ class Board(NamedTuple):
             if NODES.get(node["type"], {}).get("kind") == kind
         ]
         return found[0] if len(found) == 1 else None
-
-
-class BuiltSoFar(Exception):
-    """Raised over a failure, carrying the nodes that did come back.
-
-    Not an error in itself — it wraps one. A graph that fails at its last node
-    still built everything before it, and the board needs to know that or it
-    will keep those nodes spinning for work that is already done.
-    """
-
-    def __init__(self, built: "list[str]", error: Exception):
-        super().__init__(str(error))
-        self.built = built
-        self.error = error
 
 
 class Unwired(ValueError):
@@ -247,8 +266,12 @@ class Router:
         self.path = path
         self.feed = feed
         self.date = date
-        self._built: "dict[str, object]" = {}
-        self._reachable: "dict[tuple[str, object], tuple]" = {}
+        self._built: "OrderedDict[str, object]" = OrderedDict()
+        #: Reachable-label sets, keyed by the environment's *signature* rather
+        #: than its identity. `id()` is reused after a collection, so an
+        #: identity key can hand one environment another's labels; a signature
+        #: says what the environment is.
+        self._reachable: "OrderedDict[tuple[str, object], tuple]" = OrderedDict()
         #: What is being built right now, by node id. Read by `/progress` from
         #: another request entirely, which is the whole reason the counter
         #: inside is an atomic rather than a callback.
@@ -277,18 +300,15 @@ class Router:
         now = time.perf_counter()
         report = {}
         for node_id, job in list(self._working.items()):
-            progress = job["progress"]
-            done, total = (0, 0)
-            if progress is not None:
-                _, done, total = progress.read()
+            phase, done, total = job["progress"].read()
             report[node_id] = {
                 "what": job["what"],
                 "seq": job["seq"],
                 "elapsed": round(now - job["since"], 1),
-                "phase": progress.phase if progress else "",
-                "fraction": progress.fraction if progress else None,
+                "phase": phase,
                 "done": done,
                 "total": total,
+                "fraction": done / total if total else None,
             }
         return report
 
@@ -304,6 +324,12 @@ class Router:
             "profiles": sorted(PROFILES),
             "feed": self.feed.name if self.feed else None,
             "date": self.date.isoformat() if self.date else None,
+            # The wiring rules themselves, so the page does not keep a second
+            # copy of them. What a port accepts, and what depends on what, is
+            # one fact — and the board's whole claim is that what it draws is
+            # what the server does, which a table that could drift would quietly
+            # stop being true. The page adds only how they look.
+            "nodes": NODES,
         }
 
     def signature(self, board: Board, node_id: str) -> str:
@@ -318,11 +344,10 @@ class Router:
         kind = node["type"]
         params = node.get("params", {})
         shown = ", ".join(f"{key}={params[key]!r}" for key in sorted(params))
-        # Only ports that are arguments: everything a value depends on is
-        # upstream of it, and a node with more than one output is never
-        # upstream of anything (see `NODES`), so which socket a wire left by
-        # cannot change what gets built. A terminal node has no arguments at
-        # all, which is the base case that keeps this from recurring for ever.
+        # Only ports that are arguments — the same rule `Board.upstream` walks,
+        # for the same reason: a node with more than one output is never
+        # upstream of anything, so which socket a wire left by cannot change
+        # what gets built, and a terminal node has no arguments at all.
         wired = "" if NODES[kind].get("terminal") else ", ".join(
             f"{port}=[{', '.join(self.signature(board, s) for s, _ in board.sources(node_id, port))}]"
             for port in sorted(NODES[kind]["inputs"])
@@ -330,8 +355,8 @@ class Router:
         inner = ", ".join(part for part in (shown, wired) if part)
         return f"{kind}({inner})"
 
-    def settled(self, board: Board, node_id: str, found: "list[str] | None" = None) -> "list[str]":
-        """Ids at or upstream of `node_id` whose value is already in hand.
+    def settled(self, board: Board, node_id: str) -> "dict[str, str]":
+        """Ids at or upstream of `node_id` whose value is in hand, and its spelling.
 
         Deliberately a walk of the graph and **not** a record of what a build
         happened to touch. A cache hit short-circuits the recursion, so a
@@ -340,14 +365,11 @@ class Router:
         though it had never been built and spin them on the next slow query.
         That is the bug this exists to have fixed.
         """
-        found = [] if found is None else found
-        if self.signature(board, node_id) in self._built:
-            found.append(node_id)
-        if not NODES[board.nodes[node_id]["type"]].get("terminal"):
-            for port in NODES[board.nodes[node_id]["type"]]["inputs"]:
-                for source, _ in board.sources(node_id, port):
-                    self.settled(board, source, found)
-        return found
+        return {
+            node_id: self.signature(board, node_id)
+            for node_id in board.upstream(node_id)
+            if self.signature(board, node_id) in self._built
+        }
 
     def build(self, board: Board, node_id: str) -> object:
         """Evaluate a node, and everything it depends on, once.
@@ -358,6 +380,7 @@ class Router:
         """
         signature = self.signature(board, node_id)
         if signature in self._built:
+            self._built.move_to_end(signature)
             return self._built[signature]
 
         node = board.nodes[node_id]
@@ -389,7 +412,7 @@ class Router:
         }
         started = time.perf_counter()
         try:
-            value = self._make(board, node_id, kind, params, one, wired, progress)
+            value = self._make(node_id, kind, params, one, wired, progress)
         finally:
             self._working.pop(node_id, None)
 
@@ -397,19 +420,19 @@ class Router:
         if elapsed > 0.1:
             print(f"  {signature}: ready in {elapsed:.1f}s", flush=True)
         self._built[signature] = value
+        while len(self._built) > REMEMBERED:
+            self._built.popitem(last=False)
         return value
 
-    def _make(self, board, node_id, kind, params, one, wired, progress) -> object:
+    def _make(self, node_id, kind, params, one, wired, progress) -> object:
         """Build one node, having established what it depends on."""
         if kind == "OSM":
-            layer = rl.OSM(self.path, PROFILES[params.get("profile", "driving")]())
-            # Forced here rather than left to whoever first asks. Both layers
-            # read lazily, which is right for a library and wrong for a board:
-            # the six seconds would be charged to the `Environment` that
-            # happened to touch it first, and the node naming the file would
-            # never so much as blink.
-            layer.network
-            value: object = layer
+            # Read here rather than left to whoever first asks. Both layers
+            # are lazy, which is right for a library and wrong for a board: the
+            # six seconds would be charged to the `Environment` that happened
+            # to touch it first, and the node naming the file would never so
+            # much as blink.
+            value: object = rl.OSM(self.path, PROFILES[params.get("profile", "driving")]()).load()
         elif kind == "GTFS":
             if self.feed is None:
                 raise Unwired(
@@ -417,9 +440,7 @@ class Router:
                     "this demo was started without a feed — pass --gtfs FEED "
                     "--date YYYY-MM-DD to route a timetable",
                 )
-            feed = rl.GTFS(self.feed, self.date)
-            feed.feed
-            value = feed
+            value = rl.GTFS(self.feed, self.date).load()
         elif kind == "Environment":
             layers = wired("layers")
             if not layers:
@@ -484,7 +505,6 @@ class Router:
         board: Board,
         origin,
         destination,
-        branches: "int | None" = None,
         explore: bool = True,
     ) -> dict:
         """Evaluate the board and ask its query.
@@ -504,13 +524,17 @@ class Router:
             return {"error": "nothing is plugged into the query", "node": query}
         try:
             planner = self.build(board, planners[0][0])
-        except Exception as error:
-            # Whatever did come back is worth reporting even though the whole
-            # did not: those nodes are built and cached, and a board that went
-            # on spinning them would be lying about what is left to do. The
-            # failure itself travels unchanged — it is the library's sentence
-            # and nothing here improves on it.
-            raise BuiltSoFar(self.settled(board, planners[0][0]), error) from error
+        except (Unwired, KeyError, TypeError, ValueError) as error:
+            # A failure is an answer like any other here, and it says the same
+            # things: the library's own sentence, the node to point at, and
+            # what did get built. That last matters — a graph that fails at its
+            # last node still built everything before it, and a board that kept
+            # those spinning would claim work that is already done.
+            return {
+                "error": str(error),
+                "built": self.settled(board, planners[0][0]),
+                **({"node": error.node_id} if isinstance(error, Unwired) else {}),
+            }
         params = board.nodes[query].get("params", {})
 
         # Where from and where to are arguments now, wired in like everything
@@ -549,7 +573,7 @@ class Router:
         answer = (
             self._ride(planner, layer, start, end, when)
             if rides_transit(planner)
-            else self._search(planner, layer, start, end, when, branches, explore)
+            else self._search(board, planners[0][0], layer, start, end, when, explore)
         )
         # Nothing is listening for the route, so there is nothing to draw. Said
         # rather than silently drawn anyway: a wire that changes nothing is not
@@ -558,8 +582,9 @@ class Router:
         answer["built"] = self.settled(board, planners[0][0])
         return answer
 
-    def _search(self, planner, layer, start, end, when, branches, explore) -> dict:
+    def _search(self, board, planner_id, layer, start, end, when, explore) -> dict:
         """A static or time-dependent search over a network, and its search space."""
+        planner = self.build(board, planner_id)
         compiled = planner.compiled
         target = planner.node_id(end)
 
@@ -574,7 +599,7 @@ class Router:
         elapsed = (time.perf_counter() - began) * 1000
 
         if result.cost(target) is None:
-            end = layer.nearest(end, within=self.reachable(planner, start))
+            end = layer.nearest(end, within=self.reachable(board, planner_id, start))
             target = planner.node_id(end)
             began = time.perf_counter()
             result = planner.search(start, targets=[target], **when)
@@ -617,12 +642,11 @@ class Router:
             # 10 MB of GeoJSON, which localhost and a canvas renderer both take
             # in stride.
             space = planner.explored(result)
-            answer["tree"] = space.geojson(limit=branches)
-            answer["peak"] = space.peak
+            answer["tree"] = space.geojson()
             answer["branch_count"] = len(space)
         return answer
 
-    def reachable(self, planner: rl.Planner, origin) -> tuple:
+    def reachable(self, board: Board, planner_id: str, origin) -> tuple:
         """Labels reachable from `origin` — what a destination may snap to.
 
         Extracts are full of stubs that connect to nothing under a given
@@ -633,13 +657,18 @@ class Router:
         node it settled. Which is why nothing calls this until a route has
         already failed — see `_search`.
         """
-        environment = planner.environment
-        key = (str(id(environment)), origin)
+        environment = self.build(board, planner_id).environment
+        key = (self.signature(board, planner_id), origin)
         if key not in self._reachable:
             compiled = environment.compile()
             result = rl.Dijkstra().bind(environment).search(origin)
-            self._reachable = dict(list(self._reachable.items())[-7:])
-            self._reachable[key] = tuple(compiled.label(node) for node in result.order)
+            # `labels` is a list, so index it rather than calling `label` half a
+            # million times.
+            labels = compiled.labels
+            self._reachable[key] = tuple(labels[node] for node in result.order)
+        self._reachable.move_to_end(key)
+        while len(self._reachable) > REMEMBERED:
+            self._reachable.popitem(last=False)
         return self._reachable[key]
 
     @staticmethod
@@ -689,6 +718,11 @@ class Handler(BaseHTTPRequestHandler):
     router: Router
     center: "tuple[float, float]"
 
+    #: Keep-alive. Every response here sets `Content-Length`, so this is safe,
+    #: and a drag makes tens of requests a second — each one otherwise a fresh
+    #: connection and a fresh thread.
+    protocol_version = "HTTP/1.1"
+
     #: The page and the board's own code, read from disk beside this file. The
     #: editor is several hundred lines of JavaScript, which is a thing to keep
     #: in a `.js` file where it can be read and linted rather than in a Python
@@ -734,18 +768,12 @@ class Handler(BaseHTTPRequestHandler):
             return float(lat), float(lon)
 
         try:
-            branches = query.get("branches", [""])[0]
             payload = self.router.route(
                 Board.parse(query["board"][0]),
                 point("from"),
                 point("to"),
-                int(branches) if branches else None,
                 explore=query.get("explore", ["1"])[0] != "0",
             )
-        except BuiltSoFar as partial:
-            payload = {"error": str(partial.error), "built": partial.built}
-            if isinstance(partial.error, Unwired):
-                payload["node"] = partial.error.node_id
         except Unwired as error:
             # The board can point at the node that is missing an argument.
             payload = {"error": str(error), "node": error.node_id}

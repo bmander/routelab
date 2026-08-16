@@ -195,6 +195,11 @@ class OSM(EdgeSource):
             )
         return self._network
 
+    def load(self) -> "OSM":
+        """Read the extract now. See :meth:`~routelab.EdgeSource.load`."""
+        self.network
+        return self
+
     def edges(self) -> Iterator[LabelledEdge]:
         network = self.network
         node_ids = network.node_ids

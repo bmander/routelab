@@ -71,10 +71,6 @@ class Planner:
     environment: Optional[Environment] = None
     compiled: Optional[CompiledEnvironment] = None
 
-    #: A counter this planner's preprocessing writes into, if it was given one
-    #: and has anything honest to count. Set by :meth:`bind`.
-    progress: "Optional[_routelab.Progress]" = None
-
     def bind(
         self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
     ) -> "Planner":
@@ -102,8 +98,7 @@ class Planner:
         bound = copy.copy(self)
         bound.environment = environment
         bound.compiled = environment.compile()
-        bound.progress = progress
-        bound.preprocess()
+        bound.preprocess(progress)
         return bound
 
     def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
@@ -121,11 +116,14 @@ class Planner:
         """
         return compiled.cost_models - self.accepts
 
-    def preprocess(self) -> None:
+    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
         """Work done once at bind time, before any query.
 
         Nothing to do for a plain search; this is where a landmark table or a
-        set of shortcuts gets built.
+        set of shortcuts gets built. `progress` is passed straight through to
+        whatever does that building, and is not kept: it describes one build,
+        and a planner holding it afterwards would be holding a stopwatch that
+        stopped.
         """
 
     @property
@@ -333,10 +331,10 @@ class AStar(Planner):
         """Whatever the heuristic needs, on top of what any planner needs."""
         return super().missing_from(compiled) | self.heuristic_spec.missing_from(compiled)
 
-    def preprocess(self) -> None:
+    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
         """Bind the heuristic to this environment — where a landmark table,
         and any preprocessing after it, gets built."""
-        self.heuristic = self.heuristic_spec.bind(self._bound(), self.progress)
+        self.heuristic = self.heuristic_spec.bind(self._bound(), progress)
 
     def _footprint(self) -> int:
         return self.heuristic.footprint
@@ -393,9 +391,9 @@ class ContractionHierarchy(Planner):
         """Whatever the ordering needs, on top of what any planner needs."""
         return super().missing_from(compiled) | self.ordering.missing_from(compiled)
 
-    def preprocess(self) -> None:
+    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
         """Contract the graph. The expensive step, and the whole technique."""
-        self.hierarchy = self.ordering.bind(self._bound(), self.progress)
+        self.hierarchy = self.ordering.bind(self._bound(), progress)
 
     def _footprint(self) -> int:
         return self.hierarchy.footprint
@@ -626,7 +624,7 @@ class TimeExpanded(TimetablePlanner):
     :attr:`footprint` is worth reading before you build one.
     """
 
-    def preprocess(self) -> None:
+    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
         self._expanded = _routelab.TimeExpanded.build(self._timetable())
 
     def _footprint(self) -> int:
