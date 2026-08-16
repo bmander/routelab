@@ -299,8 +299,11 @@ class Board {
     const element = this.layer.querySelector(`[data-id="${id}"]`);
     if (!element) { return; }
     element.classList.toggle('busy', working);
+    // Not the field being used: disabling a slider mid-drag ends the drag,
+    // and the query goes busy on every ask — including the ones the slider
+    // itself is making. It stays live; the rest wait.
     element.querySelectorAll('select, input').forEach(field => {
-      field.disabled = working;
+      if (field !== document.activeElement) { field.disabled = working; }
     });
     if (!working) { this.report(id, null); }
   }
