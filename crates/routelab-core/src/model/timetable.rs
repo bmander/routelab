@@ -26,8 +26,7 @@
 //! a later increment — the conversion needs a service-day-to-calendar anchor,
 //! which is exactly the thing that must not be implicit.
 
-use crate::model::graph::{Graph, NodeId, Weight};
-use crate::model::search::SearchOptions;
+use crate::model::graph::{Graph, NodeId};
 
 /// A moment, in seconds since the service day's midnight.
 ///
@@ -154,19 +153,15 @@ impl Footpaths {
         Footpaths::default()
     }
 
-    /// Build from `(from, to, duration)` triples in any order.
+    /// Pack already-closed links into the per-stop index.
     ///
-    /// Links whose stops fall outside `stops` are dropped. Both directions are
-    /// the caller's business: a walk that only goes one way is unusual but
-    /// not impossible (a one-way turnstile), so nothing is mirrored here.
-    pub fn new(stops: usize, links: impl IntoIterator<Item = (NodeId, NodeId, Time)>) -> Self {
-        let given: Vec<(NodeId, NodeId, Weight)> = links
-            .into_iter()
-            .filter(|(from, to, _)| {
-                (*from as usize) < stops && (*to as usize) < stops && from != to
-            })
-            .collect();
-        let mut links = Self::closure(stops, &given);
+    /// Closing them under composition is a search, so it lives with the
+    /// techniques — see [`crate::kernels::footpaths`]. What is left here is the
+    /// storage and the lookups, which is all any kernel reading footpaths needs.
+    pub(crate) fn from_closed(
+        stops: usize,
+        mut links: Vec<(NodeId, NodeId, Time, NodeId)>,
+    ) -> Self {
         links.sort_unstable();
         let mut stop_links = vec![0u32; stops + 1];
         for (from, _, _, _) in &links {
@@ -182,60 +177,6 @@ impl Footpaths {
                 .map(|(_, to, duration, via)| (to, duration, via))
                 .collect(),
         }
-    }
-
-    /// Every walk reachable by chaining `given`, at its shortest duration, as
-    /// `(from, to, duration, via)`.
-    ///
-    /// The links are a graph, so this is [`crate::dijkstra`] from each stop
-    /// that has one, and `via` is the search's own parent pointer. The
-    /// footpath graph is a scatter of small components — a street corner, a
-    /// transit centre — so this is cheap; it is not, and need not be, an
-    /// all-pairs pass over the network.
-    fn closure(
-        stops: usize,
-        given: &[(NodeId, NodeId, Weight)],
-    ) -> Vec<(NodeId, NodeId, Time, NodeId)> {
-        let graph = Graph::from_edges(stops, given).expect("links were filtered to the stop set");
-        let mut closed = Vec::new();
-        for origin in 0..stops as NodeId {
-            if graph.out_edges(origin).next().is_none() {
-                continue;
-            }
-            let Ok(reached) = crate::kernels::dijkstra::dijkstra(
-                &graph,
-                &[(origin, 0)],
-                &SearchOptions::default(),
-            ) else {
-                continue;
-            };
-            for &stop in &reached.order {
-                if stop == origin {
-                    continue;
-                }
-                let (Some(duration), Some(via)) = (reached.cost(stop), reached.parent(stop)) else {
-                    continue;
-                };
-                closed.push((origin, stop, duration, via));
-            }
-        }
-        closed
-    }
-
-    /// Build from **positions in a graph's input edge list**: each named edge
-    /// becomes a footpath between its endpoints taking its weight.
-    ///
-    /// The join between an environment and the models, in one place, and by
-    /// input position for the reason [`Timetable::from_input_connections`]
-    /// gives — `Graph` permutes edges into CSR order, and whatever produced
-    /// the edges holds input positions.
-    pub fn from_input_edges(graph: &Graph, positions: impl IntoIterator<Item = u32>) -> Self {
-        let to_edge = graph.edges_by_input();
-        let links = positions
-            .into_iter()
-            .filter(|input| (*input as usize) < to_edge.len())
-            .map(|input| graph.edge(to_edge[input as usize]));
-        Footpaths::new(graph.num_nodes(), links)
     }
 
     /// Where you can walk from `stop`, as `(to, duration)`.

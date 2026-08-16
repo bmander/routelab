@@ -101,7 +101,7 @@ pub fn astar<H: Heuristic>(
 mod tests {
     use super::*;
     use crate::kernels::dijkstra::dijkstra;
-    use crate::model::heuristic::StandardHeuristic;
+    use crate::kernels::heuristics::StandardHeuristic;
 
     /// Four nodes in a line at x = 0, 1, 2, 3, each hop costing 10, plus a
     /// dead-end spur off node 0 that a guided search should not bother with.

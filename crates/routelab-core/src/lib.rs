@@ -28,6 +28,7 @@ pub use kernels::contraction::{
     ContractionHierarchy, Expansion, Half, MeetingSearch, Ordering, Policy,
 };
 pub use kernels::dijkstra::dijkstra;
+pub use kernels::heuristics::{HeuristicError, StandardHeuristic};
 pub use kernels::landmark::{Landmarks, Selection};
 pub use kernels::raptor::{Raptor, RaptorSearch};
 pub use kernels::timedep::{
@@ -35,7 +36,7 @@ pub use kernels::timedep::{
 };
 pub use kernels::timetable::TimeExpanded;
 pub use model::graph::{EdgeId, Graph, GraphError, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
-pub use model::heuristic::{Heuristic, HeuristicError, StandardHeuristic};
+pub use model::heuristic::Heuristic;
 pub use model::search::{SearchError, SearchOptions, SearchResult};
 pub use model::timetable::{
     Connection, Footpaths, Itinerary, Leg, Ride, Timetable, Transfer, Walk,

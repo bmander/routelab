@@ -6,13 +6,11 @@
 //! is here rather than beside one transit kernel precisely because all three
 //! read it.
 //!
-//! These are descriptions, not decisions, with one exception worth naming
-//! rather than hiding: building [`timetable::Footpaths`] closes the given links
-//! under composition, and it does that by running
-//! [`crate::kernels::dijkstra::dijkstra`] from each stop. So `model` depends on
-//! one kernel, upward through the layering. It is a construction detail of a
-//! shared structure rather than a routing choice, and the alternative — putting
-//! a structure all three transit kernels read inside one of them — is worse.
+//! Nothing here decides anything, and nothing here names a kernel. Where a
+//! structure needs work done to build it, that work lives with the techniques
+//! and hands the finished thing back: closing footpaths under composition is a
+//! search, so it is [`crate::kernels::footpaths`], while the container it fills
+//! is [`timetable::Footpaths`]. The dependency runs one way, and it runs down.
 
 pub mod graph;
 pub mod heuristic;

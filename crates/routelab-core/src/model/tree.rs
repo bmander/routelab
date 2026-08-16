@@ -97,6 +97,9 @@ impl SearchResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // A tree is what a search leaves behind, so testing one needs a search to
+    // have run. This is the only place `model` names a kernel, it is test-only,
+    // and it does not reach the shipped library.
     use crate::kernels::dijkstra::dijkstra;
     use crate::model::search::SearchOptions;
 
