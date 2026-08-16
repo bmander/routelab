@@ -330,23 +330,34 @@ class Router:
         inner = ", ".join(part for part in (shown, wired) if part)
         return f"{kind}({inner})"
 
-    def build(self, board: Board, node_id: str, built: "list[str] | None" = None) -> object:
+    def settled(self, board: Board, node_id: str, found: "list[str] | None" = None) -> "list[str]":
+        """Ids at or upstream of `node_id` whose value is already in hand.
+
+        Deliberately a walk of the graph and **not** a record of what a build
+        happened to touch. A cache hit short-circuits the recursion, so a
+        request whose planner was already built would visit only the planner —
+        and the board, told that, would leave every node under it looking as
+        though it had never been built and spin them on the next slow query.
+        That is the bug this exists to have fixed.
+        """
+        found = [] if found is None else found
+        if self.signature(board, node_id) in self._built:
+            found.append(node_id)
+        if not NODES[board.nodes[node_id]["type"]].get("terminal"):
+            for port in NODES[board.nodes[node_id]["type"]]["inputs"]:
+                for source, _ in board.sources(node_id, port):
+                    self.settled(board, source, found)
+        return found
+
+    def build(self, board: Board, node_id: str) -> object:
         """Evaluate a node, and everything it depends on, once.
 
         The recursion *is* the DSL: an environment is built from its layers, a
         technique binds to an environment, and each step is the same call
         somebody would write by hand.
-
-        `built` collects the ids that came back with a value, cache hit or not.
-        The board keeps its own idea of what has been built so it knows which
-        nodes to grey out and spin, and this is what keeps that idea true —
-        including across a reload, where the page has forgotten everything and
-        the server has not.
         """
         signature = self.signature(board, node_id)
         if signature in self._built:
-            if built is not None:
-                built.append(node_id)
             return self._built[signature]
 
         node = board.nodes[node_id]
@@ -354,10 +365,7 @@ class Router:
         params = node.get("params", {})
 
         def wired(port: str) -> list:
-            return [
-                self.build(board, source, built)
-                for source, _ in board.sources(node_id, port)
-            ]
+            return [self.build(board, source) for source, _ in board.sources(node_id, port)]
 
         def one(port: str) -> object:
             values = wired(port)
@@ -389,8 +397,6 @@ class Router:
         if elapsed > 0.1:
             print(f"  {signature}: ready in {elapsed:.1f}s", flush=True)
         self._built[signature] = value
-        if built is not None:
-            built.append(node_id)
         return value
 
     def _make(self, board, node_id, kind, params, one, wired, progress) -> object:
@@ -496,16 +502,15 @@ class Router:
         planners = board.sources(query, "planner")
         if not planners:
             return {"error": "nothing is plugged into the query", "node": query}
-        built: "list[str]" = []
         try:
-            planner = self.build(board, planners[0][0], built)
+            planner = self.build(board, planners[0][0])
         except Exception as error:
             # Whatever did come back is worth reporting even though the whole
             # did not: those nodes are built and cached, and a board that went
             # on spinning them would be lying about what is left to do. The
             # failure itself travels unchanged — it is the library's sentence
             # and nothing here improves on it.
-            raise BuiltSoFar(built, error) from error
+            raise BuiltSoFar(self.settled(board, planners[0][0]), error) from error
         params = board.nodes[query].get("params", {})
 
         # Where from and where to are arguments now, wired in like everything
@@ -550,7 +555,7 @@ class Router:
         # rather than silently drawn anyway: a wire that changes nothing is not
         # a wire, it is decoration.
         answer["drawn"] = drawn
-        answer["built"] = built
+        answer["built"] = self.settled(board, planners[0][0])
         return answer
 
     def _search(self, planner, layer, start, end, when, branches, explore) -> dict:
