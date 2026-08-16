@@ -33,4 +33,8 @@ features = ["extension-module"]
 [tool.pytest.ini_options]
 # Docstring examples are run as tests, so the documentation cannot drift.
 testpaths = ["tests", "python/routelab"]
+# tests/ on the path so nested test files keep reaching conftest's helpers
+# by name. Do not add __init__.py under tests/ — a second conftest module
+# would then shadow this one.
+pythonpath = ["tests"]
 addopts = "--doctest-modules"
