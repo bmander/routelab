@@ -722,6 +722,7 @@ crates/routelab-core/     Rust. No Python.
                           time-dependent, Pyrga's two timetable models, RAPTOR.
   model/                  CSR graph, search options and results, search trees,
                           the heuristic trait, the timetable structures.
+                          Names nothing above it: the dependency runs one way.
   util/                   Progress counters, seeded RNG.
 crates/routelab-osm/      Reading OpenStreetMap extracts. Kernel-free; wraps `osmpbf`.
 crates/routelab-gtfs/     Reading GTFS feeds. Kernel-free; wraps `gtfs-structures`.
