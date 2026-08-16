@@ -6,7 +6,6 @@ from typing import Any, Dict, Optional
 
 from .. import _routelab
 from .._routelab import SearchResult
-from ..model.search import Result
 from ..util._args import Nodes, Sources, normalize_nodes, normalize_sources
 from .planner import Planner
 

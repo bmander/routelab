@@ -3,7 +3,7 @@ information in public transportation systems* (2007) — the two models."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .. import _routelab
 from .planner import TimetablePlanner

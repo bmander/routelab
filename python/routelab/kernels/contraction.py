@@ -6,7 +6,8 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from .. import _routelab
-from ..model.journey import Journey
+from ..model.environment import CompiledEnvironment
+from ..model.search import Result
 from ..model.searchspace import MeetingTrees, SearchSpace
 from .orderings import EdgeDifference, Ordering
 from .planner import Planner

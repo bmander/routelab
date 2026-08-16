@@ -6,7 +6,8 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from .. import _routelab
-from ..model.search import Result, SearchResult
+from ..model.environment import CompiledEnvironment
+from ..model.search import Result
 from ..util.clock import weekly_seconds
 from .planner import Planner
 from .schedule import Schedule

@@ -6,8 +6,7 @@ from typing import Any, Dict, Optional
 
 from .. import _routelab
 from .._routelab import SearchResult
-from ..model.search import Result
-from ..util._args import Nodes, Sources, normalize_nodes, normalize_sources
+from ..util._args import Nodes, normalize_nodes
 from .planner import Planner
 
 __all__ = ["BFS", "bfs"]

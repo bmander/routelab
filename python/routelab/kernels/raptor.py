@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Hashable, List, Optional
 
 from .. import _routelab
 from ..model.journey import Journey
+from ..model.search import Result
 from ..model.searchspace import Rounds, SearchSpace
-from ..util.clock import service_seconds
-from .planner import Planner, TimetablePlanner
+from .planner import Origins, Planner, TimetablePlanner
 
 __all__ = ["RAPTOR"]
 

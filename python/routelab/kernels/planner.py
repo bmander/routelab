@@ -35,9 +35,9 @@ from typing import Any, Dict, Hashable, Iterable, List, Mapping, Optional, Tuple
 from .. import _routelab
 from ..model.environment import CompiledEnvironment, Environment
 from ..model.journey import Journey
-from ..model.search import Result, SearchResult
+from ..model.search import Result
 from ..model.searchspace import SearchSpace, ShortestPathTree
-from ..util.clock import service_seconds, weekly_seconds
+from ..util.clock import service_seconds
 from .departures import Departures, Walks
 from .schedule import Schedule
 
