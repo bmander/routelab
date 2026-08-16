@@ -238,6 +238,74 @@ class Board {
     this.draw();
   }
 
+  // --- identity -------------------------------------------------------
+
+  /** What a node is, as a string: its type, its settings, and everything
+   * upstream of it.
+   *
+   * The server caches what it builds under the same idea, so two boards that
+   * would produce the same object spell the same and the second costs nothing.
+   * The spelling itself does not have to match the server's — this is only ever
+   * compared against other strings from here — but the *rule* does, or the
+   * board would promise a rebuild that never happens, or hide one that does.
+   *
+   * Only argument ports count. A node with more than one output is never
+   * upstream of anything, so which socket a wire left by cannot change what
+   * gets built. And a terminal node's inputs are not arguments at all — what
+   * comes out of the map does not depend on what is drawn on it — so they are
+   * skipped, which is also what stops Map -> Query -> Map recurring forever.
+   */
+  signature(id) {
+    const node = this.nodes.get(id);
+    const params = Object.keys(node.params || {}).sort()
+      .map(key => `${key}=${JSON.stringify(node.params[key])}`);
+    const wired = TYPES[node.type].terminal ? [] :
+      ports(node.type, 'in').map(([port]) => port).sort()
+        .map(port =>
+          `${port}=[${this.sources(id, port).map(s => this.signature(s)).join(',')}]`);
+    return `${node.type}(${[...params, ...wired].join(', ')})`;
+  }
+
+  /** Ids feeding one input port, in the order they were wired. */
+  sources(id, port) {
+    return this.links.filter(l => l.to === id && l.toPort === port).map(l => l.from);
+  }
+
+  /** Every node upstream of `id` through argument ports, `id` included.
+   *
+   * What a query actually depends on — which is not the whole board. A
+   * technique parked to one side with nothing plugged into the query is never
+   * built, and should not be shown waiting to be.
+   */
+  upstream(id, found = new Set()) {
+    if (found.has(id)) { return found; }
+    found.add(id);
+    if (TYPES[this.nodes.get(id).type].terminal) { return found; }
+    for (const [port] of ports(this.nodes.get(id).type, 'in')) {
+      for (const source of this.sources(id, port)) { this.upstream(source, found); }
+    }
+    return found;
+  }
+
+  /** Show a node as working, and stop it being changed while it is.
+   *
+   * Both halves matter: a spinner says the answer on screen is not this node's
+   * yet, and a live dropdown would invite a change whose result would arrive
+   * out of order with the one already in flight.
+   */
+  busy(id, working) {
+    const element = this.layer.querySelector(`[data-id="${id}"]`);
+    if (!element) { return; }
+    element.classList.toggle('busy', working);
+    element.querySelectorAll('select, input').forEach(field => {
+      field.disabled = working;
+    });
+  }
+
+  idle() {
+    this.layer.querySelectorAll('.busy').forEach(node => this.busy(node.dataset.id, false));
+  }
+
   // --- geometry -------------------------------------------------------
 
   /** Where a port's dot sits, in board coordinates. */

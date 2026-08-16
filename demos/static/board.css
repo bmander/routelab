@@ -71,6 +71,21 @@ body { display: flex; flex-direction: column; }
 .node.selected { border-color: #7fb2e5; }
 .node.failed { border-color: #d1495b; box-shadow: 0 0 0 2px rgba(209,73,91,.35); }
 
+/* Working: the answer on screen is not this node's yet, and its settings are
+   not to be touched until it is. The contents dim rather than the node, which
+   stays opaque — fading the whole node lets the wires behind it show through,
+   and a wire running through a node reads as a wire attached to it. */
+.node.busy .body { opacity: .4; }
+.node.busy header { opacity: .75; }
+.node.busy .field { pointer-events: none; }
+.node.busy header::after {
+  content: ''; margin-left: auto; flex: 0 0 auto;
+  width: 11px; height: 11px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.3); border-top-color: #fff;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .node header {
   padding: 5px 9px; border-radius: 5px 5px 0 0; cursor: grab;
   font-size: 12px; font-weight: 600; letter-spacing: .2px;

@@ -223,6 +223,54 @@ function restoreFromUrl() {
   if (pins.length === 2) { request(true); }
 }
 
+// --- what is already built ---------------------------------------------
+
+// Signatures the server has answered for. It caches what it builds under the
+// same idea of what a node *is*, so anything in here costs nothing to ask for
+// again and anything absent may cost seconds — which is exactly the difference
+// worth showing on the board.
+//
+// It starts empty on every load, and the server fills it in: each answer names
+// the nodes it evaluated, cache hit or not, so a reloaded page learns on its
+// first query that the city it is looking at was read some time ago.
+const built = new Set();
+
+// Only shown after a moment. Most rebuilds are cache hits that come back in
+// single-digit milliseconds, and a spinner that appears and vanishes inside one
+// frame reads as a flicker rather than as work.
+const SETTLE = 150;
+let pending = null, generation = 0;
+
+/** Spin whatever this request will have to build, once it is clear it is slow.
+ *
+ * Two different reasons to spin, and both are true. A node upstream of the
+ * query spins when this board has never seen an answer for what it currently
+ * is — that is the rebuild, and it may cost seconds. The query itself spins
+ * whenever it is waiting, because unlike everything else it is never cached:
+ * the search runs again every time.
+ */
+function markStale() {
+  const query = [...board.nodes.values()].find(n => n.type === 'Query');
+  if (!query) { return []; }
+  const planner = board.sources(query.id, 'planner')[0];
+  const needed = planner
+    ? [...board.upstream(planner)].filter(id => !built.has(board.signature(id)))
+    : [];
+  clearTimeout(pending);
+  pending = setTimeout(
+    () => [...needed, query.id].forEach(id => board.busy(id, true)), SETTLE);
+  return needed;
+}
+
+/** Record what came back, and let the board go still. */
+function settle(answer) {
+  clearTimeout(pending);
+  for (const id of answer.built || []) {
+    if (board.nodes.has(id)) { built.add(board.signature(id)); }
+  }
+  board.idle();
+}
+
 // --- asking ------------------------------------------------------------
 
 // One request in flight at a time, with the last drag position remembered.
@@ -247,6 +295,11 @@ async function request(explore) {
     readout.className = 'hint';
     readout.textContent = 'routing…';
   }
+  markStale();
+  // A change made while an answer is in flight makes that answer the wrong one.
+  // Without this the slower of two overlapping requests wins, and the board
+  // ends up showing a route its own wiring no longer asks for.
+  const mine = ++generation;
 
   const query = new URLSearchParams({
     from: at(pins[0]), to: at(pins[1]),
@@ -256,6 +309,8 @@ async function request(explore) {
 
   syncUrl();
   const answer = await (await fetch('/route?' + query)).json();
+  if (mine !== generation) { return; }
+  settle(answer);
   board.blame(answer.node);
   if (answer.error) {
     readout.className = 'hint';

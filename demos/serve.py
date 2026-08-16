@@ -40,7 +40,15 @@ visibly does not under Dijkstra.
 Everything the board builds is cached by a canonical spelling of the node and
 everything upstream of it, so rewiring back to a shape you had before is free.
 That matters because the expensive things are exactly the ones worth comparing:
-reading Seattle is six seconds, sixteen landmarks a second and 33 MB.
+reading Seattle is six seconds, sixteen landmarks a second and 33 MB, a
+contraction hierarchy six seconds and 19 MB.
+
+Which nodes those are is not left to be guessed at. A node whose configuration
+the board has never had an answer for greys out and spins until it does, and
+because a node's identity includes everything upstream of it, the spinners
+spread exactly as far as the rebuild does and no further — swap the ordering
+under a hierarchy and the hierarchy waits, while the extract it was built from
+does not. A change that costs nothing shows nothing.
 
 Nothing here is a production server: it is the standard library's `http.server`,
 bound to localhost, with no cache and no rate limiting. It is a way to look at
@@ -110,6 +118,10 @@ NODES: "dict[str, dict]" = {
         "kind": "map",
         "inputs": {"route": "route", "space": "space"},
         "outputs": {"origin": "point", "destination": "point"},
+        # Its outputs owe nothing to its inputs, so its inputs are not
+        # arguments and nothing upstream of it is upstream of anything. Which
+        # is what stops a signature walking Map -> Query -> Map for ever.
+        "terminal": True,
     },
 }
 
@@ -183,6 +195,20 @@ class Board(NamedTuple):
         return found[0] if len(found) == 1 else None
 
 
+class BuiltSoFar(Exception):
+    """Raised over a failure, carrying the nodes that did come back.
+
+    Not an error in itself — it wraps one. A graph that fails at its last node
+    still built everything before it, and the board needs to know that or it
+    will keep those nodes spinning for work that is already done.
+    """
+
+    def __init__(self, built: "list[str]", error: Exception):
+        super().__init__(str(error))
+        self.built = built
+        self.error = error
+
+
 class Unwired(ValueError):
     """A node whose input has nothing plugged into it.
 
@@ -247,23 +273,32 @@ class Router:
         # Only ports that are arguments: everything a value depends on is
         # upstream of it, and a node with more than one output is never
         # upstream of anything (see `NODES`), so which socket a wire left by
-        # cannot change what gets built.
-        wired = ", ".join(
+        # cannot change what gets built. A terminal node has no arguments at
+        # all, which is the base case that keeps this from recurring for ever.
+        wired = "" if NODES[kind].get("terminal") else ", ".join(
             f"{port}=[{', '.join(self.signature(board, s) for s, _ in board.sources(node_id, port))}]"
             for port in sorted(NODES[kind]["inputs"])
         )
         inner = ", ".join(part for part in (shown, wired) if part)
         return f"{kind}({inner})"
 
-    def build(self, board: Board, node_id: str) -> object:
+    def build(self, board: Board, node_id: str, built: "list[str] | None" = None) -> object:
         """Evaluate a node, and everything it depends on, once.
 
         The recursion *is* the DSL: an environment is built from its layers, a
         technique binds to an environment, and each step is the same call
         somebody would write by hand.
+
+        `built` collects the ids that came back with a value, cache hit or not.
+        The board keeps its own idea of what has been built so it knows which
+        nodes to grey out and spin, and this is what keeps that idea true —
+        including across a reload, where the page has forgotten everything and
+        the server has not.
         """
         signature = self.signature(board, node_id)
         if signature in self._built:
+            if built is not None:
+                built.append(node_id)
             return self._built[signature]
 
         node = board.nodes[node_id]
@@ -271,7 +306,10 @@ class Router:
         params = node.get("params", {})
 
         def wired(port: str) -> list:
-            return [self.build(board, source) for source, _ in board.sources(node_id, port)]
+            return [
+                self.build(board, source, built)
+                for source, _ in board.sources(node_id, port)
+            ]
 
         def one(port: str) -> object:
             values = wired(port)
@@ -320,6 +358,8 @@ class Router:
         if elapsed > 0.1:
             print(f"  {signature}: ready in {elapsed:.1f}s", flush=True)
         self._built[signature] = value
+        if built is not None:
+            built.append(node_id)
         return value
 
     @staticmethod
@@ -379,7 +419,16 @@ class Router:
         planners = board.sources(query, "planner")
         if not planners:
             return {"error": "nothing is plugged into the query", "node": query}
-        planner = self.build(board, planners[0][0])
+        built: "list[str]" = []
+        try:
+            planner = self.build(board, planners[0][0], built)
+        except Exception as error:
+            # Whatever did come back is worth reporting even though the whole
+            # did not: those nodes are built and cached, and a board that went
+            # on spinning them would be lying about what is left to do. The
+            # failure itself travels unchanged — it is the library's sentence
+            # and nothing here improves on it.
+            raise BuiltSoFar(built, error) from error
         params = board.nodes[query].get("params", {})
 
         # Where from and where to are arguments now, wired in like everything
@@ -424,6 +473,7 @@ class Router:
         # rather than silently drawn anyway: a wire that changes nothing is not
         # a wire, it is decoration.
         answer["drawn"] = drawn
+        answer["built"] = built
         return answer
 
     def _search(self, planner, layer, start, end, when, branches, explore) -> dict:
@@ -582,7 +632,9 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(404, "text/plain", b"not found")
             return
         kind = self.TYPES.get(path.suffix, "application/octet-stream")
-        self.respond(200, f"{kind}; charset=utf-8", path.read_bytes())
+        # Never cached. This is a demo you are meant to edit, and a stale
+        # board.js served out of the browser's cache is an afternoon.
+        self.respond(200, f"{kind}; charset=utf-8", path.read_bytes(), cache=False)
 
     def route(self, query: "dict[str, list[str]]") -> bytes:
         def point(name: str) -> "tuple[float, float]":
@@ -598,6 +650,10 @@ class Handler(BaseHTTPRequestHandler):
                 int(branches) if branches else None,
                 explore=query.get("explore", ["1"])[0] != "0",
             )
+        except BuiltSoFar as partial:
+            payload = {"error": str(partial.error), "built": partial.built}
+            if isinstance(partial.error, Unwired):
+                payload["node"] = partial.error.node_id
         except Unwired as error:
             # The board can point at the node that is missing an argument.
             payload = {"error": str(error), "node": error.node_id}
@@ -617,10 +673,14 @@ class Handler(BaseHTTPRequestHandler):
             json.dumps({"center": list(self.center), **self.router.catalogue}),
         )
 
-    def respond(self, status: int, content_type: str, body: bytes) -> None:
+    def respond(
+        self, status: int, content_type: str, body: bytes, cache: bool = True
+    ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        if not cache:
+            self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
