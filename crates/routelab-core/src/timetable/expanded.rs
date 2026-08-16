@@ -44,7 +44,7 @@
 //! answer may still be a little later in the search than that first hit, and
 //! one bounded re-run up to *t + walk* finds it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::dijkstra::dijkstra;
 use crate::graph::{Graph, NodeId, Weight};
@@ -222,61 +222,87 @@ impl TimeExpanded {
             + self.graph.footprint()
     }
 
-    /// Earliest arrival at `to`, leaving `from` no earlier than `at`.
-    pub fn earliest_arrival(&self, from: NodeId, at: Time, to: NodeId) -> Option<Itinerary> {
+    /// Earliest arrival at `to` from `sources` — each a stop and the time you
+    /// are standing there.
+    pub fn earliest_arrival(&self, sources: &[(NodeId, Time)], to: NodeId) -> Option<Itinerary> {
         let stops = self.departures.len();
-        if from as usize >= stops || to as usize >= stops {
+        if to as usize >= stops {
             return None;
         }
-        if from == to {
-            // Already there. Worth saying explicitly: this model's answers are
-            // arrival *events*, and there is no event for standing still — left
-            // to itself it would ride a loop back to where it started.
-            return Some(Itinerary {
-                arrives: at,
-                legs: Vec::new(),
-                settled: 0,
-            });
-        }
 
-        // Enter at the first departure you could catch — here, and at every
-        // stop you could walk to first. Every later departure at a stop is
-        // reachable from its first along the waiting chain, so one seed per
-        // stop is enough. Each seed remembers the walk that reached it, if
-        // one did, because that walk is not an edge in the graph. Walking
-        // straight to the target is an answer too, and one with no arrival
-        // event to find; it is compared at the end.
+        // Enter at the first departure you could catch — at each source, and
+        // at every stop it could walk to first. Every later departure at a
+        // stop is reachable from its first along the waiting chain, so one
+        // seed per stop is enough. Each seed remembers the walk that reached
+        // it, if one did, because that walk is not an edge in the graph.
+        // Standing at the target already, or walking straight to it, is an
+        // answer too, and one with no arrival event to find — this model's
+        // answers are arrival *events*, and there is no event for standing
+        // still — so it is kept aside and compared at the end.
         let mut seeds: Vec<(NodeId, Time)> = Vec::new();
+        let mut seeded: HashSet<NodeId> = HashSet::new();
         let mut walked_to: HashMap<NodeId, Walk> = HashMap::new();
-        let mut on_foot: Option<Walk> = None;
-        if let Some(start) = first_departure(&self.departures, &self.events, from, at) {
-            seeds.push((start, self.events[start as usize].time()));
-        }
-        for (next, duration) in self.footpaths.from(from) {
-            let walk = Walk {
-                from,
-                to: next,
-                departs: at,
-                arrives: at.saturating_add(duration),
+        let mut standing: Option<(Time, Option<Walk>)> = None;
+        let mut consider_standing = |arrives: Time, walk: Option<Walk>| {
+            if standing.is_none_or(|(known, _)| arrives < known) {
+                standing = Some((arrives, walk));
+            }
+        };
+        let mut seed = |stop: NodeId, ready: Time, walk: Option<Walk>, seeds: &mut Vec<(NodeId, Time)>, walked_to: &mut HashMap<NodeId, Walk>| {
+            let Some(start) = first_departure(&self.departures, &self.events, stop, ready) else {
+                return;
             };
-            if next == to {
-                on_foot = Some(walk);
-            } else if let Some(start) =
-                first_departure(&self.departures, &self.events, next, walk.arrives)
-            {
+            // One seed per departure event — its time is the event's, so two
+            // sources that reach the same departure seed it identically, and
+            // the first walk to claim it keeps it.
+            if seeded.insert(start) {
                 seeds.push((start, self.events[start as usize].time()));
-                walked_to.insert(start, walk);
+                if let Some(walk) = walk {
+                    walked_to.insert(start, walk);
+                }
+            }
+        };
+        for &(from, at) in sources {
+            if from as usize >= stops {
+                continue;
+            }
+            if from == to {
+                consider_standing(at, None);
+            }
+            seed(from, at, None, &mut seeds, &mut walked_to);
+            for (next, duration) in self.footpaths.from(from) {
+                let walk = Walk {
+                    from,
+                    to: next,
+                    departs: at,
+                    arrives: at.saturating_add(duration),
+                };
+                if next == to {
+                    consider_standing(walk.arrives, Some(walk));
+                } else {
+                    seed(next, walk.arrives, Some(walk), &mut seeds, &mut walked_to);
+                }
+            }
+        }
+        // Standing at the target, or walking straight to it, wins outright
+        // when it happens no later than the earliest source: nothing ridden
+        // can leave before its own departure, let alone arrive sooner. Worth
+        // checking before the search rather than after, because "route from a
+        // stop to itself" would otherwise settle the whole event graph.
+        let ready = |arrives: Time| sources.iter().all(|&(_, at)| arrives <= at);
+        let standing_wins = |arrives: Time, ridden: Option<&Found>| {
+            ridden.is_none_or(|found| arrives <= found.arrives)
+        };
+        if let Some((arrives, walk)) = standing {
+            if ready(arrives) {
+                return Some(self.standing_still(arrives, walk));
             }
         }
 
         let ridden = self.ride(&seeds, to);
-        if let Some(walk) = on_foot {
-            if ridden.as_ref().is_none_or(|found| walk.arrives <= found.arrives) {
-                return Some(Itinerary {
-                    arrives: walk.arrives,
-                    legs: self.footpaths.expand(walk).into_iter().map(Leg::Walk).collect(),
-                    settled: 0,
-                });
+        if let Some((arrives, walk)) = standing {
+            if standing_wins(arrives, ridden.as_ref()) {
+                return Some(self.standing_still(arrives, walk));
             }
         }
         let Found {
@@ -329,6 +355,17 @@ impl TimeExpanded {
             legs,
             settled,
         })
+    }
+
+    /// Already there, or a walk away: an answer with no event to find.
+    fn standing_still(&self, arrives: Time, walk: Option<Walk>) -> Itinerary {
+        Itinerary {
+            arrives,
+            legs: walk
+                .map(|walk| self.footpaths.expand(walk).into_iter().map(Leg::Walk).collect())
+                .unwrap_or_default(),
+            settled: 0,
+        }
     }
 
     /// The best finish reachable by riding from `seeds`: the arrival event it

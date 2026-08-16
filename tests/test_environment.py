@@ -128,7 +128,7 @@ def test_departures_land_on_the_edge_they_were_filed_under():
     # 08:00 to 'b', waiting, then the only departure onward.
     compiled = rl.Environment(Timetable()).compile()
     itinerary = rl.Departures().bind(compiled).earliest_arrival(
-        compiled.node_id("a"), 8 * 3600, compiled.node_id("c")
+        [(compiled.node_id("a"), 8 * 3600)], compiled.node_id("c")
     )
     assert itinerary.arrives == 10 * 3600 + 900
     assert [ride[0] for ride in itinerary.rides()] == [0, 2]

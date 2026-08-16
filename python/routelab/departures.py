@@ -71,8 +71,13 @@ class Departures:
             return frozenset()
         return frozenset({cls.name})
 
-    def bind(self, compiled: CompiledEnvironment) -> "_routelab.Timetable":
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "_routelab.Timetable":
         """Collect every layer's departures into one timetable, or explain.
+
+        ``progress`` is accepted for parity with every other ``bind`` and left
+        alone: a walk of the layers has no honest measure of its own.
 
         Raises:
             ValueError: If no layer keeps a timetable, or the one that does
@@ -113,20 +118,28 @@ class Walks:
 
     The kernel closes the set under composition — walk A→B and B→C and you may
     walk A→C — for the reason :class:`~routelab._routelab.Footpaths` gives:
-    the two timetable models chain walks differently and must still agree.
+    the timetable techniques chain walks differently and must still agree.
     """
+
+    #: The word every derivation carries. Never answered by :meth:`missing_from`
+    #: — an environment with no walks is the plain model, not a refusal — but a
+    #: derivation with no name would be the one that reads differently.
+    name = "walks"
 
     @classmethod
     def missing_from(cls, compiled: CompiledEnvironment) -> "frozenset[str]":
         """Nothing, ever: an environment with no walks is the plain model."""
         return frozenset()
 
-    def bind(self, compiled: CompiledEnvironment) -> "_routelab.Footpaths":
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "_routelab.Footpaths":
         """Gather every scalar edge between two timetable stops into one
         kernel footpath table.
 
         Empty when no such edge exists, which is a legitimate environment
-        rather than a refusal.
+        rather than a refusal. ``progress`` is accepted for parity and left
+        alone.
         """
         stops: "Set[Hashable]" = set()
         for _, _, source in compiled.spans:

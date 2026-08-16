@@ -26,7 +26,7 @@ benchmark an algorithm.
 
 from __future__ import annotations
 
-from . import _routelab, heuristics, orderings, reference, sources
+from . import _routelab, heuristics, orderings, planners, reference, sources
 from ._args import Nodes, Sources
 from .departures import Departures, Walks
 from .environment import (
@@ -40,10 +40,11 @@ from .graph import Graph
 from .heuristics import Euclidean, Heuristic, Landmarks, Pace, Plane, Zero
 from .journey import Journey, Leg
 from .orderings import EdgeDifference, Ordering, RandomOrder
-from .clock import WEEK, weekly_seconds
+from .clock import WEEK, service_seconds, weekly_seconds
 from .schedule import Schedule
 from .planners import (
     BFS,
+    RAPTOR,
     AStar,
     ContractionHierarchy,
     Dijkstra,
@@ -51,10 +52,20 @@ from .planners import (
     TimeDependent,
     TimeDependentDijkstra,
     TimeExpanded,
+    TimetablePlanner,
+    clock_readers,
     route,
 )
-from .search import Result, SearchResult, astar, bfs, dijkstra
-from .searchspace import Branch, MeetingTrees, SearchSpace, ShortestPathTree
+from .search import EdgeResult, Result, SearchResult, astar, bfs, dijkstra
+from .searchspace import (
+    Branch,
+    Leap,
+    MeetingTrees,
+    Reach,
+    Rounds,
+    SearchSpace,
+    ShortestPathTree,
+)
 from .sources import GTFS, OSM, Cycling, Driving, Footpaths, Profile, Walking
 
 __all__ = [
@@ -111,6 +122,15 @@ __all__ = [
     "route",
     "sources",
     "weekly_seconds",
+    "RAPTOR",
+    "TimetablePlanner",
+    "EdgeResult",
+    "Leap",
+    "Reach",
+    "Rounds",
+    "clock_readers",
+    "planners",
+    "service_seconds",
 ]
 
 __version__ = _routelab.__version__

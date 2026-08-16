@@ -163,3 +163,15 @@ def bellman_ford(
             break
 
     return [costs.get(node) for node in range(graph.num_nodes)]
+
+
+@pytest.fixture
+def feed() -> rl.GTFS:
+    """The tiny fixture feed, read for the service day the tests route on."""
+    return rl.GTFS(TINY_GTFS, TINY_DATE)
+
+
+@pytest.fixture
+def env(feed: rl.GTFS) -> rl.Environment:
+    """That feed as an environment, with no walks between its stops."""
+    return rl.Environment(feed)

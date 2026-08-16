@@ -26,9 +26,9 @@ errors this project exists to raise, and they are easier to believe when you
 cause one yourself.
 
 A dropdown in the board's toolbar loads a starting point — the same query wired
-six different ways. They are places to begin, not modes: the pins stay where
+seven different ways. They are places to begin, not modes: the pins stay where
 they are across a change, so the same two points can be routed by A*, by a
-contraction hierarchy, and by both of the timetable models in turn.
+contraction hierarchy, and by each of the timetable techniques in turn.
 
 Click once on the map to drop an origin, again for a destination, and the route
 draws over the search tree that found it — the part a routing engine normally
@@ -145,6 +145,7 @@ NODES: "dict[str, dict]" = {
     },
     "TimeDependent": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
     "TimeExpanded": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
+    "RAPTOR": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
     # Walks between nearby stops, made from another layer's coordinates. A
     # layer that takes a layer: its output is edges like any other layer's,
     # and how far a rider will walk is the knob — which is why it is a node
@@ -171,6 +172,26 @@ NODES: "dict[str, dict]" = {
         "terminal": True,
     },
 }
+
+
+#: What each technique node stands for in the library — the class whose
+#: `options` say which query knobs the board should show under it. Declared
+#: by the technique, read here; the board learns what a technique takes from
+#: the library rather than from a second table.
+TECHNIQUES: "dict[str, type]" = {
+    "Dijkstra": rl.Dijkstra,
+    "BFS": rl.BFS,
+    "AStar": rl.AStar,
+    "ContractionHierarchy": rl.ContractionHierarchy,
+    "TimeDependentDijkstra": rl.TimeDependentDijkstra,
+    "TimeDependent": rl.TimeDependent,
+    "TimeExpanded": rl.TimeExpanded,
+    "RAPTOR": rl.RAPTOR,
+}
+for _kind, _cls in TECHNIQUES.items():
+    # `departing` is covered by `clock`; the rest are the knobs a Query node
+    # shows when this technique is wired into it.
+    NODES[_kind]["options"] = sorted(_cls.options - {"departing"})
 
 
 def rides_transit(planner: rl.Planner) -> bool:
@@ -499,22 +520,22 @@ class Router:
 
     @staticmethod
     def _technique(kind: str, params: dict, one) -> rl.Planner:
-        """The unbound technique a node stands for."""
-        if kind == "Dijkstra":
-            return rl.Dijkstra()
-        if kind == "BFS":
-            return rl.BFS()
+        """The unbound technique a node stands for.
+
+        Only the ones that take something get a line: a wire, or a field. The
+        rest are the class in `TECHNIQUES` called with nothing, which is what
+        a technique with no choices to make is.
+        """
         if kind == "AStar":
             return rl.AStar(one("heuristic"))
         if kind == "ContractionHierarchy":
             return rl.ContractionHierarchy(one("ordering"))
         if kind == "TimeDependentDijkstra":
             return rl.TimeDependentDijkstra(params.get("waiting", "unrestricted"))
-        if kind == "TimeDependent":
-            return rl.TimeDependent()
-        if kind == "TimeExpanded":
-            return rl.TimeExpanded()
-        raise ValueError(f"no such node type: {kind}")
+        try:
+            return TECHNIQUES[kind]()
+        except KeyError:
+            raise ValueError(f"no such node type: {kind}") from None
 
     @staticmethod
     def _snappable(planner: rl.Planner):
@@ -594,19 +615,22 @@ class Router:
         # clocks are not the same: a timetable runs on the service day fixed
         # when its feed was loaded, and a street schedule repeats weekly.
         minute = int(params.get("minute", 480))
-        clock = NODES[board.nodes[planners[0][0]]["type"]].get("clock")
+        spec = NODES[board.nodes[planners[0][0]]["type"]]
+        clock = spec.get("clock")
         if clock is None:
             when = {}
         elif clock == "day":
             when = {"departing": minute * 60}
         else:
             when = {"departing": int(params.get("day", 0)) * 86400 + minute * 60}
+        # The other knobs the wired technique takes, from the Query node —
+        # blank means "not set", the technique's own default.
+        for option in spec.get("options", ()):
+            value = params.get(option)
+            if value not in (None, ""):
+                when[option] = int(value)
 
-        answer = (
-            self._ride(planner, layer, start, end, when)
-            if rides_transit(planner)
-            else self._search(board, planners[0][0], layer, start, end, when, explore)
-        )
+        answer = self._ask(board, planners[0][0], layer, start, end, when, explore)
         # Nothing is listening for the route, so there is nothing to draw. Said
         # rather than silently drawn anyway: a wire that changes nothing is not
         # a wire, it is decoration.
@@ -614,11 +638,35 @@ class Router:
         answer["built"] = self.settled(board, planners[0][0])
         return answer
 
-    def _search(self, board, planner_id, layer, start, end, when, explore) -> dict:
-        """A static or time-dependent search over a network, and its search space."""
+    def _ask(self, board, planner_id, layer, start, end, when, explore) -> dict:
+        """Ask the planner, and answer in one vocabulary whatever it is.
+
+        Every technique is asked the same way, and asked once: `search` for the
+        cost table, `journey` to read the answer off it, `journeys` for the
+        rest of a front if it keeps one, `explored` for the space behind it. A
+        technique that keeps no table says so in the library's own words and is
+        asked for its journey instead; one that keeps no space says so too, and
+        that sentence is what the page shows where a space would have gone.
+        """
         planner = self.build(board, planner_id)
         compiled = planner.compiled
+        coordinates = layer.coordinates()
         target = planner.node_id(end)
+
+        def ask(target):
+            began = time.perf_counter()
+            try:
+                result = planner.search(start, targets=[target], **when)
+                journey = planner.journey(result, planner.label(target))
+                settled = result.settled
+            except NotImplementedError:
+                # A technique that keeps no cost table: ask it for the journey
+                # it does answer with. Its refusal for a search space comes
+                # later, from `explored`, and only if a space is wanted.
+                result = None
+                journey = planner.route(start, planner.label(target), **when)
+                settled = journey.settled if journey is not None else 0
+            return result, journey, settled, (time.perf_counter() - began) * 1000
 
         # Snap plainly, and work out what is actually connected only if that
         # turns out to have failed. Restricting the snap up front costs a
@@ -626,58 +674,95 @@ class Router:
         # spends routing, and the same quarter-second for all of them, which
         # would flatten the difference this demo exists to show. Paying it on
         # the rare failure keeps a drag answering at the speed of the search.
-        began = time.perf_counter()
-        result = planner.search(start, targets=[target], **when)
-        elapsed = (time.perf_counter() - began) * 1000
-
-        if result.cost(target) is None:
+        result, journey, settled, elapsed = ask(target)
+        if journey is None and not rides_transit(planner):
             end = layer.nearest(end, within=self.reachable(board, planner_id, start))
-            target = planner.node_id(end)
-            began = time.perf_counter()
-            result = planner.search(start, targets=[target], **when)
-            elapsed = (time.perf_counter() - began) * 1000
+            result, journey, settled, elapsed = ask(planner.node_id(end))
+        if journey is None:
+            error = (
+                f"no journey from {layer.names()[start]} at that hour"
+                if rides_transit(planner)
+                else "no route between those points"
+            )
+            return {"error": error, "snapped": [coordinates[start], coordinates[end]]}
 
-        if result.cost(target) is None:
-            return {"error": "no route between those points"}
-        # Built from the result already in hand rather than by asking the
-        # planner to route again — the same query twice is the one thing a drag
-        # cannot afford.
-        journey = rl.Journey.from_result(compiled, result, end)
+        # Drawn in pieces where the legs are scheduled: a piece per vehicle
+        # boarded and per walk between them, so the page can tell a change of
+        # bus from a stop passed through, and a walk across the street from
+        # either. A street journey draws as one line of real road.
+        segments = None
+        if any(leg.trip is not None for leg in journey.legs):
+            segments = []
+            for leg in journey.legs:
+                if segments and segments[-1]["trip"] == leg.trip:
+                    segments[-1]["points"].append(coordinates[leg.head])
+                else:
+                    segments.append({
+                        "trip": leg.trip,
+                        "walk": leg.trip is None,
+                        "points": [coordinates[leg.tail], coordinates[leg.head]],
+                    })
 
-        coordinates = layer.coordinates()
+        # The search space, as the planner reports it, if anything is
+        # listening for one. Every branch is drawn by default — keeping only
+        # the heaviest keeps the trunk and throws away the crown, which is
+        # exactly the part that shows how far the search reached. A technique
+        # that keeps none refuses in its own words, and those are what the
+        # page shows where a space would have gone.
+        space = space_kind = space_size = note = None
+        if explore:
+            try:
+                explored = planner.explored(result)
+                space, space_kind, space_size = explored.geojson(), explored.kind, len(explored)
+            except NotImplementedError as nothing_to_draw:
+                note = str(nothing_to_draw)
+
         calendar = self.calendar(board, planner_id)
-        answer = {
-            "route": journey.geometry,
+        noun, of = planner.searches
+        # Read off the search already in hand rather than asking for another:
+        # a second front costs a second full set of rounds, and a drag cannot
+        # afford the query twice.
+        frontier = None
+        if result is not None and hasattr(planner, "journeys"):
+            frontier = [
+                {"arrives": alternative.arrives, "transfers": alternative.transfers}
+                for alternative in planner.journeys(result, end)
+            ]
+        return {
+            # No `shapes.txt` yet, so a transit leg has no geometry and the
+            # route is drawn stop to stop. Straight lines, and honestly so — a
+            # bus does not fly, but neither does this claim to know its streets.
+            "route": journey.geometry or [coordinates[label] for label in journey.nodes],
+            "segments": segments,
             "snapped": [coordinates[start], coordinates[end]],
             "seconds": journey.cost,
             "waiting": journey.waiting,
+            "walked": journey.walking,
             "legs": len(journey.legs),
+            "transfers": journey.transfers,
+            "arrives": journey.arrives,
+            "clock": NODES[board.nodes[planner_id]["type"]].get("clock"),
+            "settled": settled,
+            "searches": noun,
+            "of": of,
+            "ms": round(elapsed, 1),
+            "space": space,
+            "space_kind": space_kind,
+            "space_size": space_size,
+            "space_note": note,
+            "rounds": getattr(result, "rounds", None),
+            "frontier": frontier,
             # How many edges this profile has a schedule for, and whether the
             # chosen technique is reading it. A schedule quietly ignored is the
-            # failure nobody can see, so the page is told and says so.
+            # failure nobody can see, so the page is told and says so — and
+            # told which technique here would read it.
             "scheduled_edges": 0 if calendar is None else len(calendar),
-            "reads_clock": bool(when),
-            # How many legs of *this* route are scheduled. The number that
-            # answers "why did changing the hour do nothing": a route over
-            # edges nobody scheduled cannot care what time it is.
+            "reads_clock": bool(when.get("departing") is not None),
             "scheduled_legs": 0
             if calendar is None
             else sum(1 for leg in journey.legs if calendar.is_restricted(leg.edge)),
-            "settled_count": result.settled,
-            "graph_nodes": compiled.graph.num_nodes,
-            "ms": round(elapsed, 1),
+            "clock_reader": rl.clock_readers(compiled),
         }
-        if explore:
-            # The search space, as the planner reports it. Every branch is drawn
-            # by default — keeping only the heaviest keeps the trunk and throws
-            # away the crown, which is exactly the part that shows how far the
-            # search reached. A city-wide Dijkstra is ~58k branches and about
-            # 10 MB of GeoJSON, which localhost and a canvas renderer both take
-            # in stride.
-            space = planner.explored(result)
-            answer["tree"] = space.geojson()
-            answer["branch_count"] = len(space)
-        return answer
 
     def calendar(self, board: Board, planner_id: str) -> "_routelab.Calendar | None":
         """The schedule under `planner_id`'s environment, or `None` if it has none.
@@ -719,67 +804,6 @@ class Router:
         return self._remember(
             self._reachable, key, tuple(labels[node] for node in result.order)
         )
-
-    @staticmethod
-    def _ride(planner, layer, start, end, when) -> dict:
-        """A timetable query, which answers with an itinerary.
-
-        Short, and short for a reason: there is no cost per node to hand back,
-        so no search space to draw and no result to rebuild a journey from.
-        `planner.route` twice is the thing `_search` goes out of its way to
-        avoid; here it is the only call there is.
-        """
-        began = time.perf_counter()
-        journey = planner.route(start, end, **when)
-        elapsed = (time.perf_counter() - began) * 1000
-
-        coordinates = layer.coordinates()
-        if journey is None:
-            return {
-                "error": f"no journey from {layer.names()[start]} at that hour",
-                "snapped": [coordinates[start], coordinates[end]],
-            }
-
-        # No `shapes.txt` yet, so a leg has no geometry and the route is drawn
-        # stop to stop. Straight lines, and honestly so — a bus does not fly,
-        # but neither does this claim to know which streets it took.
-        #
-        # Drawn in pieces rather than as one line: a piece per vehicle boarded
-        # and per walk between them, so the page can tell a change of bus from
-        # a stop passed through, and a walk across the street from either.
-        segments = []
-        for leg in journey.legs:
-            if segments and segments[-1]["trip"] == leg.trip:
-                segments[-1]["points"].append(coordinates[leg.head])
-            else:
-                segments.append({
-                    "trip": leg.trip,
-                    "walk": leg.trip is None,
-                    "points": [coordinates[leg.tail], coordinates[leg.head]],
-                })
-        return {
-            "route": [coordinates[label] for label in journey.nodes],
-            "segments": segments,
-            "snapped": [coordinates[start], coordinates[end]],
-            "seconds": journey.cost,
-            "waiting": journey.waiting,
-            "legs": len(journey.legs),
-            "transfers": journey.transfers,
-            # Seconds on foot between stops — the footpaths doing their work,
-            # and the number that says a "transfer" was a walk across the
-            # street rather than a wait at the same pole.
-            "walked": journey.walking,
-            "arrives": journey.arrives,
-            "settled_count": journey.settled,
-            # The model's own node set, not the environment's: the time-expanded
-            # model settles events, and reporting its share against the stop
-            # count would put it over 100%.
-            "graph_nodes": getattr(planner, "num_events", None)
-            or planner.compiled.graph.num_nodes,
-            "nodes_are": "events" if hasattr(planner, "num_events") else "stops",
-            "ms": round(elapsed, 1),
-            "transit": True,
-        }
 
 
 class Handler(BaseHTTPRequestHandler):

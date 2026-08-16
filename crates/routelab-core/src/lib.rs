@@ -43,6 +43,7 @@ pub use progress::Progress;
 pub use search::{SearchError, SearchOptions, SearchResult};
 pub use timedep::{time_dependent_dijkstra, Calendar, Clock, Departure, Waiting, Window, WEEK};
 pub use timetable::{
-    Connection, Footpaths, Itinerary, Leg, Ride, TimeExpanded, Timetable, Transfer, Walk,
+    Connection, Footpaths, Itinerary, Leg, Raptor, RaptorSearch, Ride, TimeExpanded, Timetable,
+    Transfer, Walk,
 };
 pub use tree::{Magnitude, SearchTree};

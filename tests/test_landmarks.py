@@ -120,14 +120,16 @@ def test_the_table_is_two_weights_per_landmark_per_node(ring):
     assert planner.heuristic.coverage == 4
 
 
-def test_a_landmark_set_has_to_have_landmarks(ring):
+def test_a_landmark_set_has_to_have_landmarks():
+    # Refused where it is written: a technique is a value, and a wrong one
+    # should say so when it is made rather than when it is bound.
     with pytest.raises(ValueError, match="at least one landmark"):
-        rl.AStar(rl.Landmarks(0)).bind(ring)
+        rl.Landmarks(0)
 
 
-def test_an_unknown_selection_says_what_it_expected(ring):
+def test_an_unknown_selection_says_what_it_expected():
     with pytest.raises(ValueError, match="expected 'farthest' or 'random'"):
-        rl.AStar(rl.Landmarks(2, "vibes")).bind(ring)
+        rl.Landmarks(2, "vibes")
 
 
 def test_asking_for_more_landmarks_than_nodes_is_fine(ring):

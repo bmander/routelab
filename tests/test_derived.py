@@ -28,6 +28,10 @@ SUPPLIED = [
         ),
     ),
     (rl.Pace, lambda: rl.Environment(rl.ScalarEdges(("a", "b", 1), cost_per_distance=1.0))),
+    (
+        rl.Walks,
+        lambda: rl.Environment(rl.GTFS(TINY_GTFS, TINY_DATE), rl.ScalarEdges(("A", "B", 30))),
+    ),
 ]
 
 #: The words each answers with, and the sentence each refuses with.
@@ -51,7 +55,7 @@ def test_a_derivation_binds_where_nothing_is_missing(derivation, supplied):
     assert derivation().bind(compiled) is not None
 
 
-@pytest.mark.parametrize("derivation", [d for d, _ in SUPPLIED], ids=lambda d: d.__name__)
+@pytest.mark.parametrize("derivation", list(REFUSALS), ids=lambda d: d.__name__)
 def test_a_derivation_refuses_in_its_own_words_where_something_is(derivation):
     name, sentence = REFUSALS[derivation]
     compiled = bare().compile()
@@ -67,6 +71,7 @@ def test_missing_words_are_owned_by_whoever_answers_for_them():
     assert rl.Departures.name == "timetable"
     assert rl.Plane.name == "positions"
     assert rl.Pace.name == "cost_per_distance"
+    assert rl.Walks.name == "walks"
     compiled = bare().compile()
     assert rl.TimeDependentDijkstra().missing_from(compiled) == {"schedule"}
     assert rl.TimeDependent().missing_from(compiled) == {"timetable"}
@@ -81,3 +86,19 @@ def test_a_technique_derives_at_bind_and_keeps_what_it_derived():
     second = rl.TimeDependentDijkstra(waiting="forbidden").bind(env)
     assert len(first.calendar) == len(second.calendar) > 0
     assert first.calendar is not second.calendar
+
+
+def test_a_derivation_that_never_refuses_binds_empty_on_a_bare_environment():
+    # Walks are optional — no walks is the paper's plain model — so `bind` on
+    # an environment with none answers with an empty table, not a refusal.
+    compiled = bare().compile()
+    assert rl.Walks.missing_from(compiled) == frozenset()
+    assert len(rl.Walks().bind(compiled)) == 0
+
+
+@pytest.mark.parametrize("derivation, supplied", SUPPLIED, ids=lambda x: getattr(x, "__name__", ""))
+def test_every_bind_takes_a_progress_counter(derivation, supplied):
+    # One shape for every derivation: bind(compiled, progress=None), whether or
+    # not it has anything to write into the counter.
+    compiled = supplied().compile()
+    assert derivation().bind(compiled, progress=None) is not None

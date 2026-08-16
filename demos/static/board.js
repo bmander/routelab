@@ -76,13 +76,26 @@ const LOOKS = {
     sub: () => 'a node per event',
     available: () => Boolean(SETUP.feed),
   },
+  RAPTOR: {
+    title: 'RAPTOR', group: 'techniques',
+    sub: () => 'rounds, no graph',
+    available: () => Boolean(SETUP.feed),
+  },
+  // The query's fields are the options its wired technique takes, and only
+  // those: a `shown` predicate reads the technique's declaration (`clock` and
+  // `options`, both from the library) so the board never shows a knob the
+  // server would ignore. Rewire the planner and the fields follow.
   Query: {
     title: 'Query', group: 'query', sub: () => 'route(a, b)',
     fields: [
       {id: 'day', label: 'weekday', type: 'select', value: '0',
        options: () => [['0', 'Mon'], ['1', 'Tue'], ['2', 'Wed'], ['3', 'Thu'],
-                       ['4', 'Fri'], ['5', 'Sat'], ['6', 'Sun']]},
-      {id: 'minute', label: 'departing', type: 'time', value: 480},
+                       ['4', 'Fri'], ['5', 'Sat'], ['6', 'Sun']],
+       shown: planner => planner && planner.clock === 'week'},
+      {id: 'minute', label: 'departing', type: 'time', value: 480,
+       shown: planner => Boolean(planner && planner.clock)},
+      {id: 'max_transfers', label: 'max changes', type: 'number', value: '', min: 0, max: 9,
+       shown: planner => Boolean(planner && (planner.options || []).includes('max_transfers'))},
     ],
   },
   Map: {title: 'Map', group: 'map', sub: () => 'click to place'},
@@ -385,9 +398,27 @@ class Board {
       }
       element.style.left = node.x + 'px';
       element.style.top = node.y + 'px';
+      this.showFields(node, element);
     }
     for (const element of [...this.layer.children]) {
       if (!seen.has(element.dataset.id)) { element.remove(); }
+    }
+  }
+
+  /** Show only the fields the node's wiring gives a meaning to.
+   *
+   * A field with a `shown` predicate is asked, with the technique wired into
+   * this node's `planner` port (or null); the rest always show. Fields sit
+   * below the ports, so hiding one moves no socket and no wire.
+   */
+  showFields(node, element) {
+    const fields = TYPES[node.type].fields || [];
+    if (!fields.some(field => field.shown)) { return; }
+    const [source] = this.sources(node.id, 'planner');
+    const planner = source ? TYPES[this.nodes.get(source).type] : null;
+    for (const field of fields) {
+      const wrap = element.querySelector(`.field[data-field="${field.id}"]`);
+      if (wrap && field.shown) { wrap.hidden = !field.shown(planner); }
     }
   }
 
@@ -486,8 +517,11 @@ class Board {
     }
 
     const read = () => {
-      node.params[field.id] = field.type === 'number' || field.type === 'time'
-        ? Number(input.value) : input.value;
+      // A blank number is "not set" — the technique's own default — and stays
+      // blank rather than becoming a zero nobody typed.
+      node.params[field.id] = (field.type === 'number' && input.value === '') ? ''
+        : (field.type === 'number' || field.type === 'time') ? Number(input.value)
+        : input.value;
     };
     // A slider wants both events: `input` fires continuously and re-routes
     // live, `change` fires when you let go and is when the expensive picture is

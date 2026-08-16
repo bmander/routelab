@@ -1,4 +1,4 @@
-"""One transit trip, routed by both of Pyrga et al.'s models.
+"""One transit trip, routed by every timetable technique here.
 
     python demos/route_transit.py kcm.zip --date 2026-08-17
 
@@ -14,9 +14,12 @@ one into something a shortest-path algorithm can read.
   that plain Dijkstra routes unchanged. General, and large.
 
 They must return the same arrival time. That claim is the paper's thesis and
-this demo's point, so the two run side by side and the table prints both.
+this demo's point — and RAPTOR (Delling, Pajor & Werneck, 2012), which builds
+no graph at all, must agree with both. The three run side by side and the
+table prints each; RAPTOR also prints its whole front, one journey per number
+of changes.
 
-Both are given the paper's *foot-edges* — walks between stops within
+All three are given the paper's *foot-edges* — walks between stops within
 ``--walk`` metres of each other — because a real feed says nothing about the
 northbound stop and the southbound one across the street being the same place,
 and a model that cannot cross the street cannot make most real trips. Pass
@@ -36,6 +39,9 @@ from pathlib import Path
 
 import routelab as rl
 from routelab import GTFS
+
+#: Every timetable technique, in the order the literature produced them.
+MODELS = [rl.TimeDependent(), rl.TimeExpanded(), rl.RAPTOR()]
 
 #: Downtown Seattle to the University District, which is a real trip somebody
 #: takes. Any two coordinates in the feed's area will do.
@@ -104,12 +110,16 @@ def main(argv: "list[str] | None" = None) -> int:
     target = feed.nearest(*args.target)
     print(f"\n{names[origin]} → {names[target]}, leaving {args.departing:%H:%M}\n")
 
-    header = f"  {'model':<16} {'bind':>7} {'memory':>9} {'query':>9} {'settled':>9}  arrives"
+    header = (
+        f"  {'technique':<14} {'nodes':>16} {'bind':>7} {'memory':>9} {'query':>9} "
+        f"{'settled':>9}  arrives"
+    )
     print(header)
     print("  " + "-" * (len(header) - 2))
 
     journeys = {}
-    for technique in (rl.TimeDependent(), rl.TimeExpanded()):
+    raptor = None
+    for technique in MODELS:
         name = type(technique).__name__
 
         started = time.perf_counter()
@@ -124,21 +134,30 @@ def main(argv: "list[str] | None" = None) -> int:
         query = (time.perf_counter() - started) * 1000
 
         if journey is None:
-            print(f"  {name:<16} {bound:6.1f}s {'':>9} {query:8.1f}ms  no journey")
+            print(f"  {name:<14} {'':>16} {bound:6.1f}s {'':>9} {query:8.1f}ms  no journey")
             return 1
         journeys[name] = journey
+        if isinstance(planner, rl.RAPTOR):
+            raptor = planner
         size = planner.footprint / 1e6
+        noun, count = planner.searches
         print(
-            f"  {name:<16} {bound:6.1f}s {size:8.1f}M {query:8.1f}ms "
+            f"  {name:<14} {count:>9,} {noun:<6} {bound:6.1f}s {size:8.1f}M {query:8.1f}ms "
             f"{journey.settled:9,}  {clock(journey.arrives)}"
         )
 
     arrivals = {journey.arrives for journey in journeys.values()}
     print(
-        f"\n  the two models agree: {clock(arrivals.pop())}"
+        f"\n  all {len(journeys)} agree: {clock(arrivals.pop())}"
         if len(arrivals) == 1
-        else f"\n  THE MODELS DISAGREE: {arrivals} — one of them is wrong"
+        else f"\n  THE TECHNIQUES DISAGREE: {arrivals} — one of them is wrong"
     )
+    front = raptor.frontier(origin, target, departing=args.departing) if raptor else []
+    if len(front) > 1:
+        print("  RAPTOR's front: " + " · ".join(
+            f"{j.transfers} change{'' if j.transfers == 1 else 's'} arrives {clock(j.arrives)}"
+            for j in front
+        ))
 
     journey = journeys["TimeDependent"]
     print(

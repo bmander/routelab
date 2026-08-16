@@ -24,6 +24,9 @@ const space = L.layerGroup().addTo(map);
 const route = L.layerGroup().addTo(map);
 // One per vehicle boarded, cycled: the point is that consecutive rides differ.
 const LEG_COLOURS = ['#d1495b', '#1d7fbf', '#e09f3e', '#4f9d69', '#8e5ea2'];
+// One per round of a round-based search, darkest first: where you start, then
+// one bus away, then two. Past the sixth every round shares the last colour.
+const ROUNDS = ['#1d3557', '#1d6fa5', '#3aa6a6', '#7fc46a', '#e0b23e', '#e07b3e'];
 const PIN = L.divIcon({className: 'pin', iconSize: [14, 14], iconAnchor: [7, 7]});
 let pins = [];
 
@@ -122,6 +125,13 @@ const PRESETS = [
     layer: ['GTFS', {}],
     walks: ['Footpaths', {within: 200}],
     technique: ['TimeExpanded', {}],
+  },
+  {
+    id: 'transit-raptor',
+    label: 'Transit · RAPTOR',
+    layer: ['GTFS', {}],
+    walks: ['Footpaths', {within: 200}],
+    technique: ['RAPTOR', {}],
   },
 ];
 
@@ -548,10 +558,25 @@ async function request(explore) {
   // Cleared only when this request asked for a tree: an answer with none is
   // either a route-only refresh mid-drag, which must leave what is drawn
   // alone, or a query whose `space` output goes nowhere, which must not.
+  //
+  // A round-based search has no branches at all — a stop is a place, not a
+  // road — so its space is points, coloured by the round that first reached
+  // each: the origin's neighbourhood, then everything one bus away, then two.
   const halves = {forward: '#1d6fa5', backward: '#7a3b9c'};
   if (explore) { space.clearLayers(); }
-  if (answer.tree) {
-    L.geoJSON(answer.tree, {
+  if (answer.space && answer.space_kind === 'rounds') {
+    // `peak` rides on the collection, not on every stop: one division here
+    // rather than a float per feature down the wire.
+    const peak = answer.space.peak || 1;
+    L.geoJSON(answer.space, {
+      pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+        radius: 3.5 - 1.5 * (feature.properties.round / peak),
+        fillColor: ROUNDS[Math.min(feature.properties.round, ROUNDS.length - 1)],
+        stroke: false, fillOpacity: 0.85,
+      }),
+    }).addTo(space);
+  } else if (answer.space) {
+    L.geoJSON(answer.space, {
       style: feature => ({
         color: halves[feature.properties.direction] || '#1d6fa5',
         weight: 0.6 + 9 * Math.sqrt(feature.properties.share),
@@ -582,44 +607,63 @@ async function request(explore) {
   answer.snapped.forEach(p => L.circleMarker(p, {radius: 4, stroke: false,
     fillOpacity: 1, fillColor: '#1d3557'}).addTo(route));
 
-  const minutes = ((answer.seconds - answer.waiting) / 60).toFixed(1);
-  const share = (100 * answer.settled_count / answer.graph_nodes).toFixed(1);
+  const share = (100 * answer.settled / answer.of).toFixed(1);
   // A ten-hour wait for a gate is not a ten-hour walk, and reporting one total
   // makes it look like one.
   const waited = answer.waiting > 0
     ? ` + <b>${humanise(answer.waiting)}</b> waiting`
     : '';
-  // What the first line says depends on what was actually asked. A transit
-  // answer's headline is when you get there and how many times you change; a
-  // street answer's is how long it takes. The second line is the same question
-  // for both — how much of the graph the search had to settle — which is the
-  // number the two timetable models exist to be compared on.
   const walked = answer.walked > 0
     ? ` + <b>${humanise(answer.walked)}</b> walking`
     : '';
-  const headline = answer.transit
-    ? `arrive <b>${hhmm(answer.arrives)}</b>, <b>${minutes}</b> min riding${walked}${waited}<br>` +
+  // What the first line says depends on what was actually asked. An answer
+  // that knows when it arrives is transit-shaped: its headline is when you
+  // get there and how many times you change. A street answer's is how long it
+  // takes. The second line is the same question for both — how much of what
+  // it searches the search had to settle — which is the number the timetable
+  // techniques exist to be compared on.
+  const scheduled = answer.arrives !== null && answer.arrives !== undefined;
+  const headline = scheduled
+    ? `arrive <b>${hhmm(answer.arrives)}</b>, ` +
+      `<b>${((answer.seconds - answer.waiting - answer.walked) / 60).toFixed(1)}</b> min riding` +
+      `${walked}${waited}<br>` +
       `<b>${answer.transfers}</b> transfer${answer.transfers === 1 ? '' : 's'} ` +
-      `over <b>${answer.legs}</b> stops`
-    : `<b>${minutes}</b> min moving${waited} over <b>${answer.legs}</b> legs`;
+      `over <b>${answer.legs}</b> stops` +
+      (answer.rounds ? ` in <b>${answer.rounds}</b> round${answer.rounds === 1 ? '' : 's'}` : '')
+    : `<b>${((answer.seconds - answer.waiting) / 60).toFixed(1)}</b> min moving${waited} ` +
+      `over <b>${answer.legs}</b> legs`;
 
   readout.className = '';
   readout.innerHTML =
     `${headline}<br>` +
-    `settled <b>${answer.settled_count.toLocaleString()}</b> ${answer.nodes_are || 'nodes'} ` +
-    `(${share}% of ${answer.graph_nodes.toLocaleString()}) in <b>${answer.ms}</b> ms` +
-    spaceNote(answer) + scheduleNote(answer);
+    `settled <b>${answer.settled.toLocaleString()}</b> ${answer.searches} ` +
+    `(${share}% of ${answer.of.toLocaleString()}) in <b>${answer.ms}</b> ms` +
+    frontierNote(answer) + spaceNote(answer) + scheduleNote(answer);
+}
+
+// The other journeys worth having, when the technique keeps them: RAPTOR's
+// front over arrival and changes, one entry per number of changes.
+function frontierNote(answer) {
+  if (!answer.frontier || answer.frontier.length < 2) { return ''; }
+  const others = answer.frontier
+    .filter(alt => alt.arrives !== answer.arrives)
+    .map(alt => `${alt.transfers} change${alt.transfers === 1 ? '' : 's'} arrives ${hhmm(alt.arrives)}`);
+  return `<br><span class="hint">also: ${others.join(' · ')}</span>`;
 }
 
 // What the query's second output did, or why it did nothing.
 function spaceNote(answer) {
-  if (answer.transit) {
-    return `<br><span class="hint">a timetable query answers with an itinerary, ` +
-           `so there is no search space to draw</span>`;
+  if (answer.space_note) {
+    // The technique's own sentence for having nothing to draw.
+    return `<br><span class="hint">${answer.space_note}</span>`;
   }
-  if (answer.tree) {
-    return `<br><span class="hint">tree: ${answer.branch_count.toLocaleString()} ` +
-           `branches, ${answer.tree.features.length.toLocaleString()} drawn</span>`;
+  if (answer.space && answer.space_kind === 'rounds') {
+    return `<br><span class="hint">rounds: ${answer.space_size.toLocaleString()} ` +
+           `stops, coloured by the round that first reached them</span>`;
+  }
+  if (answer.space) {
+    return `<br><span class="hint">tree: ${answer.space_size.toLocaleString()} ` +
+           `branches, ${answer.space.features.length.toLocaleString()} drawn</span>`;
   }
   if (!board.links.some(l => l.fromPort === 'space')) {
     return `<br><span class="hint">nothing is wired to the query's ` +
@@ -646,11 +690,11 @@ function hhmm(seconds) {
 // reading. Otherwise the map looks the same at every hour and there is nothing
 // to tell you the clock was never consulted.
 function scheduleNote(answer) {
-  if (answer.transit || !answer.scheduled_edges) { return ''; }
+  if (answer.clock === 'day' || !answer.scheduled_edges) { return ''; }
   if (!answer.reads_clock) {
     return `<br><span class="hint">${answer.scheduled_edges} edges here are ` +
            `scheduled; this technique ignores them — wire in ` +
-           `<b>TimeDependentDijkstra</b> to route with the clock</span>`;
+           `<b>${answer.clock_reader || 'a technique that reads the clock'}</b> to route with the clock</span>`;
   }
   // Reading the clock and still seeing no change is the confusing case, and it
   // has an ordinary cause: this particular route never touches a scheduled

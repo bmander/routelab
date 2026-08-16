@@ -69,8 +69,13 @@ class Schedule:
             return frozenset()
         return frozenset({cls.name})
 
-    def bind(self, compiled: CompiledEnvironment) -> "_routelab.Calendar":
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "_routelab.Calendar":
         """Collect every layer's windows into one calendar, or explain.
+
+        ``progress`` is accepted for parity with every other ``bind`` and left
+        alone: a walk of the layers has no honest measure of its own.
 
         Raises:
             ValueError: If no layer schedules anything.

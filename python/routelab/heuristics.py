@@ -76,9 +76,11 @@ class Plane:
             return frozenset()
         return frozenset({cls.name})
 
-    def bind(self, compiled: CompiledEnvironment) -> "Tuple[List[float], List[float]]":
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "Tuple[List[float], List[float]]":
         """The table as parallel ``xs, ys`` per node id, or name the nodes
-        nothing placed.
+        nothing placed. ``progress`` is accepted for parity and left alone.
 
         Raises:
             ValueError: If some node has no position.
@@ -143,8 +145,11 @@ class Pace:
         declared a rate."""
         return frozenset() if cls._gather(compiled) is not None else frozenset({cls.name})
 
-    def bind(self, compiled: CompiledEnvironment) -> float:
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> float:
         """The rate, or an explanation of which layer withheld it.
+        ``progress`` is accepted for parity and left alone.
 
         Raises:
             ValueError: If some edge-contributing layer declared no rate.
@@ -291,7 +296,17 @@ class Landmarks(Heuristic):
         seed: Fixes the choice, so a benchmark can be repeated.
     """
 
+    SELECTIONS = ("farthest", "random")
+
     def __init__(self, count: int = 16, selection: str = "farthest", seed: int = 0):
+        # Refused where it is written, not at bind: a technique is a value you
+        # can put in a list and compare, and a value that is wrong should say
+        # so when it is made.
+        if count < 1:
+            raise ValueError(f"a landmark heuristic needs at least one landmark, got {count}")
+        if selection not in self.SELECTIONS:
+            names = " or ".join(repr(name) for name in self.SELECTIONS)
+            raise ValueError(f"unknown landmark selection {selection!r}; expected {names}")
         self.count = count
         self.selection = selection
         self.seed = seed
@@ -299,8 +314,6 @@ class Landmarks(Heuristic):
     def bind(
         self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
     ) -> "_routelab.Heuristic":
-        if self.count < 1:
-            raise ValueError(f"a landmark heuristic needs at least one landmark, got {self.count}")
         return _routelab.Heuristic.landmarks(
             compiled.graph, self.count, self.selection, self.seed, progress=progress
         )

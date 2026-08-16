@@ -50,12 +50,14 @@
 
 mod dependent;
 mod expanded;
+mod raptor;
 
 #[cfg(test)]
 mod tests;
 
 pub use dependent::earliest_arrival;
 pub use expanded::TimeExpanded;
+pub use raptor::{Raptor, RaptorSearch};
 
 use crate::graph::{Graph, NodeId, Weight};
 use crate::search::SearchOptions;
@@ -166,7 +168,7 @@ impl Leg {
 /// one can still be told as the hops it was made of — see [`Footpaths::hops`].
 /// An answer names the links that were given, never one the closure invented.
 ///
-/// Stored CSR-style by origin stop, which is the shape both models read them
+/// Stored CSR-style by origin stop, which is the shape every model reads them
 /// in: from a stop I am standing at, where can I walk and how long does it take.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Footpaths {
@@ -380,7 +382,7 @@ impl Transfer {
     }
 }
 
-/// A day's connections, indexed for both models to read.
+/// A day's connections, indexed for every model to read.
 ///
 /// Stored once as a two-level index: for each stop the **stop pairs** leaving
 /// it, and for each pair the connections along it in departure order. The
@@ -590,21 +592,34 @@ impl Itinerary {
         trips.windows(2).filter(|pair| pair[0] != pair[1]).count()
     }
 
-    /// Is this a legal itinerary under `transfer`, walking only `footpaths`?
+    /// Is this a legal itinerary from one of `sources` — each a stop and the
+    /// time you are standing there — under `transfer`, walking only `footpaths`?
     ///
     /// The falsifiability check, in the manner of [`crate::graph::Graph::walk`]:
-    /// every leg must start where the last one ended, no earlier than it
-    /// arrived; a ride must leave enough time to change when the vehicle
-    /// changes; a walk must be a footpath that exists and take exactly as long
-    /// as it says.
+    /// the first leg must start at a source no earlier than its time, every
+    /// leg must start where the last one ended, no earlier than it arrived; a
+    /// ride must leave enough time to change when the vehicle changes; a walk
+    /// must be a footpath that exists and take exactly as long as it says. An
+    /// itinerary with no legs is standing at a source, and arrives when it does.
     pub fn is_valid(
         &self,
-        from: NodeId,
-        at: Time,
+        sources: &[(NodeId, Time)],
         transfer: Transfer,
         footpaths: &Footpaths,
     ) -> bool {
-        let mut here = from;
+        let Some(first) = self.legs.first() else {
+            return sources.iter().any(|&(_, at)| at == self.arrives);
+        };
+        // The source it left from: the earliest time anyone stood there.
+        let Some(at) = sources
+            .iter()
+            .filter(|&&(stop, _)| stop == first.from())
+            .map(|&(_, at)| at)
+            .min()
+        else {
+            return false;
+        };
+        let mut here = first.from();
         let mut now = at;
         let mut aboard: Option<u32> = None;
         for leg in &self.legs {

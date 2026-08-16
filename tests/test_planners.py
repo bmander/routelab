@@ -210,3 +210,79 @@ def test_planners_agree_with_the_kernel_they_wrap(env):
     graph = env.compile().graph
     direct = rl.dijkstra(graph, planner.node_id("a"))
     assert direct.cost(planner.node_id("c")) == planner.route("a", "c").cost
+
+
+# --- one protocol, every technique ---------------------------------------------
+
+
+EVERY_TECHNIQUE = [
+    rl.Dijkstra(),
+    rl.BFS(),
+    rl.AStar(rl.Zero()),
+    rl.ContractionHierarchy(),
+    rl.TimeDependentDijkstra(),
+    rl.TimeDependent(),
+    rl.TimeExpanded(),
+    rl.RAPTOR(),
+]
+
+
+@pytest.mark.parametrize("technique", EVERY_TECHNIQUE, ids=repr)
+def test_every_technique_declares_what_it_takes(technique):
+    # Data, not discovery: a caller — or a board — can know what a technique
+    # takes before asking it anything, and every technique says.
+    assert isinstance(technique.options, frozenset)
+    assert technique.required <= technique.options
+    assert technique.accepts
+
+
+def test_an_option_a_technique_does_not_take_is_refused_by_name(env):
+    planner = rl.Dijkstra().bind(env)
+    with pytest.raises(ValueError, match="Dijkstra takes no max_depth; a hop bound belongs to BFS"):
+        planner.route("a", "c", max_depth=1)
+    with pytest.raises(ValueError, match="takes no max_transfers; a cap on changes belongs to RAPTOR"):
+        planner.route("a", "c", max_transfers=1)
+    with pytest.raises(ValueError, match="takes no nonsense; no technique here takes nonsense"):
+        planner.route("a", "c", nonsense=True)
+    with pytest.raises(ValueError, match=r"BFS takes no max_cost; a cost bound belongs to .*Dijkstra"):
+        rl.BFS().bind(env).route("a", "c", max_cost=5)
+
+
+def test_a_departure_time_on_an_unscheduled_network_says_so(env):
+    # Nothing here reads a clock, and the refusal says that rather than
+    # naming a technique that could not help either.
+    with pytest.raises(ValueError, match="Nothing in this environment is scheduled"):
+        rl.Dijkstra().bind(env).route("a", "c", departing=0)
+    assert rl.clock_readers(env.compile()) is None
+
+
+def test_who_owns_an_option_is_read_off_the_techniques(env):
+    # Not a table of sentences that goes stale: the refusal names whoever
+    # declares the option, so a new technique joins the sentence by existing.
+    assert rl.planners.owners("max_transfers") == [rl.RAPTOR]
+    assert set(rl.planners.owners("max_cost")) == {rl.Dijkstra, rl.AStar, rl.TimeDependentDijkstra}
+    assert rl.planners.names(rl.planners.owners("max_depth")) == "BFS()"
+    assert rl.planners.owners("nonsense") == []
+    # And every technique the library exports is one of them.
+    assert set(rl.planners.techniques()) == {
+        rl.Dijkstra, rl.BFS, rl.AStar, rl.ContractionHierarchy,
+        rl.TimeDependentDijkstra, rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR,
+    }
+
+
+def test_the_package_exports_the_whole_onramp():
+    for name in ("RAPTOR", "TimetablePlanner", "Rounds", "Reach", "Leap", "EdgeResult",
+                 "service_seconds", "clock_readers", "planners"):
+        assert hasattr(rl, name), name
+
+
+@pytest.mark.parametrize(
+    "technique", [rl.Dijkstra(), rl.BFS(), rl.AStar(rl.Zero()), rl.ContractionHierarchy()], ids=repr
+)
+def test_route_is_the_journey_a_search_holds(env, technique):
+    # The identity every technique with a cost table keeps: asking for the
+    # journey is asking for the search and reading it back.
+    planner = technique.bind(env)
+    result = planner.search("a", targets=[planner.node_id("c")])
+    assert planner.journey(result, "c") == planner.route("a", "c")
+    assert planner.journey(result, "d") is None

@@ -16,22 +16,16 @@ import pytest
 import routelab as rl
 from routelab import GTFS
 
-from conftest import TINY_DATE, TINY_GTFS
+from conftest import TINY_GTFS
 
 #: Both models. Every behavioural test runs against each, because "these two
 #: agree" is the paper's thesis and a test that only asked one would not notice
 #: the day they stopped.
-MODELS = [rl.TimeDependent, rl.TimeExpanded]
+MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR]
 
-
-@pytest.fixture
-def feed() -> GTFS:
-    return GTFS(TINY_GTFS, TINY_DATE)
-
-
-@pytest.fixture
-def env(feed: GTFS) -> rl.Environment:
-    return rl.Environment(feed)
+#: The two Pyrga models — the ones that answer with an itinerary and nothing
+#: else, so a cost table and a search space are things they refuse.
+ITINERARY_ONLY = [rl.TimeDependent, rl.TimeExpanded]
 
 
 def test_the_feed_reads_its_service_day(feed: GTFS):
@@ -138,15 +132,45 @@ def test_a_departure_time_is_required(model, env: rl.Environment):
 
 
 @pytest.mark.parametrize("model", MODELS)
-def test_several_origins_are_refused_rather_than_guessed_at(model, env: rl.Environment):
-    with pytest.raises(ValueError, match="one stop at one time"):
-        model().bind(env).route(["A", "B"], "C", departing=time(8, 0))
+def test_several_origins_each_carry_a_head_start(model, feed):
+    """The multimodal query, the same way every planner takes it: several
+    origins, each already this many seconds along when the query departs."""
+    env = rl.Environment(feed, rl.ScalarEdges(("C", "B", 60)))
+    planner = model().bind(env)
+    # Standing at A and at C at 08:00: walking C -> B lands at 08:01, well
+    # before WEEKDAY1 reaches B at 08:10.
+    journey = planner.route({"A": 0, "C": 0}, "B", departing=time(8, 0))
+    assert (journey.origin, journey.arrives, journey.cost) == ("C", 8 * 3600 + 60, 60)
+    # A head start of 15 minutes at C is a walk landing at 08:16; A's bus wins.
+    journey = planner.route({"A": 0, "C": 900}, "B", departing=time(8, 0))
+    assert (journey.origin, journey.arrives, journey.cost) == ("A", 8 * 3600 + 600, 600)
+    # And a head start of 5 minutes at C: the walk lands at 08:06, cost counted
+    # from the query's departure, head start included.
+    journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0))
+    assert (journey.origin, journey.arrives, journey.cost) == ("C", 8 * 3600 + 360, 360)
+    # A list of origins is several origins with no head start.
+    assert planner.route(["A", "C"], "B", departing=time(8, 0)).origin == "C"
+
+
+@pytest.mark.parametrize("model", ITINERARY_ONLY)
+def test_a_pyrga_model_answers_with_a_journey_and_nothing_else(model, env: rl.Environment):
+    # No cost table and no search space: said in so many words, and naming
+    # the technique that has both.
+    planner = model().bind(env)
+    with pytest.raises(NotImplementedError, match="journey rather than a cost per node"):
+        planner.search("A", departing=time(8, 0))
+    with pytest.raises(NotImplementedError, match="nothing to draw. RAPTOR"):
+        planner.explored(None)
 
 
 @pytest.mark.parametrize("model", MODELS)
-def test_there_is_no_cost_table_to_hand_back(model, env: rl.Environment):
-    with pytest.raises(NotImplementedError, match="itinerary"):
-        model().bind(env).search("A")
+def test_an_option_a_model_cannot_honour_names_the_one_that_can(model, env: rl.Environment):
+    planner = model().bind(env)
+    with pytest.raises(ValueError, match="takes no max_cost; a cost bound belongs to"):
+        planner.route("A", "C", departing=time(8, 0), max_cost=10)
+    if model is not rl.RAPTOR:
+        with pytest.raises(ValueError, match="takes no max_transfers; a cap on changes belongs to RAPTOR"):
+            planner.route("A", "C", departing=time(8, 0), max_transfers=1)
 
 
 def test_the_expanded_model_pays_its_size_at_bind_time(env: rl.Environment):
@@ -158,9 +182,12 @@ def test_the_expanded_model_pays_its_size_at_bind_time(env: rl.Environment):
     """
     planner = rl.TimeExpanded().bind(env)
     assert planner.num_events == 8
-    assert planner.footprint > 0
-    # The time-dependent model builds nothing, and reports that honestly.
-    assert rl.TimeDependent().bind(env).footprint == 0
+    # Every model holds the timetable and the walks; the expanded one holds
+    # its event graph on top, and says so.
+    dependent = rl.TimeDependent().bind(env)
+    assert dependent.footprint > 0
+    assert planner.footprint > dependent.footprint
+    assert (dependent.searches, planner.searches) == (("stops", 3), ("events", 8))
 
 
 def test_a_date_nothing_runs_on_is_an_empty_day_not_an_error():

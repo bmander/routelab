@@ -7,7 +7,7 @@ from typing import Hashable, Iterator, List, NamedTuple, Optional, Tuple
 
 from . import _routelab
 from .environment import CompiledEnvironment, EdgeSource, shape_of
-from .search import Result
+from .search import EdgeResult
 
 __all__ = ["Journey", "Leg"]
 
@@ -161,7 +161,7 @@ class Journey:
         cls,
         compiled: CompiledEnvironment,
         itinerary: "_routelab.Itinerary",
-        origin: Hashable,
+        destination: Hashable,
         departing: int,
     ) -> "Journey":
         """Rebuild a journey from a timetable query's answer.
@@ -171,6 +171,13 @@ class Journey:
         actually made, so :attr:`waiting` comes out as time spent at stops —
         which for a transit journey is the number a rider cares about and the
         static case can only ever report as a residual.
+
+        The origin is whichever source the itinerary left from — a query may
+        start at several stops, each already reached at its own time — read
+        off its first leg; a journey with no legs stood at the destination.
+        ``departing`` is what the cost is elapsed from: the query's departure,
+        so a source reached later than that already carries that head start,
+        exactly as an initial cost does for a static search.
         """
         # A ride's edge and a walk's edge may join the same two stops; the cost
         # model tells them apart, and a walk comes back hop by hop already —
@@ -186,8 +193,8 @@ class Journey:
             for trip, tail, head, departs, arrives in itinerary.legs()
         ]
         return cls(
-            origin=origin,
-            destination=legs[-1].head if legs else origin,
+            origin=legs[0].tail if legs else destination,
+            destination=destination,
             # Elapsed time, so that `waiting` is the part of it spent standing
             # at a stop rather than moving. An arrival time on its own would
             # make the cost depend on when midnight was.
@@ -200,7 +207,7 @@ class Journey:
     def from_result(
         cls,
         compiled: CompiledEnvironment,
-        result: Result,
+        result: EdgeResult,
         destination: Hashable,
     ) -> "Journey":
         """Rebuild a journey from a search result. Assumes the target was reached."""

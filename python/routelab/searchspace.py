@@ -9,11 +9,12 @@ Every planner can hand over its search space, and what it hands over depends on
 how it searches. Dijkstra and A* grow a **shortest-path tree**: every settled
 node remembers the edge it arrived by, and those edges form a tree rooted at the
 sources. A contraction hierarchy grows two, from either end, and reports where
-they met. Algorithms further along the roadmap explore differently again — a
-schedule-based search produces a decision graph, a multicriteria one a frontier
-of incomparable labels — and will report those instead. :class:`SearchSpace` is
-the common promise: whatever it is, it is made of branches, it has a heaviest
-one, and you can draw it.
+they met. A round-based transit search keeps no tree at all — a label per stop
+per round — and reports which round first reached each stop. Algorithms further
+along the roadmap will report other shapes again — a multicriteria search a
+frontier of incomparable labels. :class:`SearchSpace` is the common promise:
+whatever it is, it is made of branches, each a named tuple with a place on the
+ground, it has a heaviest one, and you can draw it.
 
 Drawn plainly, a hundred thousand identical lines say very little, so every kind
 of space gives each branch a ``share`` of its own heaviest — which is what lets
@@ -25,24 +26,28 @@ hierarchy weights them by how much road each one leapt over.
 from __future__ import annotations
 
 import heapq
-from typing import Hashable, Iterator, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Hashable, Iterator, List, NamedTuple, Optional, Sequence, Tuple
 
-__all__ = ["Branch", "MeetingTrees", "SearchSpace", "ShortestPathTree"]
+__all__ = ["Branch", "Leap", "MeetingTrees", "Reach", "Rounds", "SearchSpace", "ShortestPathTree"]
 
 #: A point on the ground, `(latitude, longitude)`.
 Point = Tuple[float, float]
 
 
-def _feature(shape: "Sequence[Point]", properties: dict) -> dict:
-    """One GeoJSON ``LineString``, with whatever a space wants to say about it."""
+def _feature(shape: "Sequence[Point]", properties: dict, kind: str = "LineString") -> dict:
+    """One GeoJSON feature, with whatever a space wants to say about it.
+
+    A ``LineString`` from a run of points, or a ``Point`` from one — a stop is
+    a place, not a road, and a space made of stops draws those.
+    """
+    # GeoJSON is (longitude, latitude); everything else here is the other way
+    # round, which is the classic way to plot a city into the ocean.
+    coordinates: Any = [[lon, lat] for lat, lon in shape]
+    if kind == "Point":
+        coordinates = coordinates[0]
     return {
         "type": "Feature",
-        # GeoJSON is (longitude, latitude); everything else here is the other
-        # way round, which is the classic way to plot a city into the ocean.
-        "geometry": {
-            "type": "LineString",
-            "coordinates": [[lon, lat] for lat, lon in shape],
-        },
+        "geometry": {"type": kind, "coordinates": coordinates},
         "properties": properties,
     }
 
@@ -108,6 +113,31 @@ class Branch(NamedTuple):
     edge: int
     #: The subtree total: see :class:`ShortestPathTree`.
     magnitude: int
+
+
+class Leap(NamedTuple):
+    """One branch of a hierarchy search: which half it belongs to, and how much
+    road it stood for."""
+
+    #: ``"forward"`` from the source, ``"backward"`` from the target.
+    direction: str
+    tail: Hashable
+    head: Hashable
+    #: The contraction rank of the branch's higher end.
+    level: int
+    #: The original edges this branch leapt over, in order.
+    edges: List[int]
+
+
+class Reach(NamedTuple):
+    """One stop a round-based search reached, and when it first did."""
+
+    stop: Hashable
+    #: The round that first reached it: 0 for the origins and what they can
+    #: walk to, `k` for a stop first reached with `k` trips.
+    round: int
+    #: The earliest arrival the whole search settled on, on the service-day clock.
+    arrives: int
 
 
 class ShortestPathTree(SearchSpace):
@@ -232,17 +262,32 @@ class MeetingTrees(SearchSpace):
         """The longest branch, in original edges — the biggest single leap."""
         return max((len(edges) for _, _, _, _, edges in self._branches), default=0)
 
-    def branches(self, *, min_span: int = 0) -> Iterator[tuple]:
-        """Every branch as ``(direction, tail, head, level, edges)``, in labels."""
+    def branches(self, *, min_span: int = 0) -> "Iterator[Leap]":
+        """Every branch as a :class:`Leap`, in labels."""
         for direction, tail, head, level, edges in self._branches:
             if len(edges) >= min_span:
-                yield (
+                yield Leap(
                     self.DIRECTIONS[direction],
                     self._compiled.label(tail),
                     self._compiled.label(head),
                     level,
                     edges,
                 )
+
+    def geometry(self, leap: "Leap") -> "Optional[List[Point]]":
+        """The unpacked shape of one leap: real road, edge by edge, or ``None``
+        where a layer along it has none."""
+        return self._shape(leap.edges)
+
+    def _shape(self, edges: "Sequence[int]") -> "Optional[List[Point]]":
+        shape: "List[Point]" = []
+        for edge in edges:
+            piece = self._compiled.geometry(edge)
+            if piece is None:
+                return None
+            # Each edge repeats the previous edge's last point.
+            shape.extend(piece[1:] if shape else piece)
+        return shape if len(shape) >= 2 else None
 
     def geojson(self, *, min_span: int = 0, limit: Optional[int] = None) -> dict:
         """Both halves as GeoJSON, one ``LineString`` per branch.
@@ -264,14 +309,8 @@ class MeetingTrees(SearchSpace):
         peak = self.peak or 1
         features = []
         for direction, level, edges in selected:
-            shape: "List[Point]" = []
-            for edge in edges:
-                piece = self._compiled.geometry(edge)
-                if piece is None:
-                    break
-                # Each edge repeats the previous edge's last point.
-                shape.extend(piece[1:] if shape else piece)
-            if len(shape) < 2:
+            shape = self._shape(edges)
+            if shape is None:
                 continue
             features.append(
                 _feature(
@@ -288,3 +327,92 @@ class MeetingTrees(SearchSpace):
 
     def __repr__(self) -> str:
         return f"MeetingTrees({len(self)} branches, longest span={self.peak})"
+
+
+def _coordinates(compiled) -> dict:
+    """``{label: (lat, lon)}`` from every layer that knows where its nodes are
+    on the ground — the ``coordinates()`` hook a feed and an extract both have.
+    Later layers win. Not ``positions()``, which is whatever planar unit a
+    distance bound is priced in."""
+    points: dict = {}
+    for source in compiled.sources:
+        getter = getattr(source, "coordinates", None)
+        if getter is not None:
+            points.update(getter())
+    return points
+
+
+class Rounds(SearchSpace):
+    """Every stop a round-based search reached, by the round that first got there.
+
+    Not a tree: RAPTOR keeps a label per stop per round and never a parent graph
+    the way Dijkstra does, so what it can honestly report is where each round's
+    frontier lay. Drawn as points — a stop is a place, not a road — coloured by
+    round, which is the picture in the paper: the origin's neighbourhood, then
+    everything one bus away, then two.
+    """
+
+    kind = "rounds"
+
+    def __init__(self, compiled, result):
+        self._compiled = compiled
+        self._reached = result.reached()
+        self._points = _coordinates(compiled)
+
+    def __len__(self) -> int:
+        return len(self._reached)
+
+    @property
+    def peak(self) -> int:
+        """The last round that reached anything."""
+        return max((round for _, round, _ in self._reached), default=0)
+
+    def branches(self, *, min_round: int = 0) -> "Iterator[Reach]":
+        """Every stop reached as a :class:`Reach`, in labels."""
+        for stop, round, arrives in self._reached:
+            if round >= min_round:
+                yield Reach(self._compiled.label(stop), round, arrives)
+
+    def geometry(self, reach: "Reach") -> "Optional[List[Point]]":
+        """Where the stop is, as a one-point shape, or ``None`` if no layer
+        places it."""
+        point = self._points.get(reach.stop)
+        return None if point is None else [point]
+
+    def geojson(self, *, min_round: int = 0, limit: Optional[int] = None) -> dict:
+        """The stops as GeoJSON ``Point`` features, each with the ``round``
+        that reached it and when it ``arrives``.
+
+        ``peak`` rides on the collection rather than a ``share`` on every
+        feature: a round is a small integer and the last one is the same
+        number for all of them, so a renderer divides once instead of reading
+        a float per stop.
+
+        Straight down the arrays rather than through :meth:`branches`, for the
+        reason :meth:`ShortestPathTree.geojson` gives: a city's search is
+        thousands of stops and a feature needs neither a `Reach` nor a label
+        resolved twice.
+
+        Args:
+            min_round: Drop stops first reached before this round.
+            limit: Keep only this many, the latest-reached first — the
+                frontier, which is the part a crowded map can still show.
+        """
+        label, points = self._compiled.label, self._points
+        selected = _heaviest(
+            [reach for reach in self._reached if reach[1] >= min_round],
+            lambda reach: reach[1],
+            limit,
+        )
+        features = []
+        for stop, round, arrives in selected:
+            point = points.get(label(stop))
+            if point is None:
+                continue
+            features.append(
+                _feature([point], {"round": round, "arrives": arrives}, kind="Point")
+            )
+        return {"type": "FeatureCollection", "features": features, "peak": self.peak}
+
+    def __repr__(self) -> str:
+        return f"Rounds({len(self):,} stops over {self.peak} rounds)"

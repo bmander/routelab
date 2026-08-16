@@ -41,37 +41,41 @@ use crate::graph::{NodeId, UNREACHABLE};
 
 use super::{Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk};
 
-/// Earliest arrival at `to`, leaving `from` no earlier than `at`, riding
-/// `timetable` and walking `footpaths`.
+/// Earliest arrival at `to` from `sources` — each a stop and the time you are
+/// standing there — riding `timetable` and walking `footpaths`.
+///
+/// Several sources are how a multimodal query starts: each entry point
+/// already reached at its own time, and the search takes whichever wins.
 pub fn earliest_arrival(
     timetable: &Timetable,
-    from: NodeId,
-    at: Time,
+    sources: &[(NodeId, Time)],
     to: NodeId,
     _transfer: Transfer,
     footpaths: &Footpaths,
 ) -> Option<Itinerary> {
     let stops = timetable.num_stops();
-    if from as usize >= stops || to as usize >= stops {
+    if to as usize >= stops {
         return None;
-    }
-    if from == to {
-        return Some(Itinerary {
-            arrives: at,
-            legs: Vec::new(),
-            settled: 0,
-        });
     }
 
     // The clock reading at each stop, and how we got there. Absolute times, so
-    // the queue orders by arrival and the answer needs no conversion.
+    // the queue orders by arrival and the answer needs no conversion. A source
+    // is a stop with a time and nothing it arrived by.
     let mut earliest = vec![UNREACHABLE; stops];
     let mut arrived_by: Vec<Option<Leg>> = vec![None; stops];
-    earliest[from as usize] = at;
+    let mut queue: BinaryHeap<Reverse<(Time, NodeId)>> = BinaryHeap::new();
+    for &(from, at) in sources {
+        if (from as usize) < stops && at < earliest[from as usize] {
+            earliest[from as usize] = at;
+            arrived_by[from as usize] = None;
+            queue.push(Reverse((at, from)));
+        }
+    }
+    if queue.is_empty() {
+        return None;
+    }
 
     let mut settled = 0;
-    let mut queue: BinaryHeap<Reverse<(Time, NodeId)>> = BinaryHeap::new();
-    queue.push(Reverse((at, from)));
 
     while let Some(Reverse((now, stop))) = queue.pop() {
         // Lazy deletion, as everywhere else in this crate.
@@ -121,12 +125,12 @@ pub fn earliest_arrival(
         return None;
     }
 
-    // Walk the legs back to the origin. A walk the closure made in one is
-    // told as the given links it chains, so the answer names real footpaths.
+    // Walk the legs back to whichever source won — the stop with nothing it
+    // arrived by. A walk the closure made in one is told as the given links
+    // it chains, so the answer names real footpaths.
     let mut legs = Vec::new();
     let mut here = to;
-    while here != from {
-        let leg = arrived_by[here as usize]?;
+    while let Some(leg) = arrived_by[here as usize] {
         match leg {
             Leg::Walk(walk) => legs.extend(footpaths.expand(walk).into_iter().rev().map(Leg::Walk)),
             ride => legs.push(ride),

@@ -14,16 +14,7 @@ from datetime import time
 import pytest
 
 import routelab as rl
-from routelab import GTFS
-
-from conftest import TINY_DATE, TINY_GTFS
-
-MODELS = [rl.TimeDependent, rl.TimeExpanded]
-
-
-@pytest.fixture
-def feed() -> GTFS:
-    return GTFS(TINY_GTFS, TINY_DATE)
+MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR]
 
 
 # --- The layer -----------------------------------------------------------------
@@ -142,7 +133,7 @@ def test_the_two_models_agree_with_footpaths_between_real_stops(feed):
                     for planner in planners
                 ]
                 arrivals = [None if journey is None else journey.arrives for journey in answers]
-                assert arrivals[0] == arrivals[1], (origin, destination, hour)
+                assert len(set(arrivals)) == 1, (origin, destination, hour, arrivals)
 
 
 def test_footpaths_on_the_board_style_environment_repr(feed):

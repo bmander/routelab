@@ -160,7 +160,7 @@ def test_it_refuses_bounds_it_cannot_honour(town):
     # max_cost over a contracted graph would cut paths that are still cheap in
     # the original, so it is refused rather than quietly answered wrong.
     planner = rl.ContractionHierarchy().bind(town)
-    with pytest.raises(ValueError, match="takes no bounds"):
+    with pytest.raises(ValueError, match="takes no max_cost; a cost bound belongs to"):
         planner.route((0, 0), (8, 8), max_cost=100)
 
 
@@ -184,7 +184,7 @@ def test_the_search_space_is_two_trees_that_met(town):
     assert space.kind == "meeting-trees"
     assert isinstance(space, rl.SearchSpace)
     assert space.meeting is not None
-    directions = {branch[0] for branch in space.branches()}
+    directions = {leap.direction for leap in space.branches()}
     assert directions == {"forward", "backward"}
 
 
