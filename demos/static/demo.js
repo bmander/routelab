@@ -257,18 +257,61 @@ function markStale() {
     ? [...board.upstream(planner)].filter(id => !built.has(board.signature(id)))
     : [];
   clearTimeout(pending);
-  pending = setTimeout(
-    () => [...needed, query.id].forEach(id => board.busy(id, true)), SETTLE);
+  pending = setTimeout(() => {
+    [...needed, query.id].forEach(id => board.busy(id, true));
+    watch();
+  }, SETTLE);
   return needed;
 }
 
 /** Record what came back, and let the board go still. */
 function settle(answer) {
   clearTimeout(pending);
+  clearInterval(watching);
+  watching = null;
   for (const id of answer.built || []) {
     if (board.nodes.has(id)) { built.add(board.signature(id)); }
   }
   board.idle();
+}
+
+// While something is building, ask what it is doing. The server answers from a
+// different request entirely — it can, because what the work writes into is an
+// atomic counter rather than something it has to stop to report.
+let watching = null;
+function watch() {
+  clearInterval(watching);
+  watching = setInterval(async () => {
+    let jobs;
+    try { jobs = await (await fetch('/progress')).json(); }
+    catch (error) { return; }
+    for (const node of board.layer.querySelectorAll('.node.busy')) {
+      board.report(node.dataset.id, jobs[node.dataset.id] || null);
+    }
+    // Builds nest — an AStar is waiting on an Environment which is waiting on
+    // an OSM read — so the one that has been running longest is the outermost
+    // and the least informative. Name the innermost instead: the one that can
+    // count itself, or failing that the one that started most recently.
+    // Started last means innermost, and it is the only exact test: the three
+    // of them begin in the same instant, so elapsed cannot tell them apart.
+    const running = Object.values(jobs).sort((a, b) => b.seq - a.seq);
+    const doing = running.find(job => job.fraction !== null) || running[0];
+    if (doing) { readout.innerHTML = building(doing); }
+  }, 400);
+}
+
+/** What to say about the longest-running job, in the readout. */
+function building(job) {
+  // The count, not just the percentage. Contraction spends a third of its time
+  // in the last half-percent of nodes, and a bar apparently stuck at 100% is
+  // the exact thing this was added to rule out — the number underneath it is
+  // visibly still climbing.
+  const detail = job.total
+    ? `${job.phase} <b>${job.done.toLocaleString()}</b> of ` +
+      `${job.total.toLocaleString()}`
+    : 'no count to report — this step cannot say how far along it is';
+  return `building <b>${job.what}</b><br>${detail}` +
+         `<br><span class="hint">${job.elapsed.toFixed(0)}s so far</span>`;
 }
 
 // --- asking ------------------------------------------------------------
@@ -308,7 +351,17 @@ async function request(explore) {
   if (!explore) { query.set('explore', '0'); }
 
   syncUrl();
-  const answer = await (await fetch('/route?' + query)).json();
+  let answer;
+  try {
+    answer = await (await fetch('/route?' + query)).json();
+  } catch (error) {
+    // Anything thrown here used to leave the board spinning for ever with no
+    // word of why, which is precisely the state the spinners exist to rule out.
+    settle({});
+    readout.className = 'hint';
+    readout.textContent = `the server did not answer: ${error}`;
+    return;
+  }
   if (mine !== generation) { return; }
   settle(answer);
   board.blame(answer.node);

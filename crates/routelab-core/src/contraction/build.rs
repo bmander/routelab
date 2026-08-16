@@ -11,6 +11,7 @@ use std::collections::BinaryHeap;
 
 use super::{Expansion, Ordering, Policy};
 use crate::graph::{Graph, NodeId, Weight, UNREACHABLE};
+use crate::progress::Progress;
 use crate::rng::Rng;
 
 /// One direction of an arc in the working graph. `other` is the far end: the
@@ -144,8 +145,13 @@ impl Builder {
     }
 
     /// Contract every node, cheapest first, and report each one's rank.
-    pub(super) fn contract_all(&mut self) -> Vec<u32> {
+    ///
+    /// `progress` counts nodes retired. An honest fraction: contraction is
+    /// monotone, every node is contracted exactly once, and the total is known
+    /// before the first one is.
+    pub(super) fn contract_all(&mut self, progress: &Progress) -> Vec<u32> {
         let num_nodes = self.out.len();
+        progress.expect("contracting", num_nodes as u64);
         let mut ranks = vec![0u32; num_nodes];
         let mut queue: BinaryHeap<Reverse<(i64, NodeId)>> = BinaryHeap::new();
         for node in 0..num_nodes as NodeId {
@@ -183,6 +189,7 @@ impl Builder {
             self.retire(node);
             ranks[node as usize] = rank;
             rank += 1;
+            progress.step();
         }
         ranks
     }

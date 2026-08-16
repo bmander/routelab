@@ -29,6 +29,7 @@
 use crate::dijkstra::dijkstra;
 use crate::graph::{Graph, NodeId, Weight, UNREACHABLE};
 use crate::heuristic::Heuristic;
+use crate::progress::Progress;
 use crate::rng::Rng;
 use crate::search::SearchOptions;
 
@@ -68,6 +69,22 @@ impl Landmarks {
     /// Runs two full searches per landmark, plus one to find the first one when
     /// spreading them out. On a city street network that is seconds, paid once.
     pub fn build(graph: &Graph, count: usize, selection: Selection, seed: u64) -> Landmarks {
+        Landmarks::build_reporting(graph, count, selection, seed, &Progress::new())
+    }
+
+    /// Choose and measure, counting landmarks finished into `progress`.
+    ///
+    /// A fraction over *searches*, not over landmarks chosen: selection already
+    /// searches from each landmark it picks, so counting only the measuring
+    /// half would sit at zero for the first part of the work and then race. The
+    /// total is two per landmark, and this counts both halves.
+    pub fn build_reporting(
+        graph: &Graph,
+        count: usize,
+        selection: Selection,
+        seed: u64,
+        progress: &Progress,
+    ) -> Landmarks {
         let num_nodes = graph.num_nodes();
         let count = count.min(num_nodes);
 
@@ -75,7 +92,8 @@ impl Landmarks {
         // means asking how far every node is from the ones chosen so far, which
         // is the outward table. So selection hands its searches back rather than
         // throwing them away for `build` to repeat.
-        let (nodes, outward) = choose(graph, count, selection, seed);
+        progress.expect("measuring", 2 * count as u64);
+        let (nodes, outward) = choose(graph, count, selection, seed, progress);
 
         let landmarks = nodes.len();
         let reversed = graph.reversed();
@@ -83,6 +101,7 @@ impl Landmarks {
         let mut to = vec![UNREACHABLE; landmarks * num_nodes];
         for (index, &landmark) in nodes.iter().enumerate() {
             let inward = distances_from(&reversed, landmark);
+            progress.step();
             for node in 0..num_nodes {
                 from[node * landmarks + index] = outward[index][node];
                 to[node * landmarks + index] = inward[node];
@@ -160,18 +179,23 @@ fn choose(
     count: usize,
     selection: Selection,
     seed: u64,
+    progress: &Progress,
 ) -> (Vec<NodeId>, Vec<Vec<Weight>>) {
     let num_nodes = graph.num_nodes();
     if count == 0 || num_nodes == 0 {
         return (Vec::new(), Vec::new());
     }
     match selection {
-        Selection::Farthest => farthest_nodes(graph, count, seed),
+        Selection::Farthest => farthest_nodes(graph, count, seed, progress),
         Selection::Random => {
             let nodes = random_nodes(count, num_nodes, seed);
             let outward = nodes
                 .iter()
-                .map(|&node| distances_from(graph, node))
+                .map(|&node| {
+                    let distances = distances_from(graph, node);
+                    progress.step();
+                    distances
+                })
                 .collect();
             (nodes, outward)
         }
@@ -183,7 +207,12 @@ fn choose(
 /// Start somewhere, walk to the farthest node from it, and make that the first
 /// landmark; from then on each new landmark is whichever node is farthest from
 /// all the ones already chosen.
-fn farthest_nodes(graph: &Graph, count: usize, seed: u64) -> (Vec<NodeId>, Vec<Vec<Weight>>) {
+fn farthest_nodes(
+    graph: &Graph,
+    count: usize,
+    seed: u64,
+    progress: &Progress,
+) -> (Vec<NodeId>, Vec<Vec<Weight>>) {
     let mut rng = Rng::new(seed);
     let start = rng.below(graph.num_nodes() as u64) as NodeId;
     let mut nearest = distances_from(graph, start);
@@ -206,6 +235,7 @@ fn farthest_nodes(graph: &Graph, count: usize, seed: u64) -> (Vec<NodeId>, Vec<V
             nearest[node] = nearest[node].min(*distance);
         }
         measured.push(distances);
+        progress.step();
     }
     (chosen, measured)
 }

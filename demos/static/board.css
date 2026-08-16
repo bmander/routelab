@@ -76,10 +76,11 @@ body { display: flex; flex-direction: column; }
    stays opaque — fading the whole node lets the wires behind it show through,
    and a wire running through a node reads as a wire attached to it. */
 .node.busy .body { opacity: .4; }
+.node.busy .progress { opacity: 1; }
 .node.busy header { opacity: .75; }
 .node.busy .field { pointer-events: none; }
 .node.busy header::after {
-  content: ''; margin-left: auto; flex: 0 0 auto;
+  content: ''; margin-left: 6px; flex: 0 0 auto;
   width: 11px; height: 11px; border-radius: 50%;
   border: 2px solid rgba(255,255,255,.3); border-top-color: #fff;
   animation: spin .7s linear infinite;
@@ -92,6 +93,21 @@ body { display: flex; flex-direction: column; }
   display: flex; align-items: baseline; gap: 6px;
 }
 .node header .sub { font-weight: 400; opacity: .75; font-size: 11px; }
+.node header .tick {
+  margin-left: auto; font-weight: 400; font-size: 11px;
+  font-variant-numeric: tabular-nums; opacity: .85;
+}
+
+/* How far along, when the work can say. Hidden otherwise rather than filled
+   with a guess. */
+.node .progress { display: none; padding: 4px 9px 0; }
+.node.busy.measured .progress { display: block; }
+.node .progress .bar { height: 3px; background: #1b1e22; border-radius: 2px; }
+.node .progress .bar i { display: block; height: 100%; width: 0;
+                         background: #7fb2e5; border-radius: 2px;
+                         transition: width .25s linear; }
+.node .progress .phase { display: block; margin-top: 3px; font-size: 10px;
+                         color: #8b929c; font-variant-numeric: tabular-nums; }
 .node.dragging header { cursor: grabbing; }
 
 /* Colour by what a node produces, the way a shader editor colours by socket

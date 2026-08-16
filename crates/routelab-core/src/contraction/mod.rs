@@ -30,6 +30,7 @@ mod query;
 mod tests;
 
 use crate::graph::{EdgeId, Graph, GraphError, NodeId, Weight};
+use crate::progress::Progress;
 use crate::search::SearchError;
 use build::Builder;
 
@@ -107,10 +108,27 @@ pub struct ContractionHierarchy {
 impl ContractionHierarchy {
     /// Contract a graph. This is the expensive step, paid once.
     pub fn build(graph: &Graph, ordering: Ordering) -> Result<Self, GraphError> {
+        ContractionHierarchy::build_reporting(graph, ordering, &Progress::new())
+    }
+
+    /// Contract a graph, counting nodes retired into `progress`.
+    ///
+    /// Six seconds on a city, which is long enough that something watching
+    /// wants to tell working from hung. See [`crate::progress`] for why this is
+    /// a second entry point rather than a parameter on the first.
+    pub fn build_reporting(
+        graph: &Graph,
+        ordering: Ordering,
+        progress: &Progress,
+    ) -> Result<Self, GraphError> {
         let mut builder = Builder::new(graph, ordering);
-        let ranks = builder.contract_all();
+        let ranks = builder.contract_all(progress);
         let edges = builder.edges;
 
+        // The second half, and not a small one: on a walking network this is a
+        // third of the wall clock. Counted separately, because a fraction that
+        // ignored it sat at 100% while it ran.
+        progress.expect("assembling", edges.len() as u64);
         let mut upward = Vec::new();
         let mut downward = Vec::new();
         let mut up_augmented = Vec::new();
@@ -125,6 +143,7 @@ impl ContractionHierarchy {
                 down_augmented.push(index as u32);
                 downward.push((edge.head, edge.tail, edge.weight));
             }
+            progress.step();
         }
 
         Ok(ContractionHierarchy {

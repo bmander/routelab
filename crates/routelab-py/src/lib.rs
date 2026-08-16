@@ -12,6 +12,7 @@ use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
+use routelab_core::progress::Progress as CoreProgress;
 use routelab_gtfs::{load as gtfs_load, Feed, Pairs};
 use routelab_osm::{load as osm_load, OsmNetwork, Profile as OsmProfile};
 
@@ -325,13 +326,14 @@ impl PyContractionHierarchy {
     ///
     /// Seconds to minutes on a city, paid once.
     #[staticmethod]
-    #[pyo3(signature = (graph, deleted_neighbours=true, max_settled=500, max_hops=5))]
+    #[pyo3(signature = (graph, deleted_neighbours=true, max_settled=500, max_hops=5, progress=None))]
     fn edge_difference(
         py: Python<'_>,
         graph: &PyGraph,
         deleted_neighbours: bool,
         max_settled: usize,
         max_hops: usize,
+        progress: Option<&PyProgress>,
     ) -> PyResult<Self> {
         Self::build(
             py,
@@ -339,20 +341,29 @@ impl PyContractionHierarchy {
             Policy::EdgeDifference { deleted_neighbours },
             max_settled,
             max_hops,
+            progress,
         )
     }
 
     /// Contract in a fixed arbitrary order — the control.
     #[staticmethod]
-    #[pyo3(signature = (graph, seed=0, max_settled=500, max_hops=5))]
+    #[pyo3(signature = (graph, seed=0, max_settled=500, max_hops=5, progress=None))]
     fn random(
         py: Python<'_>,
         graph: &PyGraph,
         seed: u64,
         max_settled: usize,
         max_hops: usize,
+        progress: Option<&PyProgress>,
     ) -> PyResult<Self> {
-        Self::build(py, graph, Policy::Random { seed }, max_settled, max_hops)
+        Self::build(
+            py,
+            graph,
+            Policy::Random { seed },
+            max_settled,
+            max_hops,
+            progress,
+        )
     }
 
     /// Search from `sources` to `target`, upward from both ends.
@@ -526,6 +537,7 @@ impl PyContractionHierarchy {
         policy: Policy,
         max_settled: usize,
         max_hops: usize,
+        progress: Option<&PyProgress>,
     ) -> PyResult<Self> {
         let ordering = CoreOrdering {
             policy,
@@ -533,7 +545,8 @@ impl PyContractionHierarchy {
             max_hops,
         };
         let graph = Arc::clone(&graph.inner);
-        let built = py.detach(|| CoreHierarchy::build(&graph, ordering));
+        let counter = progress.map_or_else(CoreProgress::new, |p| p.inner.clone());
+        let built = py.detach(|| CoreHierarchy::build_reporting(&graph, ordering, &counter));
         Ok(PyContractionHierarchy {
             inner: Arc::new(built.map_err(value_err)?),
             graph,
@@ -989,6 +1002,59 @@ impl PyItinerary {
     }
 }
 
+/// How far along a piece of preprocessing is.
+///
+/// Hand one to a preprocessing call and read it from another thread while that
+/// call runs. Reading takes no lock and does not need the GIL back, which is
+/// the point: preprocessing releases the GIL precisely so that something else
+/// can be doing something, and a progress report that took it back would be
+/// asking the work to stop in order to say it had not.
+#[pyclass(name = "Progress", module = "routelab._routelab", frozen)]
+#[derive(Default)]
+pub struct PyProgress {
+    inner: CoreProgress,
+}
+
+#[pymethods]
+impl PyProgress {
+    #[new]
+    fn new() -> Self {
+        PyProgress::default()
+    }
+
+    /// `(phase, done, total)`. `total` is 0 when the work cannot say — which is
+    /// different from not having started, and worth being able to tell apart.
+    fn read(&self) -> (&'static str, u64, u64) {
+        let (done, total) = self.inner.read();
+        (self.inner.phase(), done, total)
+    }
+
+    /// What is happening now — `"contracting"`, `"assembling"`, `"measuring"`.
+    ///
+    /// A fraction is always within a phase, so this is half the answer: a build
+    /// with two unequal halves reports the second from zero rather than letting
+    /// the first sit at 100% while it runs.
+    #[getter]
+    fn phase(&self) -> &'static str {
+        self.inner.phase()
+    }
+
+    /// How far along, 0 to 1, or `None` from work with no honest measure.
+    #[getter]
+    fn fraction(&self) -> Option<f64> {
+        self.inner.fraction()
+    }
+
+    fn __repr__(&self) -> String {
+        match self.inner.fraction() {
+            Some(fraction) => {
+                format!("Progress({} {:.0}%)", self.inner.phase(), fraction * 100.0)
+            }
+            None => "Progress(unknown)".to_string(),
+        }
+    }
+}
+
 /// An estimate of the cost remaining to a target, for goal-directed search.
 ///
 /// Built from data the environment gathered — never a Python callable: a callback
@@ -1026,13 +1092,14 @@ impl PyHeuristic {
     ///
     /// `selection` is `"farthest"` or `"random"`.
     #[staticmethod]
-    #[pyo3(signature = (graph, count, selection="farthest", seed=0))]
+    #[pyo3(signature = (graph, count, selection="farthest", seed=0, progress=None))]
     fn landmarks(
         py: Python<'_>,
         graph: &PyGraph,
         count: usize,
         selection: &str,
         seed: u64,
+        progress: Option<&PyProgress>,
     ) -> PyResult<Self> {
         let selection = match selection {
             "farthest" => Selection::Farthest,
@@ -1046,7 +1113,9 @@ impl PyHeuristic {
         let graph = Arc::clone(&graph.inner);
         // Two full searches per landmark: seconds on a city, and the reason
         // this is preprocessing rather than something a query can afford.
-        let landmarks = py.detach(|| CoreLandmarks::build(&graph, count, selection, seed));
+        let counter = progress.map_or_else(CoreProgress::new, |p| p.inner.clone());
+        let landmarks =
+            py.detach(|| CoreLandmarks::build_reporting(&graph, count, selection, seed, &counter));
         Ok(PyHeuristic {
             inner: Arc::new(StandardHeuristic::Landmarks(landmarks)),
         })
@@ -1212,6 +1281,7 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHeuristic>()?;
     m.add_class::<PyMeetingSearch>()?;
     m.add_class::<PyOsmNetwork>()?;
+    m.add_class::<PyProgress>()?;
     m.add_class::<PySearchResult>()?;
     m.add_class::<PyItinerary>()?;
     m.add_class::<PySearchTree>()?;

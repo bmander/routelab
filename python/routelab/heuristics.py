@@ -49,7 +49,9 @@ class Heuristic:
         """
         return cls.requires - compiled.provides
 
-    def bind(self, compiled: CompiledEnvironment) -> "_routelab.Heuristic":
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "_routelab.Heuristic":
         """Build the kernel heuristic for ``compiled``, or explain what is missing.
 
         Raises:
@@ -71,7 +73,9 @@ class Zero(Heuristic):
     against: same answers, and the node count A* has to beat.
     """
 
-    def bind(self, compiled: CompiledEnvironment) -> "_routelab.Heuristic":
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "_routelab.Heuristic":
         return _routelab.Heuristic.zero()
 
 
@@ -99,7 +103,9 @@ class Euclidean(Heuristic):
     def __init__(self, cost_per_distance: Optional[float] = None):
         self.cost_per_distance = cost_per_distance
 
-    def bind(self, compiled: CompiledEnvironment) -> "_routelab.Heuristic":
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "_routelab.Heuristic":
         rate = self.cost_per_distance
         if rate is None:
             rate = compiled.cost_per_distance
@@ -184,11 +190,13 @@ class Landmarks(Heuristic):
         self.selection = selection
         self.seed = seed
 
-    def bind(self, compiled: CompiledEnvironment) -> "_routelab.Heuristic":
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "_routelab.Heuristic":
         if self.count < 1:
             raise ValueError(f"a landmark heuristic needs at least one landmark, got {self.count}")
         return _routelab.Heuristic.landmarks(
-            compiled.graph, self.count, self.selection, self.seed
+            compiled.graph, self.count, self.selection, self.seed, progress=progress
         )
 
     def __repr__(self) -> str:

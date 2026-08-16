@@ -67,6 +67,7 @@ from typing import NamedTuple
 from urllib.parse import parse_qs, urlparse
 
 import routelab as rl
+from routelab import _routelab
 
 PROFILES = {"walking": rl.Walking, "cycling": rl.Cycling, "driving": rl.Driving}
 
@@ -243,6 +244,48 @@ class Router:
         self.date = date
         self._built: "dict[str, object]" = {}
         self._reachable: "dict[tuple[str, object], tuple]" = {}
+        #: What is being built right now, by node id. Read by `/progress` from
+        #: another request entirely, which is the whole reason the counter
+        #: inside is an atomic rather than a callback.
+        self._working: "dict[str, dict]" = {}
+        #: Bumped for each build started, so a watcher can tell which of several
+        #: nested builds is the innermost. Elapsed cannot: an `AStar`, the
+        #: `Environment` it waits on and the `OSM` under that all start in the
+        #: same instant.
+        self._sequence = 0
+
+    def working(self) -> dict:
+        """What is under construction, and how far along.
+
+        `fraction` is `None` for work with no honest measure of its own — a
+        parser that yields no counts, a graph being compiled — and those report
+        elapsed seconds alone. Better than a bar that guesses: a progress bar
+        which lies once is a progress bar nobody reads again.
+
+        `done` and `total` come too, and they are not redundant. Contraction is
+        wildly non-linear in time: the last half-percent of a walking network's
+        nodes are its most connected, and contracting them takes a third of the
+        wall clock with the percentage pinned at 100. A count that keeps
+        climbing is what actually answers "is this hung", which is the question
+        any of this was added for.
+        """
+        now = time.perf_counter()
+        report = {}
+        for node_id, job in list(self._working.items()):
+            progress = job["progress"]
+            done, total = (0, 0)
+            if progress is not None:
+                _, done, total = progress.read()
+            report[node_id] = {
+                "what": job["what"],
+                "seq": job["seq"],
+                "elapsed": round(now - job["since"], 1),
+                "phase": progress.phase if progress else "",
+                "fraction": progress.fraction if progress else None,
+                "done": done,
+                "total": total,
+            }
+        return report
 
     @property
     def catalogue(self) -> dict:
@@ -319,9 +362,43 @@ class Router:
                 )
             return values[0]
 
+        # A counter for whoever asked, whether or not this kind of work has
+        # anything to write into it. Handing one to everything and letting
+        # `fraction` come back `None` beats keeping a list here of which
+        # techniques report — the list would be one release out of date.
+        progress = _routelab.Progress()
+        self._sequence += 1
+        self._working[node_id] = {
+            "since": time.perf_counter(),
+            "progress": progress,
+            "what": kind,
+            "seq": self._sequence,
+        }
         started = time.perf_counter()
+        try:
+            value = self._make(board, node_id, kind, params, one, wired, progress)
+        finally:
+            self._working.pop(node_id, None)
+
+        elapsed = time.perf_counter() - started
+        if elapsed > 0.1:
+            print(f"  {signature}: ready in {elapsed:.1f}s", flush=True)
+        self._built[signature] = value
+        if built is not None:
+            built.append(node_id)
+        return value
+
+    def _make(self, board, node_id, kind, params, one, wired, progress) -> object:
+        """Build one node, having established what it depends on."""
         if kind == "OSM":
-            value: object = rl.OSM(self.path, PROFILES[params.get("profile", "driving")]())
+            layer = rl.OSM(self.path, PROFILES[params.get("profile", "driving")]())
+            # Forced here rather than left to whoever first asks. Both layers
+            # read lazily, which is right for a library and wrong for a board:
+            # the six seconds would be charged to the `Environment` that
+            # happened to touch it first, and the node naming the file would
+            # never so much as blink.
+            layer.network
+            value: object = layer
         elif kind == "GTFS":
             if self.feed is None:
                 raise Unwired(
@@ -329,7 +406,9 @@ class Router:
                     "this demo was started without a feed — pass --gtfs FEED "
                     "--date YYYY-MM-DD to route a timetable",
                 )
-            value = rl.GTFS(self.feed, self.date)
+            feed = rl.GTFS(self.feed, self.date)
+            feed.feed
+            value = feed
         elif kind == "Environment":
             layers = wired("layers")
             if not layers:
@@ -352,14 +431,7 @@ class Router:
             # two calls the library makes, and the signature says so.
             technique = self._technique(kind, params, one)
             environment = one("environment")
-            value = technique.bind(environment)
-
-        elapsed = time.perf_counter() - started
-        if elapsed > 0.1:
-            print(f"  {signature}: ready in {elapsed:.1f}s", flush=True)
-        self._built[signature] = value
-        if built is not None:
-            built.append(node_id)
+            value = technique.bind(environment, progress=progress)
         return value
 
     @staticmethod
@@ -620,6 +692,16 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(200, "text/html; charset=utf-8", self.page().encode("utf-8"))
         elif url.path == "/route":
             self.respond(200, "application/json", self.route(parse_qs(url.query)))
+        elif url.path == "/progress":
+            # Answered while another request is mid-build, which is the only
+            # reason it can say anything. `ThreadingHTTPServer`, an atomic
+            # counter, and no lock between them.
+            self.respond(
+                200,
+                "application/json",
+                json.dumps(self.router.working(), separators=(",", ":")).encode("utf-8"),
+                cache=False,
+            )
         elif url.path.startswith("/static/"):
             self.static(url.path[len("/static/") :])
         else:

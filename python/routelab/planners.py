@@ -71,12 +71,26 @@ class Planner:
     environment: Optional[Environment] = None
     compiled: Optional[CompiledEnvironment] = None
 
-    def bind(self, environment: Environment) -> "Planner":
+    #: A counter this planner's preprocessing writes into, if it was given one
+    #: and has anything honest to count. Set by :meth:`bind`.
+    progress: "Optional[_routelab.Progress]" = None
+
+    def bind(
+        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "Planner":
         """Attach this technique to an environment and do its preprocessing.
 
         Returns a *new* planner and leaves this one as it was, so a technique can
         be bound to several environments — which is the whole point of writing
         one down: the same configuration, measured across datasets.
+
+        Args:
+            progress: A counter to write into while preprocessing runs, for
+                anything watching from another thread. Six seconds of
+                contraction is long enough that "still working" and "hung" want
+                telling apart. Techniques with no honest measure of their own
+                progress leave it alone — see :mod:`routelab._routelab` and
+                `Progress.fraction` returning ``None``.
         """
         unsupported = environment.cost_models - self.accepts
         if unsupported:
@@ -88,6 +102,7 @@ class Planner:
         bound = copy.copy(self)
         bound.environment = environment
         bound.compiled = environment.compile()
+        bound.progress = progress
         bound.preprocess()
         return bound
 
@@ -321,7 +336,7 @@ class AStar(Planner):
     def preprocess(self) -> None:
         """Bind the heuristic to this environment — where a landmark table,
         and any preprocessing after it, gets built."""
-        self.heuristic = self.heuristic_spec.bind(self._bound())
+        self.heuristic = self.heuristic_spec.bind(self._bound(), self.progress)
 
     def _footprint(self) -> int:
         return self.heuristic.footprint
@@ -380,7 +395,7 @@ class ContractionHierarchy(Planner):
 
     def preprocess(self) -> None:
         """Contract the graph. The expensive step, and the whole technique."""
-        self.hierarchy = self.ordering.bind(self._bound())
+        self.hierarchy = self.ordering.bind(self._bound(), self.progress)
 
     def _footprint(self) -> int:
         return self.hierarchy.footprint

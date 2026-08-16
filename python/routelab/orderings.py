@@ -56,7 +56,9 @@ class Ordering:
         """What this ordering needs that ``compiled`` does not provide."""
         return cls.requires - compiled.provides
 
-    def bind(self, compiled: CompiledEnvironment) -> "_routelab.ContractionHierarchy":
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "_routelab.ContractionHierarchy":
         """Contract ``compiled``'s graph in this order, and return the result."""
         raise NotImplementedError
 
@@ -91,12 +93,15 @@ class EdgeDifference(Ordering):
         super().__init__(max_settled, max_hops)
         self.deleted_neighbours = deleted_neighbours
 
-    def bind(self, compiled: CompiledEnvironment) -> "_routelab.ContractionHierarchy":
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "_routelab.ContractionHierarchy":
         return _routelab.ContractionHierarchy.edge_difference(
             compiled.graph,
             deleted_neighbours=self.deleted_neighbours,
             max_settled=self.max_settled,
             max_hops=self.max_hops,
+            progress=progress,
         )
 
     def __repr__(self) -> str:
@@ -119,12 +124,15 @@ class RandomOrder(Ordering):
         super().__init__(max_settled, max_hops)
         self.seed = seed
 
-    def bind(self, compiled: CompiledEnvironment) -> "_routelab.ContractionHierarchy":
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "_routelab.ContractionHierarchy":
         return _routelab.ContractionHierarchy.random(
             compiled.graph,
             seed=self.seed,
             max_settled=self.max_settled,
             max_hops=self.max_hops,
+            progress=progress,
         )
 
     def __repr__(self) -> str:

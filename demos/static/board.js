@@ -300,10 +300,43 @@ class Board {
     element.querySelectorAll('select, input').forEach(field => {
       field.disabled = working;
     });
+    if (!working) { this.report(id, null); }
   }
 
+  /** Say how a working node is getting on, or clear it.
+   *
+   * The seconds tick whether or not there is a fraction, and they are the part
+   * that actually answers "is this hung" — contraction's percentage can sit at
+   * 99.9% for a minute while the count behind it climbs, because the last
+   * nodes it contracts are its most connected.
+   */
+  report(id, job) {
+    const element = this.layer.querySelector(`[data-id="${id}"]`);
+    if (!element) { return; }
+    const tick = element.querySelector('.tick');
+    const strip = element.querySelector('.progress');
+    if (!job) {
+      tick.textContent = '';
+      element.classList.remove('measured');
+      return;
+    }
+    tick.textContent = `${job.elapsed.toFixed(0)}s`;
+    if (job.fraction === null || job.fraction === undefined) {
+      element.classList.remove('measured');
+      return;
+    }
+    element.classList.add('measured');
+    strip.querySelector('i').style.width = `${(job.fraction * 100).toFixed(2)}%`;
+    // Two decimals near the end, because one would read as a stuck 100%.
+    const percent = job.fraction > 0.99
+      ? (job.fraction * 100).toFixed(2) : (job.fraction * 100).toFixed(0);
+    strip.querySelector('.phase').textContent = `${job.phase} ${percent}%`;
+  }
+
+  /** Nothing is working any more. */
   idle() {
-    this.layer.querySelectorAll('.busy').forEach(node => this.busy(node.dataset.id, false));
+    this.layer.querySelectorAll('.busy')
+      .forEach(node => this.busy(node.dataset.id, false));
   }
 
   // --- geometry -------------------------------------------------------
@@ -361,8 +394,17 @@ class Board {
 
     const header = document.createElement('header');
     header.innerHTML = `<span>${spec.title}</span>` +
-      (spec.sub ? `<span class="sub">${spec.sub()}</span>` : '');
+      (spec.sub ? `<span class="sub">${spec.sub()}</span>` : '') +
+      `<span class="tick"></span>`;
     element.append(header);
+
+    // Shown only while this node is working and only when the work can say how
+    // far it has got. A bar that appears for everything would have to invent a
+    // number for the things that cannot count themselves.
+    const strip = document.createElement('div');
+    strip.className = 'progress';
+    strip.innerHTML = `<div class="bar"><i></i></div><span class="phase"></span>`;
+    element.append(strip);
 
     const body = document.createElement('div');
     body.className = 'body';

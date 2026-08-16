@@ -232,6 +232,20 @@ and no search space gets built — ten megabytes of GeoJSON that nothing was
 listening for. Unplug `route` and the query still runs and still reports what it
 cost, with nothing drawing it.
 
+A node whose configuration the board has never had an answer for greys out and
+spins until it does, and because a node's identity includes everything upstream
+of it, the spinners spread exactly as far as the rebuild does and no further. A
+change that costs nothing shows nothing. Where the work can count itself the
+node shows how far along: contraction reports nodes retired, then arcs
+assembled; a landmark table reports searches run. Where it cannot — a file
+parser that yields no counts — it says so rather than inventing a bar.
+
+Watch that bar on a big network and it will teach you something the timings
+table hides. Contracting Seattle's walking graph settles 99.5% of its 554,393
+nodes in the first minute and spends two more on the rest: the last nodes left
+are the most connected, and they are where the shortcut search does its real
+work.
+
 Which is what makes the refusals worth causing on purpose. Wire a GTFS layer
 into `Dijkstra` and the node turns red with the library's own sentence:
 
