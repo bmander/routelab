@@ -20,14 +20,17 @@ use routelab_core::kernels::contraction::{
     ContractionHierarchy as CoreHierarchy, MeetingSearch as CoreMeetingSearch,
     Ordering as CoreOrdering, Policy,
 };
+use routelab_core::kernels::raptor::{Raptor as CoreRaptor, RaptorSearch as CoreRaptorSearch};
 use routelab_core::kernels::timedep::{
     time_dependent_dijkstra as core_timedep, Calendar as CoreCalendar, Departure as CoreDeparture,
     Waiting as CoreWaiting, Window as CoreWindow,
 };
 use routelab_core::kernels::timetable::{
-    earliest_arrival as core_earliest_arrival, Footpaths as CoreFootpaths,
-    Itinerary as CoreItinerary, Leg, Raptor as CoreRaptor, RaptorSearch as CoreRaptorSearch,
-    TimeExpanded as CoreTimeExpanded, Timetable as CoreTimetable, Transfer,
+    earliest_arrival as core_earliest_arrival, TimeExpanded as CoreTimeExpanded,
+};
+use routelab_core::model::timetable::{
+    Footpaths as CoreFootpaths, Itinerary as CoreItinerary, Leg, Timetable as CoreTimetable,
+    Transfer,
 };
 use routelab_core::{
     astar as core_astar, bfs as core_bfs, dijkstra as core_dijkstra, EdgeId, Graph as CoreGraph,

@@ -2,8 +2,12 @@
 //! question, so that is what is tested: the models against each other, and both
 //! against an oracle that enumerates itineraries the obvious way.
 
-use super::*;
-use crate::model::graph::UNREACHABLE;
+use super::{earliest_arrival, TimeExpanded};
+use crate::kernels::raptor::Raptor;
+use crate::model::graph::{NodeId, UNREACHABLE};
+use crate::model::timetable::{
+    Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk,
+};
 use crate::util::rng::Rng;
 
 /// Stops 0 -> 1 -> 2, with a fast trip and a slow one.

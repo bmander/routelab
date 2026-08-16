@@ -29,15 +29,16 @@ pub use kernels::contraction::{
 };
 pub use kernels::dijkstra::dijkstra;
 pub use kernels::landmark::{Landmarks, Selection};
+pub use kernels::raptor::{Raptor, RaptorSearch};
 pub use kernels::timedep::{
     time_dependent_dijkstra, Calendar, Clock, Departure, Waiting, Window, WEEK,
 };
-pub use kernels::timetable::{
-    Connection, Footpaths, Itinerary, Leg, Raptor, RaptorSearch, Ride, TimeExpanded, Timetable,
-    Transfer, Walk,
-};
+pub use kernels::timetable::TimeExpanded;
 pub use model::graph::{EdgeId, Graph, GraphError, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
 pub use model::heuristic::{Heuristic, HeuristicError, StandardHeuristic};
 pub use model::search::{SearchError, SearchOptions, SearchResult};
+pub use model::timetable::{
+    Connection, Footpaths, Itinerary, Leg, Ride, Timetable, Transfer, Walk,
+};
 pub use model::tree::{Magnitude, SearchTree};
 pub use util::progress::Progress;

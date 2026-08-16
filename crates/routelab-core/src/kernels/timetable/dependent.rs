@@ -39,7 +39,7 @@ use std::collections::BinaryHeap;
 
 use crate::model::graph::{NodeId, UNREACHABLE};
 
-use super::{Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk};
+use crate::model::timetable::{Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk};
 
 /// Earliest arrival at `to` from `sources` — each a stop and the time you are
 /// standing there — riding `timetable` and walking `footpaths`.

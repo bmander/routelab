@@ -89,7 +89,7 @@ pub enum StandardHeuristic {
     },
     /// Distances measured from a handful of fixed nodes, combined by the
     /// triangle inequality. Needs no geometry — only the graph and the time to
-    /// walk it. See [`crate::landmark`].
+    /// walk it. See [`crate::kernels::landmark`].
     Landmarks(crate::kernels::landmark::Landmarks),
 }
 

@@ -114,7 +114,7 @@ impl ContractionHierarchy {
     /// Contract a graph, counting nodes retired into `progress`.
     ///
     /// Six seconds on a city, which is long enough that something watching
-    /// wants to tell working from hung. See [`crate::progress`] for why this is
+    /// wants to tell working from hung. See [`crate::util::progress`] for why this is
     /// a second entry point rather than a parameter on the first.
     pub fn build_reporting(
         graph: &Graph,

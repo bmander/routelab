@@ -10,5 +10,6 @@ pub mod bfs;
 pub mod contraction;
 pub mod dijkstra;
 pub mod landmark;
+pub mod raptor;
 pub mod timedep;
 pub mod timetable;

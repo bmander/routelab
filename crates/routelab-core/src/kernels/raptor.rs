@@ -42,7 +42,9 @@
 
 use crate::model::graph::{NodeId, UNREACHABLE};
 
-use super::{Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk};
+use crate::model::timetable::{
+    Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk,
+};
 
 /// When a trip reaches a stop and when it leaves it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,7 +57,7 @@ struct StopTime {
 /// departure order, and a time per (trip, position).
 ///
 /// Built once from a [`Timetable`] and a [`Footpaths`], the way
-/// [`super::TimeExpanded`] is, and reused for every query.
+/// [`crate::kernels::timetable::TimeExpanded`] is, and reused for every query.
 #[derive(Debug)]
 pub struct Raptor {
     stops: usize,

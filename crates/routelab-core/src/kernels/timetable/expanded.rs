@@ -50,7 +50,7 @@ use crate::kernels::dijkstra::dijkstra;
 use crate::model::graph::{Graph, NodeId, Weight};
 use crate::model::search::{SearchOptions, SearchResult};
 
-use super::{Footpaths, Itinerary, Leg, Ride, Time, Timetable, Transfer, Walk};
+use crate::model::timetable::{Footpaths, Itinerary, Leg, Ride, Time, Timetable, Transfer, Walk};
 
 /// What an event node stands for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
