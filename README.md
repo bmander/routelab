@@ -38,10 +38,21 @@ each one buys and what it costs.
 | Geisberger, Sanders, Schultes & Delling, *Contraction hierarchies: faster and simpler hierarchical routing in road networks* (2008) | `ContractionHierarchy(EdgeDifference())`, `ContractionHierarchy(RandomOrder())` | [Not searching the city at all](#not-searching-the-city-at-all) |
 | Dreyfus, *An appraisal of some shortest-path algorithms* (1969) — time-dependent Dijkstra | `TimeDependentDijkstra()` | [When the network is not always open](#when-the-network-is-not-always-open) |
 | Pyrga, Schulz, Wagner & Zaroliagis, *Efficient models for timetable information in public transportation systems* (2007) — time-expanded and time-dependent models, with foot-edges | `TimeExpanded()`, `TimeDependent()`, `Footpaths(feed, within=)` | [Timetables](#timetables-two-models-of-the-same-departures) |
+| Delling, Pajor & Wagner, *Engineering time-expanded graphs for faster timetable information* (2009) | *not yet implemented* | |
+| Geisberger, *Contraction of timetable networks with realistic transfers* (2010) | *not yet implemented* | |
+| Bast, Carlsson, Eigenwillig, Geisberger, Harrelson, Raychev & Viger, *Fast routing in very large public transportation networks using transfer patterns* (2010) | *not yet implemented* | |
+| Delling, Pajor & Werneck, *Round-based public transit routing* (2012) — RAPTOR | *not yet implemented* | |
+| Dibbelt, Pajor, Strasser & Wagner, *Intriguingly simple and fast transit routing* (2013) — CSA | *not yet implemented* | |
+| Witt, *Trip-based public transit routing* (2015) | *not yet implemented* | |
+| Delling, Dibbelt, Pajor & Werneck, *Public transit labeling* (2015) | *not yet implemented* | |
+| Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for multi-modal route planning: an efficient solution* (2019) — ULTRA | *not yet implemented* | |
 
-Every kernel is checked against something that cannot be wrong in the same
-direction — a pure-Python reference, a brute-force oracle, or the paper's own
-second model — see [The contract](#the-contract).
+The rows marked *not yet implemented* are the shelf's gaps, in the order the
+literature filled them: after Pyrga et al. the timetable graphs were engineered
+harder, then RAPTOR and CSA stopped building a graph at all, and the rest are
+what came after. Every kernel that is here is checked against something that
+cannot be wrong in the same direction — a pure-Python reference, a brute-force
+oracle, or the paper's own second model — see [The contract](#the-contract).
 
 ## Install
 
