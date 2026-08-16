@@ -711,18 +711,43 @@ that rather than trusting the search's own bookkeeping.
 
 ## Layout
 
+The same three words divide both halves. **Kernels** are the papers, one entry
+each. **Model** is the vocabulary they all speak — a type earns a place there
+when more than one technique reads it, which is the whole test. **Util** is
+plumbing with no routing content.
+
 ```
-crates/routelab-core/   Rust: CSR graph, searches, heuristics, contraction, timetables. No Python.
-crates/routelab-osm/    Reading OpenStreetMap extracts. Kernel-free; wraps `osmpbf`.
-crates/routelab-gtfs/   Reading GTFS feeds. Kernel-free; wraps `gtfs-structures`.
-crates/routelab-py/     PyO3 bindings. Conversion and GIL release, nothing else.
-python/routelab/        The veneer: constructors, argument sugar, reference implementations.
-tests/                  Behaviour tests and differential tests against the reference.
+crates/routelab-core/     Rust. No Python.
+  kernels/                Dijkstra, BFS, A*, ALT landmarks, contraction,
+                          time-dependent, Pyrga's two timetable models, RAPTOR.
+  model/                  CSR graph, search options and results, search trees,
+                          the heuristic trait, the timetable structures.
+  util/                   Progress counters, seeded RNG.
+crates/routelab-osm/      Reading OpenStreetMap extracts. Kernel-free; wraps `osmpbf`.
+crates/routelab-gtfs/     Reading GTFS feeds. Kernel-free; wraps `gtfs-structures`.
+crates/routelab-py/       PyO3 bindings, one module per wrapped subsystem.
+                          Conversion and GIL release, nothing else.
+python/routelab/          The veneer: constructors, argument sugar, docstrings.
+  kernels/                One module per paper, holding both roads to it and the
+                          spec only it reads — an ordering, a calendar, a heuristic.
+  model/                  Graph, Environment, Journey, results, search spaces.
+  data/                   The OSM, GTFS and footpath layers.
+  util/                   Clocks and argument coercion.
+  reference.py            Pure-Python twins of the static kernels — the oracle.
+tests/                    Mirrors the veneer. The differential suite sits at the
+                          top, because it belongs to no single technique.
+demos/                    Runnable examples, and the node board behind `serve.py`.
+benchmarks/               What each technique costs, on a real city.
 ```
 
 Kernel work goes in `routelab-core`, where it is usable from Rust and testable
 without Python. The bindings layer stays thin on purpose: sugar is easier to read,
 change, and document in Python.
+
+A new technique is a new file in both `kernels/` directories and nothing else
+moved: it reuses the model, declares the query options it takes, brings its own
+derivation of whatever it needs beyond the graph, and is checked against
+something that cannot be wrong in the same direction.
 
 ## Design notes
 
