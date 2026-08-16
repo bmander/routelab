@@ -23,6 +23,26 @@ Pyrga et al.'s timetable models over GTFS. The path from here runs on through
 schedule-based search — RAPTOR, CSA — and then the multimodal and multicriteria
 layers above them.
 
+## What is implemented
+
+Each technique is a published algorithm, implemented as its paper states it,
+and named after it in the API. This is the shelf; the sections below say what
+each one buys and what it costs.
+
+| Paper | Technique | Section |
+|---|---|---|
+| Dijkstra, *A note on two problems in connexion with graphs* (1959) | `Dijkstra()` | [Use](#use) |
+| Moore, *The shortest path through a maze* (1959) — breadth-first search | `BFS()` | [Use](#use) |
+| Hart, Nilsson & Raphael, *A formal basis for the heuristic determination of minimum cost paths* (1968) — A* | `AStar(Euclidean())`, `AStar(Zero())` | [Guided search](#guided-search) |
+| Goldberg & Harrelson, *Computing the shortest path: A\* search meets graph theory* (2005) — ALT landmarks | `AStar(Landmarks(16))` | [Measuring instead of assuming](#measuring-instead-of-assuming) |
+| Geisberger, Sanders, Schultes & Delling, *Contraction hierarchies: faster and simpler hierarchical routing in road networks* (2008) | `ContractionHierarchy(EdgeDifference())`, `ContractionHierarchy(RandomOrder())` | [Not searching the city at all](#not-searching-the-city-at-all) |
+| Dreyfus, *An appraisal of some shortest-path algorithms* (1969) — time-dependent Dijkstra | `TimeDependentDijkstra()` | [When the network is not always open](#when-the-network-is-not-always-open) |
+| Pyrga, Schulz, Wagner & Zaroliagis, *Efficient models for timetable information in public transportation systems* (2007) — time-expanded and time-dependent models, with foot-edges | `TimeExpanded()`, `TimeDependent()`, `Footpaths(feed, within=)` | [Timetables](#timetables-two-models-of-the-same-departures) |
+
+Every kernel is checked against something that cannot be wrong in the same
+direction — a pure-Python reference, a brute-force oracle, or the paper's own
+second model — see [The contract](#the-contract).
+
 ## Install
 
 Requires Python 3.9+ and a [Rust toolchain](https://rustup.rs).
