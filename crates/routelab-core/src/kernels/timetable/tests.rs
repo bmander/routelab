@@ -3,6 +3,7 @@
 //! against an oracle that enumerates itineraries the obvious way.
 
 use super::{earliest_arrival, TimeExpanded};
+use crate::kernels::csa::ConnectionScan;
 use crate::kernels::raptor::Raptor;
 use crate::model::graph::{NodeId, UNREACHABLE};
 use crate::model::timetable::{
@@ -121,6 +122,14 @@ fn raptor_with(timetable: &Timetable, footpaths: &Footpaths) -> Raptor {
     Raptor::build(timetable, Transfer::instant(), footpaths)
 }
 
+fn csa(timetable: &Timetable) -> ConnectionScan {
+    ConnectionScan::build(timetable, Transfer::instant(), &Footpaths::none())
+}
+
+fn csa_with(timetable: &Timetable, footpaths: &Footpaths) -> ConnectionScan {
+    ConnectionScan::build(timetable, Transfer::instant(), footpaths)
+}
+
 // --- The timetable itself ---------------------------------------------------
 
 #[test]
@@ -231,6 +240,7 @@ fn the_two_models_agree_on_everything() {
         let table = random_timetable(seed, 12, 25);
         let expanded = expanded(&table);
         let rounds = raptor(&table);
+        let scan = csa(&table);
         for from in 0..12u32 {
             for to in 0..12u32 {
                 for at in [0, 900, 1800, 3600] {
@@ -243,6 +253,7 @@ fn the_two_models_agree_on_everything() {
                         &Footpaths::none(),
                     );
                     let by_rounds = rounds.earliest_arrival(from, at, to);
+                    let by_scan = scan.earliest_arrival(from, at, to);
                     assert_eq!(
                         by_events.as_ref().map(|i| i.arrives),
                         by_stops.as_ref().map(|i| i.arrives),
@@ -252,6 +263,11 @@ fn the_two_models_agree_on_everything() {
                         by_rounds.as_ref().map(|i| i.arrives),
                         by_stops.as_ref().map(|i| i.arrives),
                         "seed {seed}: RAPTOR, {from} -> {to} at {at}"
+                    );
+                    assert_eq!(
+                        by_scan.as_ref().map(|i| i.arrives),
+                        by_stops.as_ref().map(|i| i.arrives),
+                        "seed {seed}: CSA, {from} -> {to} at {at}"
                     );
                 }
             }
@@ -266,9 +282,15 @@ fn both_models_agree_with_brute_force() {
         let table = random_timetable(seed, 6, 10);
         let expanded = expanded(&table);
         let rounds = raptor(&table);
+        let scan = csa(&table);
         for from in 0..6u32 {
             for to in 0..6u32 {
                 let truth = best_by_brute_force(&table, &Footpaths::none(), from, 0, to, 6);
+                assert_eq!(
+                    scan.earliest_arrival(from, 0, to).map(|i| i.arrives),
+                    truth,
+                    "seed {seed}: CSA, {from} -> {to}"
+                );
                 assert_eq!(
                     expanded
                         .earliest_arrival(&[(from, 0)], to)
@@ -305,6 +327,7 @@ fn every_itinerary_returned_is_one_you_could_actually_ride() {
         let table = random_timetable(seed, 10, 20);
         let expanded = expanded(&table);
         let rounds = raptor(&table);
+        let scan = csa(&table);
         for from in 0..10u32 {
             for to in 0..10u32 {
                 for query in [
@@ -317,6 +340,7 @@ fn every_itinerary_returned_is_one_you_could_actually_ride() {
                         &Footpaths::none(),
                     ),
                     rounds.earliest_arrival(from, 0, to),
+                    scan.earliest_arrival(from, 0, to),
                 ] {
                     let Some(itinerary) = query else { continue };
                     assert!(
@@ -520,6 +544,7 @@ fn the_two_models_agree_with_footpaths_too() {
         let paths = random_footpaths(seed, 12, 8);
         let expanded = expanded_with(&table, &paths);
         let rounds = raptor_with(&table, &paths);
+        let scan = csa_with(&table, &paths);
         for from in 0..12u32 {
             for to in 0..12u32 {
                 for at in [0, 900, 1800, 3600] {
@@ -527,6 +552,7 @@ fn the_two_models_agree_with_footpaths_too() {
                     let by_stops =
                         earliest_arrival(&table, &[(from, at)], to, Transfer::instant(), &paths);
                     let by_rounds = rounds.earliest_arrival(from, at, to);
+                    let by_scan = scan.earliest_arrival(from, at, to);
                     assert_eq!(
                         by_events.as_ref().map(|i| i.arrives),
                         by_stops.as_ref().map(|i| i.arrives),
@@ -537,7 +563,15 @@ fn the_two_models_agree_with_footpaths_too() {
                         by_stops.as_ref().map(|i| i.arrives),
                         "seed {seed}: RAPTOR, {from} -> {to} at {at}"
                     );
-                    for itinerary in [by_events, by_stops, by_rounds].into_iter().flatten() {
+                    assert_eq!(
+                        by_scan.as_ref().map(|i| i.arrives),
+                        by_stops.as_ref().map(|i| i.arrives),
+                        "seed {seed}: CSA, {from} -> {to} at {at}"
+                    );
+                    for itinerary in [by_events, by_stops, by_rounds, by_scan]
+                        .into_iter()
+                        .flatten()
+                    {
                         assert!(
                             itinerary.is_valid(&[(from, at)], Transfer::instant(), &paths),
                             "seed {seed}: {from} -> {to} at {at} returned {itinerary:?}"
@@ -556,6 +590,7 @@ fn both_models_agree_with_brute_force_when_walking() {
         let paths = random_footpaths(seed, 6, 3);
         let expanded = expanded_with(&table, &paths);
         let rounds = raptor_with(&table, &paths);
+        let scan = csa_with(&table, &paths);
         for from in 0..6u32 {
             for to in 0..6u32 {
                 let truth = best_by_brute_force(&table, &paths, from, 0, to, 6);
@@ -577,6 +612,11 @@ fn both_models_agree_with_brute_force_when_walking() {
                     truth,
                     "seed {seed}: RAPTOR, {from} -> {to}"
                 );
+                assert_eq!(
+                    scan.earliest_arrival(from, 0, to).map(|i| i.arrives),
+                    truth,
+                    "seed {seed}: CSA, {from} -> {to}"
+                );
             }
         }
     }
@@ -592,6 +632,7 @@ fn the_two_models_agree_with_dense_footpaths_over_many_seeds() {
         let paths = random_footpaths(seed, 10, 12);
         let expanded = expanded_with(&table, &paths);
         let rounds = raptor_with(&table, &paths);
+        let scan = csa_with(&table, &paths);
         for from in 0..10u32 {
             for to in 0..10u32 {
                 for at in [0, 600, 1500, 2700] {
@@ -599,6 +640,7 @@ fn the_two_models_agree_with_dense_footpaths_over_many_seeds() {
                     let by_stops =
                         earliest_arrival(&table, &[(from, at)], to, Transfer::instant(), &paths);
                     let by_rounds = rounds.earliest_arrival(from, at, to);
+                    let by_scan = scan.earliest_arrival(from, at, to);
                     assert_eq!(
                         by_events.as_ref().map(|i| i.arrives),
                         by_stops.as_ref().map(|i| i.arrives),
@@ -609,7 +651,15 @@ fn the_two_models_agree_with_dense_footpaths_over_many_seeds() {
                         by_stops.as_ref().map(|i| i.arrives),
                         "seed {seed}: RAPTOR, {from} -> {to} at {at}"
                     );
-                    for itinerary in [by_events, by_stops, by_rounds].into_iter().flatten() {
+                    assert_eq!(
+                        by_scan.as_ref().map(|i| i.arrives),
+                        by_stops.as_ref().map(|i| i.arrives),
+                        "seed {seed}: CSA, {from} -> {to} at {at}"
+                    );
+                    for itinerary in [by_events, by_stops, by_rounds, by_scan]
+                        .into_iter()
+                        .flatten()
+                    {
                         assert!(
                             itinerary.is_valid(&[(from, at)], Transfer::instant(), &paths),
                             "seed {seed}: {from} -> {to} at {at} returned {itinerary:?}"
@@ -949,7 +999,7 @@ fn a_search_without_a_target_labels_every_stop_the_time_dependent_model_reaches(
 }
 
 #[test]
-fn the_three_models_agree_from_several_sources() {
+fn the_four_models_agree_from_several_sources() {
     // A multimodal query starts at several stops, each already reached at its
     // own time. All three must take whichever wins, and say so the same way.
     for seed in 0..8 {
@@ -957,6 +1007,7 @@ fn the_three_models_agree_from_several_sources() {
         let paths = random_footpaths(seed, 10, 4);
         let expanded = expanded_with(&table, &paths);
         let rounds = raptor_with(&table, &paths);
+        let scan = csa_with(&table, &paths);
         for a in 0..10u32 {
             let b = (a + 3) % 10;
             let sources = [(a, 0), (b, 400)];
@@ -965,6 +1016,7 @@ fn the_three_models_agree_from_several_sources() {
                 let by_events = expanded.earliest_arrival(&sources, to);
                 let by_rounds =
                     rounds.itinerary(&rounds.search(&sources, Some(to), None, None), to);
+                let by_scan = scan.itinerary(&scan.search(&sources, Some(to), None), to);
                 let want = by_stops.as_ref().map(|i| i.arrives);
                 assert_eq!(
                     by_events.as_ref().map(|i| i.arrives),
@@ -976,7 +1028,15 @@ fn the_three_models_agree_from_several_sources() {
                     want,
                     "seed {seed}: RAPTOR {sources:?} -> {to}"
                 );
-                for itinerary in [by_stops, by_events, by_rounds].into_iter().flatten() {
+                assert_eq!(
+                    by_scan.as_ref().map(|i| i.arrives),
+                    want,
+                    "seed {seed}: CSA {sources:?} -> {to}"
+                );
+                for itinerary in [by_stops, by_events, by_rounds, by_scan]
+                    .into_iter()
+                    .flatten()
+                {
                     assert!(
                         itinerary.is_valid(&sources, Transfer::instant(), &paths),
                         "seed {seed}: {sources:?} -> {to}: {itinerary:?}"
@@ -985,4 +1045,187 @@ fn the_three_models_agree_from_several_sources() {
             }
         }
     }
+}
+
+// --- CSA --------------------------------------------------------------------
+
+#[test]
+fn csa_lays_town_out_as_one_array() {
+    let table = town();
+    let scan = csa(&table);
+    assert_eq!(scan.num_connections(), 4);
+    assert_eq!(scan.num_trips(), 3);
+    assert_eq!(scan.num_stops(), 3);
+    assert!(scan.footprint() > 0);
+    // Leaving 0 at 08:00: trip 1 to stop 1, then trip 3 to stop 2 by 08:20 —
+    // one change, and every leg is one connection.
+    let best = scan.earliest_arrival(0, 28_800, 2).unwrap();
+    assert_eq!(best.arrives, 30_000);
+    assert_eq!(best.transfers(), 1);
+    assert_eq!(best.legs.len(), 2);
+    assert!(best.is_valid(&[(0, 28_800)], Transfer::instant(), &Footpaths::none()));
+}
+
+#[test]
+fn the_stop_criterion_scans_less_than_the_whole_day() {
+    let table = town();
+    let scan = csa(&table);
+    let toward = scan.search(&[(0, 28_800)], Some(1), None);
+    let everything = scan.search(&[(0, 28_800)], None, None);
+    assert!(
+        toward.scanned < everything.scanned,
+        "{} < {}",
+        toward.scanned,
+        everything.scanned
+    );
+    assert_eq!(toward.cost(1), everything.cost(1));
+    // One-to-all: every stop holds a label, and reads back as an itinerary.
+    assert_eq!(everything.settled, 3);
+    assert_eq!(everything.reached().len(), 3);
+    assert_eq!(scan.itinerary(&everything, 2).unwrap().arrives, 30_000);
+    assert_eq!(scan.path(&everything, 2), Some(vec![0, 1, 2]));
+    // A start criterion: nothing before 08:05 is scanned when leaving then.
+    let late = scan.search(&[(0, 29_100)], None, None);
+    assert!(late.scanned < everything.scanned);
+    // The departure an elapsed cost is measured from.
+    assert_eq!(
+        scan.search(&[(0, 100), (1, 50)], None, Some(0)).departing,
+        0
+    );
+    assert_eq!(scan.search(&[(0, 100), (1, 50)], None, None).departing, 50);
+}
+
+#[test]
+fn a_broken_trip_chain_is_two_trips_to_the_scan_too() {
+    // Trip 1's second hop leaves before its first arrives: no vehicle did
+    // that, so the trip flag must not carry across the break.
+    let table = Timetable::new(3, [c(1, 0, 1, 100, 200), c(1, 1, 2, 150, 250)]);
+    let scan = csa(&table);
+    assert_eq!(scan.num_trips(), 2);
+    assert!(scan.earliest_arrival(0, 0, 2).is_none());
+}
+
+#[test]
+fn a_walk_from_the_source_needs_no_connection_to_set_it_off() {
+    let table = Timetable::new(4, town().connections().iter().copied());
+    let paths = Footpaths::new(4, [(0, 3, 300), (3, 0, 300)]);
+    let scan = csa_with(&table, &paths);
+    let walked = scan.earliest_arrival(0, 28_800, 3).unwrap();
+    assert_eq!(walked.arrives, 29_100);
+    assert!(walked.rides().next().is_none());
+    // And from 3, the walk to 0 catches trip 1.
+    let ridden = scan.earliest_arrival(3, 28_500, 1).unwrap();
+    assert_eq!(ridden.arrives, 29_400);
+    assert!(ridden.is_valid(&[(3, 28_500)], Transfer::instant(), &paths));
+}
+
+/// The profile the obvious way: ask the time-dependent model at every second
+/// of the window and keep, for each arrival, the latest moment that still
+/// makes it — leaving out what the direct walk would beat.
+fn profile_by_brute_force(
+    table: &Timetable,
+    paths: &Footpaths,
+    from: NodeId,
+    to: NodeId,
+    window: std::ops::RangeInclusive<Time>,
+) -> Vec<(Time, Time)> {
+    let walk = paths.duration(from, to);
+    let mut latest: Vec<(Time, Time)> = Vec::new();
+    for t in window {
+        let Some(itinerary) = earliest_arrival(table, &[(from, t)], to, Transfer::instant(), paths)
+        else {
+            continue;
+        };
+        if walk.is_some_and(|d| itinerary.arrives >= t + d) {
+            continue;
+        }
+        match latest.last_mut() {
+            Some(last) if last.1 == itinerary.arrives => last.0 = t,
+            _ => latest.push((t, itinerary.arrives)),
+        }
+    }
+    latest
+}
+
+#[test]
+fn the_profile_matches_asking_at_every_second() {
+    // A window past the last departure, so nothing leaves after it and the
+    // oracle's "latest moment" is the profile's departure exactly.
+    for seed in 0..6 {
+        let table = random_timetable(seed, 8, 16);
+        let paths = random_footpaths(seed, 8, 3);
+        let scan = csa_with(&table, &paths);
+        for to in 0..8u32 {
+            let profile = scan.profile(to, 0, None);
+            for from in 0..8u32 {
+                if from == to {
+                    continue;
+                }
+                let truth = profile_by_brute_force(&table, &paths, from, to, 0..=12_000);
+                let pairs = scan.pairs(&profile, from, 0, 12_000);
+                assert_eq!(pairs, truth, "seed {seed}: {from} -> {to}");
+                assert_eq!(scan.walk(&profile, from), paths.duration(from, to));
+                // Every pair is a journey you could ride, leaving when it says
+                // and arriving when it says.
+                for (dep, itinerary) in scan.journeys(&profile, from, 0, 12_000) {
+                    assert!(
+                        itinerary.is_valid(&[(from, dep)], Transfer::instant(), &paths),
+                        "seed {seed}: {from} -> {to} at {dep}: {itinerary:?}"
+                    );
+                    assert_eq!(itinerary.legs.first().map(|leg| leg.departs()), Some(dep));
+                    assert!(pairs.contains(&(dep, itinerary.arrives)));
+                }
+                // The one-to-one pruning changes what the other stops hold,
+                // not what the source does.
+                let pruned = scan.profile(to, 0, Some(from));
+                assert_eq!(
+                    scan.pairs(&pruned, from, 0, 12_000),
+                    truth,
+                    "seed {seed}: pruned {from} -> {to}"
+                );
+                assert!(pruned.settled <= profile.settled);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_window_keeps_the_pairs_that_leave_inside_it() {
+    let table = random_timetable(3, 8, 16);
+    let paths = random_footpaths(3, 8, 3);
+    let scan = csa_with(&table, &paths);
+    let whole = scan.profile(5, 0, None);
+    let all = scan.pairs(&whole, 2, 0, 12_000);
+    let some: Vec<_> = all
+        .iter()
+        .copied()
+        .filter(|&(dep, _)| (900..=3_000).contains(&dep))
+        .collect();
+    assert_eq!(scan.pairs(&whole, 2, 900, 3_000), some);
+    // Scanning only from the window's start finds the same pairs inside it:
+    // connections before it cannot be in a journey leaving after it.
+    let trimmed = scan.profile(5, 900, None);
+    assert!(trimmed.scanned <= whole.scanned);
+    assert_eq!(scan.pairs(&trimmed, 2, 900, 3_000), some);
+}
+
+#[test]
+fn a_profile_of_town_is_one_departure_worth_taking() {
+    let table = town();
+    let scan = csa(&table);
+    let profile = scan.profile(2, 0, Some(0));
+    // Leave 0 at 08:00 on trip 1, change to trip 3, arrive 08:20. Trip 2 at
+    // 08:05 reaches 1 at 08:20, too late for anything: not a pair.
+    assert_eq!(scan.pairs(&profile, 0, 0, 86_400), vec![(28_800, 30_000)]);
+    let (dep, itinerary) = scan.journeys(&profile, 0, 0, 86_400).remove(0);
+    assert_eq!(
+        (dep, itinerary.arrives, itinerary.transfers()),
+        (28_800, 30_000, 1)
+    );
+    // From 1, two departures worth having: 08:12 aboard trip 1 arriving
+    // 08:30, and 08:15 on trip 3 arriving 08:20 — the earlier is dominated.
+    assert_eq!(
+        scan.pairs(&scan.profile(2, 0, Some(1)), 1, 0, 86_400),
+        vec![(29_700, 30_000)]
+    );
 }

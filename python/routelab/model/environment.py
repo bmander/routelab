@@ -36,7 +36,7 @@ Compilation checks the same attribute for a different reason. Flattening every
 layer into one fixed-cost graph is what makes a scalar environment cheap, and it
 is exactly what a schedule cannot survive — so :class:`CompiledEnvironment`
 refuses cost models it would have to lie about, rather than dropping the
-time-dependence on the floor. That refusal is the seam CSA and RAPTOR plug into.
+time-dependence on the floor. That refusal is the seam RAPTOR and CSA plug into.
 """
 
 from __future__ import annotations

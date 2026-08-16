@@ -116,7 +116,7 @@ impl Leg {
 /// The paper's *foot-edges*. Kept apart from the [`Timetable`] because they are
 /// not connections — nothing leaves, they are simply always open — and because
 /// which of them exist is a modelling choice (how far will a rider walk?)
-/// rather than a fact the feed states. Both models take them as a separate
+/// rather than a fact the feed states. Every model takes them as a separate
 /// argument, and [`Footpaths::none`] is the paper's plain model.
 ///
 /// **Closed under composition.** If you can walk A→B and B→C, then A→C is a
@@ -126,7 +126,7 @@ impl Leg {
 /// time-expanded graph must not, or a pair of opposite footpaths would spawn
 /// events for ever. Closing the set is what lets one model take a walk one hop
 /// at a time and the other take it in one, and still agree on every query.
-/// It is also what the RAPTOR family requires of its footpaths, for the same
+/// It is also what RAPTOR and CSA require of their footpaths, for the same
 /// reason. The cost is that "stops within 200 m" quietly becomes "stops
 /// reachable by 200 m hops"; on a real feed those components are small.
 ///
@@ -177,6 +177,25 @@ impl Footpaths {
                 .map(|(_, to, duration, via)| (to, duration, via))
                 .collect(),
         }
+    }
+
+    /// The same walks the other way round, so a kernel can ask who can walk
+    /// *to* a stop rather than where from it — [`Footpaths::from`] on the
+    /// result reads the links that arrive.
+    ///
+    /// A reversed set answers durations, not the hops behind them: each
+    /// reversed link is presented as given, since the chain a `via` records
+    /// runs the way the original was closed. Ask the original for
+    /// [`Footpaths::expand`].
+    pub fn reversed(&self) -> Self {
+        let stops = self.stop_links.len().saturating_sub(1);
+        let mut links = Vec::with_capacity(self.links.len());
+        for from in 0..stops as NodeId {
+            for (to, duration) in self.from(from) {
+                links.push((to, from, duration, to));
+            }
+        }
+        Footpaths::from_closed(stops, links)
     }
 
     /// Where you can walk from `stop`, as `(to, duration)`.
@@ -502,6 +521,15 @@ impl Itinerary {
             Leg::Walk(walk) => Some(walk),
             Leg::Ride(_) => None,
         })
+    }
+
+    /// The stops passed through, in order, starting where the first leg does.
+    /// An itinerary with no legs is standing at `standing_at` and is that one
+    /// stop — which is why the caller must say where it was standing.
+    pub fn stops(&self, standing_at: NodeId) -> Vec<NodeId> {
+        let mut path = vec![self.legs.first().map_or(standing_at, |leg| leg.from())];
+        path.extend(self.legs.iter().map(|leg| leg.to()));
+        path
     }
 
     /// How many times you changed vehicles — zero for a journey you never got

@@ -266,12 +266,12 @@ def test_who_owns_an_option_is_read_off_the_techniques(env):
     # And every technique the library exports is one of them.
     assert set(rl.kernels.techniques()) == {
         rl.Dijkstra, rl.BFS, rl.AStar, rl.ContractionHierarchy,
-        rl.TimeDependentDijkstra, rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR,
+        rl.TimeDependentDijkstra, rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA,
     }
 
 
 def test_the_package_exports_the_whole_onramp():
-    for name in ("RAPTOR", "TimetablePlanner", "Rounds", "Reach", "Leap", "EdgeResult",
+    for name in ("RAPTOR", "CSA", "TimetablePlanner", "Rounds", "Reach", "Scan", "Arrival", "Leap", "EdgeResult",
                  "service_seconds", "clock_readers", "kernels"):
         assert hasattr(rl, name), name
 

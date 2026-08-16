@@ -10,7 +10,8 @@ how it searches. Dijkstra and A* grow a **shortest-path tree**: every settled
 node remembers the edge it arrived by, and those edges form a tree rooted at the
 sources. A contraction hierarchy grows two, from either end, and reports where
 they met. A round-based transit search keeps no tree at all — a label per stop
-per round — and reports which round first reached each stop. Algorithms further
+per round — and reports which round first reached each stop; a connection scan
+keeps a label per stop and reports how far its sweep through the day got. Algorithms further
 along the roadmap will report other shapes again — a multicriteria search a
 frontier of incomparable labels. :class:`SearchSpace` is the common promise:
 whatever it is, it is made of branches, each a named tuple with a place on the
@@ -28,7 +29,17 @@ from __future__ import annotations
 import heapq
 from typing import Any, Hashable, Iterator, List, NamedTuple, Optional, Sequence, Tuple
 
-__all__ = ["Branch", "Leap", "MeetingTrees", "Reach", "Rounds", "SearchSpace", "ShortestPathTree"]
+__all__ = [
+    "Arrival",
+    "Branch",
+    "Leap",
+    "MeetingTrees",
+    "Reach",
+    "Rounds",
+    "Scan",
+    "SearchSpace",
+    "ShortestPathTree",
+]
 
 #: A point on the ground, `(latitude, longitude)`.
 Point = Tuple[float, float]
@@ -137,6 +148,14 @@ class Reach(NamedTuple):
     #: walk to, `k` for a stop first reached with `k` trips.
     round: int
     #: The earliest arrival the whole search settled on, on the service-day clock.
+    arrives: int
+
+
+class Arrival(NamedTuple):
+    """One stop a connection scan labelled, and when."""
+
+    stop: Hashable
+    #: The earliest arrival, on the service-day clock.
     arrives: int
 
 
@@ -416,3 +435,86 @@ class Rounds(SearchSpace):
 
     def __repr__(self) -> str:
         return f"Rounds({len(self):,} stops over {self.peak} rounds)"
+
+
+class Scan(SearchSpace):
+    """Every stop a connection scan labelled, by when it was reached.
+
+    Not a tree and not rounds: CSA sweeps one array of connections in
+    departure order and a stop's label is the moment the sweep first got
+    there, so what it can honestly report is the sweep — the stops it
+    labelled, each stamped with its arrival. Drawn as points, coloured by how
+    long after departure each was reached: the origin's neighbourhood first
+    and the far side of the network last, which is the picture of a scan
+    running toward its target and stopping when it passes it.
+    """
+
+    kind = "scan"
+
+    def __init__(self, compiled, result):
+        self._compiled = compiled
+        self._reached = result.reached()
+        self._departing = result.departing
+        self._points = _coordinates(compiled)
+        self._peak = max(
+            (arrives - self._departing for _, arrives in self._reached), default=0
+        )
+
+    def __len__(self) -> int:
+        return len(self._reached)
+
+    @property
+    def departing(self) -> int:
+        """When the query left: what ``after`` counts from."""
+        return self._departing
+
+    @property
+    def peak(self) -> int:
+        """The scan's horizon: seconds from departure to the last arrival it
+        labelled, which is what a stop's ``after`` is a share of. Held from
+        construction, the way :class:`ShortestPathTree` holds its own."""
+        return self._peak
+
+    def branches(self, *, min_after: int = 0) -> "Iterator[Arrival]":
+        """Every stop reached as an :class:`Arrival`, in labels."""
+        for stop, arrives in self._reached:
+            if arrives - self._departing >= min_after:
+                yield Arrival(self._compiled.label(stop), arrives)
+
+    def geometry(self, arrival: "Arrival") -> "Optional[List[Point]]":
+        """Where the stop is, as a one-point shape, or ``None`` if no layer
+        places it."""
+        point = self._points.get(arrival.stop)
+        return None if point is None else [point]
+
+    def geojson(self, *, min_after: int = 0, limit: Optional[int] = None) -> dict:
+        """The stops as GeoJSON ``Point`` features, each with when it
+        ``arrives`` and how many seconds ``after`` departure that is.
+
+        ``peak`` rides on the collection under the name every kind uses, the
+        way :class:`Rounds` ships its last round: a renderer divides once
+        rather than reading a float per stop, and does it the same way here.
+
+        Args:
+            min_after: Drop stops reached sooner than this after departure.
+            limit: Keep only this many, the latest-reached first — the edge of
+                the sweep, which is the part a crowded map can still show.
+        """
+        label, points, departing = self._compiled.label, self._points, self._departing
+        selected = _heaviest(
+            [reach for reach in self._reached if reach[1] - departing >= min_after],
+            lambda reach: reach[1],
+            limit,
+        )
+        features = []
+        for stop, arrives in selected:
+            point = points.get(label(stop))
+            if point is None:
+                continue
+            features.append(
+                _feature([point], {"arrives": arrives, "after": arrives - departing}, kind="Point")
+            )
+        return {"type": "FeatureCollection", "features": features, "peak": self._peak}
+
+    def __repr__(self) -> str:
+        return f"Scan({len(self):,} stops within {self._peak // 60} min)"

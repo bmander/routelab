@@ -18,10 +18,10 @@ from routelab import GTFS
 
 from conftest import TINY_GTFS
 
-#: Both models. Every behavioural test runs against each, because "these two
+#: Every timetable technique. Every behavioural test runs against each, because "these two
 #: agree" is the paper's thesis and a test that only asked one would not notice
 #: the day they stopped.
-MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR]
+MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA]
 
 #: The two Pyrga models — the ones that answer with an itinerary and nothing
 #: else, so a cost table and a search space are things they refuse.
@@ -159,7 +159,9 @@ def test_a_pyrga_model_answers_with_a_journey_and_nothing_else(model, env: rl.En
     planner = model().bind(env)
     with pytest.raises(NotImplementedError, match="journey rather than a cost per node"):
         planner.search("A", departing=time(8, 0))
-    with pytest.raises(NotImplementedError, match="nothing to draw. RAPTOR"):
+    # Who to ask is derived from the shelf, so the test holds the derivation
+    # to naming both kernels that keep a table — not the sentence around it.
+    with pytest.raises(NotImplementedError, match=r"nothing to draw\..*CSA\(\) or RAPTOR\(\)"):
         planner.explored(None)
 
 
@@ -171,6 +173,9 @@ def test_an_option_a_model_cannot_honour_names_the_one_that_can(model, env: rl.E
     if model is not rl.RAPTOR:
         with pytest.raises(ValueError, match="takes no max_transfers; a cap on changes belongs to RAPTOR"):
             planner.route("A", "C", departing=time(8, 0), max_transfers=1)
+    if model is not rl.CSA:
+        with pytest.raises(ValueError, match="takes no until; .*profile\\(\\) on CSA"):
+            planner.route("A", "C", departing=time(8, 0), until=time(9, 0))
 
 
 def test_the_expanded_model_pays_its_size_at_bind_time(env: rl.Environment):

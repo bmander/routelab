@@ -15,6 +15,7 @@
 pub mod astar;
 pub mod bfs;
 pub mod contraction;
+pub mod csa;
 pub mod dijkstra;
 pub mod footpaths;
 pub mod heuristics;

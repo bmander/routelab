@@ -22,16 +22,17 @@ class RAPTOR(TimetablePlanner):
     and rides the earliest trip that can be caught, so after `k` rounds every
     stop holds its earliest arrival with at most `k-1` changes. That is
     one-to-all by construction — a label per stop per round — which is why,
-    alone among the timetable techniques, this one has a real :meth:`search`
-    and something to draw. It is Pareto by construction too: arrival against
+    like :class:`CSA` and unlike the two Pyrga models, this one has a real
+    :meth:`search` and something to draw. It is Pareto by construction too: arrival against
     changes, one incomparable journey per round that improved something, which
     is what :meth:`frontier` hands back.
 
     ``max_transfers`` is a query option, not a constructor argument, for the
     reason ``max_cost`` is: it bounds one question, not the technique.
-    Changing vehicles is instantaneous, as it is for the two Pyrga models it is
-    checked against; a minimum change time is a new kernel ``Transfer``
-    constructor and would land in all three at once, so it is not a knob here.
+    Changing vehicles is instantaneous, as it is for the two Pyrga models and
+    CSA it is checked against; a minimum change time is a new kernel
+    ``Transfer`` constructor and would land in all four at once, so it is not
+    a knob here.
     """
 
     options = frozenset({"departing", "max_transfers"})
@@ -68,8 +69,9 @@ class RAPTOR(TimetablePlanner):
 
     # RAPTOR keeps a label per stop per round, so it has a cost table like any
     # graph search and `Planner.route` — search, then read the journey off the
-    # result — is the whole implementation. The itinerary hook the two Pyrga
-    # models need is not used here.
+    # result — is the whole implementation; the family's `journey` reads an
+    # itinerary off it. The itinerary hook the two Pyrga models need is not
+    # used here.
     _route = Planner._route
 
     def _search(self, starts: "Dict[int, int]", **options: Any) -> "_routelab.RaptorSearch":
@@ -81,13 +83,6 @@ class RAPTOR(TimetablePlanner):
         return self._raptor.search(
             sources, target, self._rounds(options.get("max_transfers")), at
         )
-
-    def journey(self, result: Result, destination: Hashable) -> Optional[Journey]:
-        """The earliest arrival at ``destination`` a kept search holds."""
-        itinerary = result.itinerary(self.node_id(destination))  # type: ignore[attr-defined]
-        if itinerary is None:
-            return None
-        return Journey.from_itinerary(self._bound(), itinerary, destination, result.departing)
 
     def journeys(self, result: Result, destination: Hashable) -> "List[Journey]":
         """Every journey a kept search holds for ``destination``: the earliest

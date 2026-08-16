@@ -45,6 +45,7 @@ from .util.clock import WEEK, service_seconds, weekly_seconds
 from .kernels.schedule import Schedule
 from .kernels import (
     BFS,
+    CSA,
     RAPTOR,
     AStar,
     ContractionHierarchy,
@@ -62,11 +63,13 @@ from .kernels import (
 )
 from .model.search import EdgeResult, Result, SearchResult
 from .model.searchspace import (
+    Arrival,
     Branch,
     Leap,
     MeetingTrees,
     Reach,
     Rounds,
+    Scan,
     SearchSpace,
     ShortestPathTree,
 )
@@ -74,8 +77,10 @@ from .data import GTFS, OSM, Cycling, Driving, Footpaths, Profile, Walking
 
 __all__ = [
     "AStar",
+    "Arrival",
     "BFS",
     "Branch",
+    "CSA",
     "CompiledEnvironment",
     "ContractionHierarchy",
     "Cycling",
@@ -132,6 +137,7 @@ __all__ = [
     "Leap",
     "Reach",
     "Rounds",
+    "Scan",
     "clock_readers",
     "kernels",
     "service_seconds",

@@ -27,6 +27,7 @@ pub use kernels::bfs::bfs;
 pub use kernels::contraction::{
     ContractionHierarchy, Expansion, Half, MeetingSearch, Ordering, Policy,
 };
+pub use kernels::csa::{ConnectionScan, ScanProfile, ScanSearch};
 pub use kernels::dijkstra::dijkstra;
 pub use kernels::heuristics::{HeuristicError, StandardHeuristic};
 pub use kernels::landmark::{Landmarks, Selection};

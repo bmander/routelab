@@ -15,11 +15,13 @@ one into something a shortest-path algorithm can read.
 
 They must return the same arrival time. That claim is the paper's thesis and
 this demo's point — and RAPTOR (Delling, Pajor & Werneck, 2012), which builds
-no graph at all, must agree with both. The three run side by side and the
-table prints each; RAPTOR also prints its whole front, one journey per number
-of changes.
+no graph at all, and CSA (Dibbelt, Pajor, Strasser & Wagner, 2013), which
+sorts the connections into one array and scans it, must agree with both. The
+four run side by side and the table prints each; RAPTOR also prints its whole
+front, one journey per number of changes, and CSA its profile for the next two
+hours, one journey per departure worth taking.
 
-All three are given the paper's *foot-edges* — walks between stops within
+All four are given the paper's *foot-edges* — walks between stops within
 ``--walk`` metres of each other — because a real feed says nothing about the
 northbound stop and the southbound one across the street being the same place,
 and a model that cannot cross the street cannot make most real trips. Pass
@@ -41,7 +43,7 @@ import routelab as rl
 from routelab import GTFS
 
 #: Every timetable technique, in the order the literature produced them.
-MODELS = [rl.TimeDependent(), rl.TimeExpanded(), rl.RAPTOR()]
+MODELS = [rl.TimeDependent(), rl.TimeExpanded(), rl.RAPTOR(), rl.CSA()]
 
 #: Downtown Seattle to the University District, which is a real trip somebody
 #: takes. Any two coordinates in the feed's area will do.
@@ -118,7 +120,7 @@ def main(argv: "list[str] | None" = None) -> int:
     print("  " + "-" * (len(header) - 2))
 
     journeys = {}
-    raptor = None
+    planners = {}
     for technique in MODELS:
         name = type(technique).__name__
 
@@ -137,8 +139,7 @@ def main(argv: "list[str] | None" = None) -> int:
             print(f"  {name:<14} {'':>16} {bound:6.1f}s {'':>9} {query:8.1f}ms  no journey")
             return 1
         journeys[name] = journey
-        if isinstance(planner, rl.RAPTOR):
-            raptor = planner
+        planners[name] = planner
         size = planner.footprint / 1e6
         noun, count = planner.searches
         print(
@@ -152,12 +153,27 @@ def main(argv: "list[str] | None" = None) -> int:
         if len(arrivals) == 1
         else f"\n  THE TECHNIQUES DISAGREE: {arrivals} — one of them is wrong"
     )
+    # The two extra readouts, each asked of the technique that has the verb.
+    raptor = planners.get("RAPTOR")
     front = raptor.frontier(origin, target, departing=args.departing) if raptor else []
     if len(front) > 1:
         print("  RAPTOR's front: " + " · ".join(
             f"{j.transfers} change{'' if j.transfers == 1 else 's'} arrives {clock(j.arrives)}"
             for j in front
         ))
+
+    csa = planners.get("CSA")
+    if csa is not None:
+        # Two hours on the service-day clock, which runs past midnight rather
+        # than wrapping at it — a 23:30 departure asks about 25:30.
+        until = rl.service_seconds(args.departing) + 2 * 3600
+        profile = csa.profile(origin, target, departing=args.departing, until=until)
+        print(
+            f"  CSA's profile to {clock(until)}: "
+            f"{len(profile)} departures worth taking — "
+            + " · ".join(f"leave {clock(j.departs)}, arrive {clock(j.arrives)}" for j in profile[:4])
+            + (" · …" if len(profile) > 4 else "")
+        )
 
     journey = journeys["TimeDependent"]
     print(

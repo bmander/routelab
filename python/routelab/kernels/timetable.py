@@ -26,7 +26,8 @@ class TimeDependent(TimetablePlanner):
     model. Its *realistic* one charges a minimum change time and is not
     expressible with one label per stop: staying in your seat must not be
     charged, so the cost of boarding depends on which vehicle you arrived on.
-    The paper's answer is more nodes (§4.2); RAPTOR's rounds are another.
+    The paper's answer is more nodes (§4.2); RAPTOR's rounds are another, and
+    CSA's trip flags a third.
     """
 
     def _earliest_arrival(

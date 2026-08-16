@@ -81,6 +81,11 @@ const LOOKS = {
     sub: () => 'rounds, no graph',
     available: () => Boolean(SETUP.feed),
   },
+  CSA: {
+    title: 'CSA', group: 'techniques',
+    sub: () => 'one array, one scan',
+    available: () => Boolean(SETUP.feed),
+  },
   // The query's fields are the options its wired technique takes, and only
   // those: a `shown` predicate reads the technique's declaration (`clock` and
   // `options`, both from the library) so the board never shows a knob the

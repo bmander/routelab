@@ -85,8 +85,19 @@ def techniques() -> "List[type]":
 
 
 def owners(option: str) -> "List[type]":
-    """The techniques that take ``option`` — who a refusal should point at."""
-    return [cls for cls in techniques() if option in cls.options]
+    """The techniques that take ``option`` on any of their verbs — who a
+    refusal should point at."""
+    return [cls for cls in techniques() if option in cls.options or option in cls.verbs]
+
+
+def verb_for(option: str) -> Optional[str]:
+    """The verb ``option`` belongs to, when it is not :meth:`Planner.route`'s
+    or :meth:`Planner.search`'s and every technique that takes it agrees on
+    which one — so a refusal can say *where* to pass it, not just to whom.
+    ``None`` when they disagree, which is when the verb is not the useful half
+    of the answer anyway."""
+    where = {cls.verbs[option] for cls in techniques() if option in cls.verbs}
+    return where.pop() if len(where) == 1 else None
 
 
 def names(classes: "Iterable[type]") -> str:
@@ -128,6 +139,7 @@ OPTIONS = {
     "max_cost": "a cost bound",
     "max_depth": "a hop bound",
     "max_transfers": "a cap on changes",
+    "until": "a departure window",
     "magnitude": "a magnitude, which belongs to explored() on a technique that grows a tree",
 }
 
@@ -153,6 +165,13 @@ class Planner:
     #: unset it.
     options: "frozenset[str]" = frozenset()
     required: "frozenset[str]" = frozenset()
+
+    #: Options this technique takes on a verb of its own rather than on
+    #: :meth:`route` or :meth:`search`, as ``{option: verb}``. Declared for the
+    #: same reason :attr:`options` is: a refusal names who takes the option and
+    #: where to pass it by asking the shelf, so no sentence has to spell out a
+    #: technique that may not be the only one tomorrow.
+    verbs: "Dict[str, str]" = {}
 
     #: The environment this was bound to, or ``None`` while it is still just a
     #: configuration.
@@ -386,7 +405,9 @@ class Planner:
                 )
             described = OPTIONS.get(option, f"{option}")
             takers = names(owners(option))
-            owner = f"{described} belongs to {takers}" if takers else f"no technique here takes {described}"
+            verb = verb_for(option)
+            where = takers if verb is None else f"{verb}() on {takers}"
+            owner = f"{described} belongs to {where}" if takers else f"no technique here takes {described}"
             raise ValueError(f"{name} takes no {option}; {owner}.")
         for option in sorted(self.required - options.keys()):
             if option == "departing":
@@ -468,8 +489,9 @@ class TimetablePlanner(Planner):
     a timetable is a set of departures, and there are two ways to make one into
     something a shortest-path algorithm can read. :class:`TimeExpanded` spends
     nodes; :class:`TimeDependent` spends search. :class:`RAPTOR` came five
-    years later and builds no graph at all. All three must agree on every
-    query, which is the paper's thesis and this library's test.
+    years later and builds no graph at all; :class:`CSA` a year after that and
+    keeps only the departures, sorted. All four must agree on every query,
+    which is the paper's thesis and this library's test.
 
     Each accepts a ``"scalar"`` layer alongside the timetable and reads its
     edges between stops as **footpaths** — walks a rider may make at any time,
@@ -526,6 +548,19 @@ class TimetablePlanner(Planner):
         """Run the model. The one line the models do not share."""
         raise NotImplementedError
 
+    def journey(self, result: Result, destination: Hashable) -> Optional[Journey]:
+        """The earliest arrival at ``destination`` a kept search holds.
+
+        A timetable technique that keeps a table — a label per stop, however
+        it got there — reads an *itinerary* off it rather than an edge path,
+        which is why this is the family's and not :class:`Planner`'s: the
+        result knows which vehicles were ridden, and a leg is one of those.
+        """
+        itinerary = result.itinerary(self.node_id(destination))  # type: ignore[attr-defined]
+        if itinerary is None:
+            return None
+        return Journey.from_itinerary(self._bound(), itinerary, destination, result.departing)
+
     def _route(
         self,
         starts: "Dict[int, int]",
@@ -549,11 +584,20 @@ class TimetablePlanner(Planner):
         """Not this: a model that answers with a journey keeps no search space.
 
         Said in so many words rather than left to fail on a result that was
-        never a table. RAPTOR keeps its rounds and reports them.
+        never a table. Who to ask instead is read off the shelf — the kernels
+        that override this — so a new one joins the sentence by existing,
+        the way :func:`clock_readers` does it.
         """
+        drawers = names(
+            cls
+            for cls in techniques()
+            if issubclass(cls, TimetablePlanner)
+            and cls.explored is not TimetablePlanner.explored
+        )
         raise NotImplementedError(
             f"{type(self).__name__} answers with a journey and keeps no search "
-            f"space, so there is nothing to draw. RAPTOR() reports its rounds."
+            f"space, so there is nothing to draw. The techniques that keep a "
+            f"table report one: ask {drawers}."
         )
 
 

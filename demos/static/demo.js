@@ -27,6 +27,23 @@ const LEG_COLOURS = ['#d1495b', '#1d7fbf', '#e09f3e', '#4f9d69', '#8e5ea2'];
 // One per round of a round-based search, darkest first: where you start, then
 // one bus away, then two. Past the sixth every round shares the last colour.
 const ROUNDS = ['#1d3557', '#1d6fa5', '#3aa6a6', '#7fc46a', '#e0b23e', '#e07b3e'];
+// The spaces made of points rather than branches: a timetable technique labels
+// stops, and a stop is a place, not a road. Every one of them ships `peak` on
+// the collection and a per-stop number to divide by it, so one drawing rule
+// covers them all and a kind's entry here is the only thing that differs —
+// which property carries the number, how it colours, and what to say about it.
+const POINTS = {
+  rounds: {
+    share: props => props.round,
+    colour: props => ROUNDS[Math.min(props.round, ROUNDS.length - 1)],
+    note: 'coloured by the round that first reached them',
+  },
+  scan: {
+    share: props => props.after,
+    colour: (props, share) => `hsl(${210 + 40 * share} 70% ${30 + 45 * share}%)`,
+    note: 'coloured by how long after departure the sweep reached them',
+  },
+};
 const PIN = L.divIcon({className: 'pin', iconSize: [14, 14], iconAnchor: [7, 7]});
 let pins = [];
 
@@ -132,6 +149,13 @@ const PRESETS = [
     layer: ['GTFS', {}],
     walks: ['Footpaths', {within: 200}],
     technique: ['RAPTOR', {}],
+  },
+  {
+    id: 'transit-csa',
+    label: 'Transit · CSA',
+    layer: ['GTFS', {}],
+    walks: ['Footpaths', {within: 200}],
+    technique: ['CSA', {}],
   },
 ];
 
@@ -559,21 +583,26 @@ async function request(explore) {
   // either a route-only refresh mid-drag, which must leave what is drawn
   // alone, or a query whose `space` output goes nowhere, which must not.
   //
-  // A round-based search has no branches at all — a stop is a place, not a
-  // road — so its space is points, coloured by the round that first reached
-  // each: the origin's neighbourhood, then everything one bus away, then two.
+  // A timetable technique's search has no branches at all — a stop is a place,
+  // not a road — so its space is points: the round that first reached each, or
+  // how long after departure the scan did. Either way the origin's
+  // neighbourhood is dark and near and the far side of the network pale.
   const halves = {forward: '#1d6fa5', backward: '#7a3b9c'};
   if (explore) { space.clearLayers(); }
-  if (answer.space && answer.space_kind === 'rounds') {
+  const look = answer.space ? POINTS[answer.space_kind] : undefined;
+  if (look) {
     // `peak` rides on the collection, not on every stop: one division here
     // rather than a float per feature down the wire.
     const peak = answer.space.peak || 1;
     L.geoJSON(answer.space, {
-      pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-        radius: 3.5 - 1.5 * (feature.properties.round / peak),
-        fillColor: ROUNDS[Math.min(feature.properties.round, ROUNDS.length - 1)],
-        stroke: false, fillOpacity: 0.85,
-      }),
+      pointToLayer: (feature, latlng) => {
+        const share = look.share(feature.properties) / peak;
+        return L.circleMarker(latlng, {
+          radius: 3.5 - 1.5 * share,
+          fillColor: look.colour(feature.properties, share),
+          stroke: false, fillOpacity: 0.85,
+        });
+      },
     }).addTo(space);
   } else if (answer.space) {
     L.geoJSON(answer.space, {
@@ -657,9 +686,9 @@ function spaceNote(answer) {
     // The technique's own sentence for having nothing to draw.
     return `<br><span class="hint">${answer.space_note}</span>`;
   }
-  if (answer.space && answer.space_kind === 'rounds') {
-    return `<br><span class="hint">rounds: ${answer.space_size.toLocaleString()} ` +
-           `stops, coloured by the round that first reached them</span>`;
+  if (answer.space && POINTS[answer.space_kind]) {
+    return `<br><span class="hint">${answer.space_kind}: ${answer.space_size.toLocaleString()} ` +
+           `stops, ${POINTS[answer.space_kind].note}</span>`;
   }
   if (answer.space) {
     return `<br><span class="hint">tree: ${answer.space_size.toLocaleString()} ` +

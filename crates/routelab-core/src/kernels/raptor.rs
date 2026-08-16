@@ -27,7 +27,7 @@
 //! footpath relaxation over a set closed under composition — that is the
 //! paper's basic algorithm with its pruning. Not here: McRAPTOR (more criteria
 //! than changes), rRAPTOR (a range of departure times), and the parallel
-//! variant. Changing vehicles is instantaneous, so the three timetable kernels
+//! variant. Changing vehicles is instantaneous, so the four timetable kernels
 //! answer the same question and can be checked against each other; a minimum
 //! change time is a new [`Transfer`] constructor, and this is the one kernel
 //! that could honour it — a round-`k` label knows the boarding was a change.
@@ -120,7 +120,7 @@ impl Chain {
 impl Raptor {
     /// Lay `timetable` out as routes and trips, with `footpaths` between stops.
     ///
-    /// The `transfer` is accepted for parity with the other two models and is
+    /// The `transfer` is accepted for parity with the other three models and is
     /// only ever [`Transfer::instant`] today.
     pub fn build(timetable: &Timetable, _transfer: Transfer, footpaths: &Footpaths) -> Self {
         let stops = timetable.num_stops();
@@ -460,17 +460,7 @@ impl Raptor {
 
     /// The stops along the earliest itinerary to `stop`, sources first.
     pub fn path(&self, search: &RaptorSearch, stop: NodeId) -> Option<Vec<NodeId>> {
-        let itinerary = self.itinerary(search, stop)?;
-        let mut path: Vec<NodeId> = itinerary
-            .legs
-            .first()
-            .map(|leg| vec![leg.from()])
-            .unwrap_or_default();
-        path.extend(itinerary.legs.iter().map(|leg| leg.to()));
-        if path.is_empty() {
-            path.push(stop);
-        }
-        Some(path)
+        Some(self.itinerary(search, stop)?.stops(stop))
     }
 
     /// The earliest arrival at `to` in `search`, however many changes it takes.

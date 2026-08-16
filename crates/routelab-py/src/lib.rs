@@ -25,6 +25,7 @@ pub(crate) fn check_index(id: u32, count: usize, what: &str) -> PyResult<()> {
 }
 
 pub mod contraction;
+pub mod csa;
 pub mod graph;
 pub mod gtfs;
 pub mod heuristic;
@@ -36,6 +37,7 @@ pub mod timedep;
 pub mod timetable;
 
 use crate::contraction::*;
+use crate::csa::*;
 use crate::graph::*;
 use crate::gtfs::*;
 use crate::heuristic::*;
@@ -52,6 +54,7 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("EARTH_RADIUS", routelab_osm::EARTH_RADIUS)?;
     m.add_function(wrap_pyfunction!(haversine, m)?)?;
     m.add_class::<PyCalendar>()?;
+    m.add_class::<PyConnectionScan>()?;
     m.add_class::<PyContractionHierarchy>()?;
     m.add_class::<PyFeed>()?;
     m.add_class::<PyGraph>()?;
@@ -64,6 +67,8 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyFootpaths>()?;
     m.add_class::<PyRaptor>()?;
     m.add_class::<PyRaptorSearch>()?;
+    m.add_class::<PyScanProfile>()?;
+    m.add_class::<PyScanSearch>()?;
     m.add_class::<PySearchTree>()?;
     m.add_class::<PyTimeExpanded>()?;
     m.add_class::<PyTimetable>()?;

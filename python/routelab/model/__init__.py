@@ -18,16 +18,19 @@ from .graph import Graph
 from .journey import Journey, Leg
 from .search import EdgeResult, Result, SearchResult
 from .searchspace import (
+    Arrival,
     Branch,
     Leap,
     MeetingTrees,
     Reach,
     Rounds,
+    Scan,
     SearchSpace,
     ShortestPathTree,
 )
 
 __all__ = [
+    "Arrival",
     "Branch",
     "CompiledEnvironment",
     "EdgeResult",
@@ -44,6 +47,7 @@ __all__ = [
     "Result",
     "Rounds",
     "ScalarEdges",
+    "Scan",
     "SearchResult",
     "SearchSpace",
     "ShortestPathTree",
