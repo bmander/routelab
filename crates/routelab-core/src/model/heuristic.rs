@@ -9,7 +9,7 @@
 
 use std::fmt;
 
-use crate::graph::{NodeId, Weight, UNREACHABLE};
+use crate::model::graph::{NodeId, Weight, UNREACHABLE};
 
 /// A lower bound on the cost of getting from `node` to `target`.
 ///
@@ -90,7 +90,7 @@ pub enum StandardHeuristic {
     /// Distances measured from a handful of fixed nodes, combined by the
     /// triangle inequality. Needs no geometry — only the graph and the time to
     /// walk it. See [`crate::landmark`].
-    Landmarks(crate::landmark::Landmarks),
+    Landmarks(crate::kernels::landmark::Landmarks),
 }
 
 impl StandardHeuristic {

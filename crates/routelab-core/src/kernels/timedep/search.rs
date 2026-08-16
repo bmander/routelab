@@ -3,8 +3,10 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use crate::graph::{EdgeId, Graph, NodeId, Weight, UNREACHABLE};
-use crate::search::{check_sources, SearchError, SearchOptions, SearchResult, TargetTracker};
+use crate::model::graph::{EdgeId, Graph, NodeId, Weight, UNREACHABLE};
+use crate::model::search::{
+    check_sources, SearchError, SearchOptions, SearchResult, TargetTracker,
+};
 
 use super::{Calendar, Departure, WEEK};
 

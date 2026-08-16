@@ -29,9 +29,9 @@ mod query;
 #[cfg(test)]
 mod tests;
 
-use crate::graph::{EdgeId, Graph, GraphError, NodeId, Weight};
-use crate::progress::Progress;
-use crate::search::SearchError;
+use crate::model::graph::{EdgeId, Graph, GraphError, NodeId, Weight};
+use crate::model::search::SearchError;
+use crate::util::progress::Progress;
 use build::Builder;
 
 pub use query::{Half, MeetingSearch};

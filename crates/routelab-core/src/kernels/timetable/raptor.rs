@@ -40,7 +40,7 @@
 //! is also why it has a search space worth drawing: which round first reached
 //! each stop is the picture in the paper.
 
-use crate::graph::{NodeId, UNREACHABLE};
+use crate::model::graph::{NodeId, UNREACHABLE};
 
 use super::{Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk};
 
@@ -152,7 +152,13 @@ impl Raptor {
             a.stops
                 .cmp(&b.stops)
                 .then(a.times[0].departure.cmp(&b.times[0].departure))
-                .then(a.times.last().unwrap().arrival.cmp(&b.times.last().unwrap().arrival))
+                .then(
+                    a.times
+                        .last()
+                        .unwrap()
+                        .arrival
+                        .cmp(&b.times.last().unwrap().arrival),
+                )
                 .then(a.trip.cmp(&b.trip))
         });
 
@@ -276,12 +282,14 @@ impl Raptor {
 
     fn stops_of(&self, route: u32) -> &[NodeId] {
         let r = route as usize;
-        &self.route_stops[self.route_stops_start[r] as usize..self.route_stops_start[r + 1] as usize]
+        &self.route_stops
+            [self.route_stops_start[r] as usize..self.route_stops_start[r + 1] as usize]
     }
 
     fn routes_at(&self, stop: NodeId) -> &[(u32, u32)] {
         let s = stop as usize;
-        &self.stop_routes[self.stop_routes_start[s] as usize..self.stop_routes_start[s + 1] as usize]
+        &self.stop_routes
+            [self.stop_routes_start[s] as usize..self.stop_routes_start[s + 1] as usize]
     }
 
     #[inline]
@@ -295,13 +303,19 @@ impl Raptor {
     ///
     /// A binary search, which is what the non-overtaking split buys: a route's
     /// trips leave every one of its stops in the same order.
-    fn earliest_trip(&self, route: u32, position: u32, at: Time, before: Option<u32>) -> Option<u32> {
+    fn earliest_trip(
+        &self,
+        route: u32,
+        position: u32,
+        at: Time,
+        before: Option<u32>,
+    ) -> Option<u32> {
         let first = self.route_trips_start[route as usize];
         let end = before.unwrap_or(self.route_trips_start[route as usize + 1]);
         let trips = &self.trip_times_start[first as usize..end as usize];
-        let found = trips.partition_point(|&start| {
-            self.stop_times[(start + position) as usize].departure < at
-        }) as u32;
+        let found = trips
+            .partition_point(|&start| self.stop_times[(start + position) as usize].departure < at)
+            as u32;
         (first + found < end).then_some(first + found)
     }
 
@@ -445,7 +459,11 @@ impl Raptor {
     /// The stops along the earliest itinerary to `stop`, sources first.
     pub fn path(&self, search: &RaptorSearch, stop: NodeId) -> Option<Vec<NodeId>> {
         let itinerary = self.itinerary(search, stop)?;
-        let mut path: Vec<NodeId> = itinerary.legs.first().map(|leg| vec![leg.from()]).unwrap_or_default();
+        let mut path: Vec<NodeId> = itinerary
+            .legs
+            .first()
+            .map(|leg| vec![leg.from()])
+            .unwrap_or_default();
         path.extend(itinerary.legs.iter().map(|leg| leg.to()));
         if path.is_empty() {
             path.push(stop);
@@ -562,7 +580,8 @@ impl Rounds {
     /// what the paper prunes against.
     fn open(&mut self) -> usize {
         self.labels.push(self.labels[self.round()].clone());
-        self.parents.push(vec![Parent::Inherited; self.is_marked.len()]);
+        self.parents
+            .push(vec![Parent::Inherited; self.is_marked.len()]);
         self.round()
     }
 
@@ -702,14 +721,12 @@ impl RaptorSearch {
     fn improving_rounds(&self, to: NodeId) -> impl Iterator<Item = usize> + '_ {
         let s = to as usize;
         let mut best = UNREACHABLE;
-        (0..self.labels.len()).filter(move |&round| {
-            match self.labels[round].get(s) {
-                Some(&arrival) if arrival < best => {
-                    best = arrival;
-                    true
-                }
-                _ => false,
+        (0..self.labels.len()).filter(move |&round| match self.labels[round].get(s) {
+            Some(&arrival) if arrival < best => {
+                best = arrival;
+                true
             }
+            _ => false,
         })
     }
 

@@ -18,32 +18,26 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-pub mod astar;
-pub mod bfs;
-pub mod contraction;
-pub mod dijkstra;
-pub mod graph;
-pub mod heuristic;
-pub mod landmark;
-pub mod progress;
-pub(crate) mod rng;
-pub mod search;
-pub mod timedep;
-pub mod timetable;
-pub mod tree;
+pub mod kernels;
+pub mod model;
+pub mod util;
 
-pub use astar::astar;
-pub use bfs::bfs;
-pub use contraction::{ContractionHierarchy, Expansion, Half, MeetingSearch, Ordering, Policy};
-pub use dijkstra::dijkstra;
-pub use graph::{EdgeId, Graph, GraphError, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
-pub use heuristic::{Heuristic, HeuristicError, StandardHeuristic};
-pub use landmark::{Landmarks, Selection};
-pub use progress::Progress;
-pub use search::{SearchError, SearchOptions, SearchResult};
-pub use timedep::{time_dependent_dijkstra, Calendar, Clock, Departure, Waiting, Window, WEEK};
-pub use timetable::{
+pub use kernels::astar::astar;
+pub use kernels::bfs::bfs;
+pub use kernels::contraction::{
+    ContractionHierarchy, Expansion, Half, MeetingSearch, Ordering, Policy,
+};
+pub use kernels::dijkstra::dijkstra;
+pub use kernels::landmark::{Landmarks, Selection};
+pub use kernels::timedep::{
+    time_dependent_dijkstra, Calendar, Clock, Departure, Waiting, Window, WEEK,
+};
+pub use kernels::timetable::{
     Connection, Footpaths, Itinerary, Leg, Raptor, RaptorSearch, Ride, TimeExpanded, Timetable,
     Transfer, Walk,
 };
-pub use tree::{Magnitude, SearchTree};
+pub use model::graph::{EdgeId, Graph, GraphError, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
+pub use model::heuristic::{Heuristic, HeuristicError, StandardHeuristic};
+pub use model::search::{SearchError, SearchOptions, SearchResult};
+pub use model::tree::{Magnitude, SearchTree};
+pub use util::progress::Progress;

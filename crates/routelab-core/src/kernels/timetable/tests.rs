@@ -3,8 +3,8 @@
 //! against an oracle that enumerates itineraries the obvious way.
 
 use super::*;
-use crate::graph::UNREACHABLE;
-use crate::rng::Rng;
+use crate::model::graph::UNREACHABLE;
+use crate::util::rng::Rng;
 
 /// Stops 0 -> 1 -> 2, with a fast trip and a slow one.
 ///
@@ -54,9 +54,7 @@ fn best_by_brute_force(
         .connections()
         .iter()
         .filter(|c| c.from == here && c.departs >= now)
-        .filter_map(|c| {
-            best_by_brute_force(timetable, footpaths, c.to, c.arrives, to, left - 1)
-        })
+        .filter_map(|c| best_by_brute_force(timetable, footpaths, c.to, c.arrives, to, left - 1))
         .min();
     let on_foot = footpaths
         .from(here)
@@ -159,8 +157,17 @@ fn both_models_find_the_connection_worth_making() {
     // until 08:30 or step onto trip 3 and be there at 08:20. The second is
     // better and every model should say so.
     let table = town();
-    let by_events = expanded(&table).earliest_arrival(&[(0, 28_800)], 2).unwrap();
-    let by_stops = earliest_arrival(&table, &[(0, 28_800)], 2, Transfer::instant(), &Footpaths::none()).unwrap();
+    let by_events = expanded(&table)
+        .earliest_arrival(&[(0, 28_800)], 2)
+        .unwrap();
+    let by_stops = earliest_arrival(
+        &table,
+        &[(0, 28_800)],
+        2,
+        Transfer::instant(),
+        &Footpaths::none(),
+    )
+    .unwrap();
 
     assert_eq!(by_events.arrives, 30_000, "08:20");
     assert_eq!(by_stops.arrives, by_events.arrives);
@@ -186,14 +193,30 @@ fn a_stop_you_cannot_reach_has_no_itinerary() {
     let table = town();
     // Nothing runs to stop 0.
     assert!(expanded(&table).earliest_arrival(&[(2, 0)], 0).is_none());
-    assert!(earliest_arrival(&table, &[(2, 0)], 0, Transfer::instant(), &Footpaths::none()).is_none());
+    assert!(earliest_arrival(
+        &table,
+        &[(2, 0)],
+        0,
+        Transfer::instant(),
+        &Footpaths::none()
+    )
+    .is_none());
 }
 
 #[test]
 fn arriving_after_the_last_departure_finds_nothing() {
     let table = town();
-    assert!(expanded(&table).earliest_arrival(&[(0, 60_000)], 2).is_none());
-    assert!(earliest_arrival(&table, &[(0, 60_000)], 2, Transfer::instant(), &Footpaths::none()).is_none());
+    assert!(expanded(&table)
+        .earliest_arrival(&[(0, 60_000)], 2)
+        .is_none());
+    assert!(earliest_arrival(
+        &table,
+        &[(0, 60_000)],
+        2,
+        Transfer::instant(),
+        &Footpaths::none()
+    )
+    .is_none());
 }
 
 #[test]
@@ -208,7 +231,13 @@ fn the_two_models_agree_on_everything() {
             for to in 0..12u32 {
                 for at in [0, 900, 1800, 3600] {
                     let by_events = expanded.earliest_arrival(&[(from, at)], to);
-                    let by_stops = earliest_arrival(&table, &[(from, at)], to, Transfer::instant(), &Footpaths::none());
+                    let by_stops = earliest_arrival(
+                        &table,
+                        &[(from, at)],
+                        to,
+                        Transfer::instant(),
+                        &Footpaths::none(),
+                    );
                     let by_rounds = rounds.earliest_arrival(from, at, to);
                     assert_eq!(
                         by_events.as_ref().map(|i| i.arrives),
@@ -237,12 +266,21 @@ fn both_models_agree_with_brute_force() {
             for to in 0..6u32 {
                 let truth = best_by_brute_force(&table, &Footpaths::none(), from, 0, to, 6);
                 assert_eq!(
-                    expanded.earliest_arrival(&[(from, 0)], to).map(|i| i.arrives),
+                    expanded
+                        .earliest_arrival(&[(from, 0)], to)
+                        .map(|i| i.arrives),
                     truth,
                     "seed {seed}: time-expanded, {from} -> {to}"
                 );
                 assert_eq!(
-                    earliest_arrival(&table, &[(from, 0)], to, Transfer::instant(), &Footpaths::none()).map(|i| i.arrives),
+                    earliest_arrival(
+                        &table,
+                        &[(from, 0)],
+                        to,
+                        Transfer::instant(),
+                        &Footpaths::none()
+                    )
+                    .map(|i| i.arrives),
                     truth,
                     "seed {seed}: time-dependent, {from} -> {to}"
                 );
@@ -267,7 +305,13 @@ fn every_itinerary_returned_is_one_you_could_actually_ride() {
             for to in 0..10u32 {
                 for query in [
                     expanded.earliest_arrival(&[(from, 0)], to),
-                    earliest_arrival(&table, &[(from, 0)], to, Transfer::instant(), &Footpaths::none()),
+                    earliest_arrival(
+                        &table,
+                        &[(from, 0)],
+                        to,
+                        Transfer::instant(),
+                        &Footpaths::none(),
+                    ),
                     rounds.earliest_arrival(from, 0, to),
                 ] {
                     let Some(itinerary) = query else { continue };
@@ -300,7 +344,13 @@ fn you_are_already_where_you_already_are() {
     for at in [0, 28_800, 60_000] {
         for answer in [
             expanded.earliest_arrival(&[(1, at)], 1),
-            earliest_arrival(&table, &[(1, at)], 1, Transfer::instant(), &Footpaths::none()),
+            earliest_arrival(
+                &table,
+                &[(1, at)],
+                1,
+                Transfer::instant(),
+                &Footpaths::none(),
+            ),
             rounds.earliest_arrival(1, at, 1),
         ] {
             let answer = answer.expect("standing still is an answer");
@@ -311,10 +361,23 @@ fn you_are_already_where_you_already_are() {
     }
     // Several sources: standing at the target already beats riding to it,
     // unless another source rides in sooner.
-    let both = earliest_arrival(&table, &[(0, 28_800), (2, 40_000)], 2, Transfer::instant(), &Footpaths::none()).unwrap();
+    let both = earliest_arrival(
+        &table,
+        &[(0, 28_800), (2, 40_000)],
+        2,
+        Transfer::instant(),
+        &Footpaths::none(),
+    )
+    .unwrap();
     assert_eq!(both.arrives, 30_000, "riding from 0 arrives before 40_000");
-    let both = expanded.earliest_arrival(&[(0, 28_800), (2, 29_000)], 2).unwrap();
-    assert_eq!((both.arrives, both.legs.len()), (29_000, 0), "already there first");
+    let both = expanded
+        .earliest_arrival(&[(0, 28_800), (2, 29_000)], 2)
+        .unwrap();
+    assert_eq!(
+        (both.arrives, both.legs.len()),
+        (29_000, 0),
+        "already there first"
+    );
 }
 
 #[test]
@@ -330,8 +393,17 @@ fn stopping_at_the_first_target_finds_the_same_answer_as_exhausting() {
         for from in 0..12u32 {
             for to in 0..12u32 {
                 assert_eq!(
-                    expanded.earliest_arrival(&[(from, 0)], to).map(|i| i.arrives),
-                    earliest_arrival(&table, &[(from, 0)], to, Transfer::instant(), &Footpaths::none()).map(|i| i.arrives),
+                    expanded
+                        .earliest_arrival(&[(from, 0)], to)
+                        .map(|i| i.arrives),
+                    earliest_arrival(
+                        &table,
+                        &[(from, 0)],
+                        to,
+                        Transfer::instant(),
+                        &Footpaths::none()
+                    )
+                    .map(|i| i.arrives),
                     "seed {seed}: {from} -> {to}"
                 );
             }
@@ -345,7 +417,11 @@ fn stopping_at_the_first_target_finds_the_same_answer_as_exhausting() {
 fn footpaths_are_closed_under_composition() {
     // A -> B and B -> C make A -> C, at the sum; a shorter direct walk wins.
     let paths = Footpaths::new(4, [(0, 1, 60), (1, 2, 60), (0, 2, 200), (2, 3, 10)]);
-    assert_eq!(paths.duration(0, 2), Some(120), "the two hops beat the direct 200");
+    assert_eq!(
+        paths.duration(0, 2),
+        Some(120),
+        "the two hops beat the direct 200"
+    );
     assert_eq!(paths.duration(0, 3), Some(130));
     assert_eq!(paths.duration(1, 3), Some(70));
     assert_eq!(paths.duration(3, 0), None, "nothing goes the other way");
@@ -355,7 +431,12 @@ fn footpaths_are_closed_under_composition() {
     assert_eq!(paths.hops(0, 3), vec![(0, 1, 60), (1, 2, 60), (2, 3, 10)]);
     assert_eq!(paths.hops(0, 1), vec![(0, 1, 60)]);
     assert!(paths.is_given(0, 1) && !paths.is_given(0, 2));
-    let told = paths.expand(Walk { from: 0, to: 3, departs: 100, arrives: 230 });
+    let told = paths.expand(Walk {
+        from: 0,
+        to: 3,
+        departs: 100,
+        arrives: 230,
+    });
     assert_eq!(told.len(), 3);
     assert_eq!((told[0].departs, told[0].arrives), (100, 160));
     assert_eq!((told[2].from, told[2].to, told[2].arrives), (2, 3, 230));
@@ -371,20 +452,34 @@ fn a_walk_reaches_a_stop_no_vehicle_does() {
     let by_events = expanded_with(&table, &paths);
 
     let ride_then_walk = by_events.earliest_arrival(&[(0, 28_800)], 3).unwrap();
-    assert_eq!(ride_then_walk.arrives, 28_800 + 300, "walking there beats any bus");
+    assert_eq!(
+        ride_then_walk.arrives,
+        28_800 + 300,
+        "walking there beats any bus"
+    );
     assert_eq!(ride_then_walk.legs.len(), 1);
     assert!(matches!(ride_then_walk.legs[0], Leg::Walk(_)));
-    let by_stops = earliest_arrival(&table, &[(0, 28_800)], 3, Transfer::instant(), &paths).unwrap();
+    let by_stops =
+        earliest_arrival(&table, &[(0, 28_800)], 3, Transfer::instant(), &paths).unwrap();
     assert_eq!(by_stops.arrives, ride_then_walk.arrives);
 
     // From stop 1 the only way to 3 is to ride to 2 and walk.
     let by_events = by_events.earliest_arrival(&[(1, 29_600)], 3).unwrap();
-    let by_stops = earliest_arrival(&table, &[(1, 29_600)], 3, Transfer::instant(), &paths).unwrap();
-    assert_eq!(by_events.arrives, 30_000 + 120, "trip 3 to stop 2, then the walk");
+    let by_stops =
+        earliest_arrival(&table, &[(1, 29_600)], 3, Transfer::instant(), &paths).unwrap();
+    assert_eq!(
+        by_events.arrives,
+        30_000 + 120,
+        "trip 3 to stop 2, then the walk"
+    );
     assert_eq!(by_stops.arrives, by_events.arrives);
     assert_eq!(by_events.legs.len(), 2);
     assert!(matches!(by_events.legs[1], Leg::Walk(_)));
-    assert_eq!(by_events.transfers(), 0, "one bus and a walk is not a change");
+    assert_eq!(
+        by_events.transfers(),
+        0,
+        "one bus and a walk is not a change"
+    );
     for itinerary in [&by_events, &by_stops] {
         assert!(itinerary.is_valid(&[(1, 29_600)], Transfer::instant(), &paths));
     }
@@ -395,9 +490,15 @@ fn a_walk_from_the_origin_can_reach_a_better_departure() {
     // Nothing leaves stop 3, but stop 0 is a walk away and trip 1 leaves it.
     let table = Timetable::new(4, town().connections().iter().copied());
     let paths = Footpaths::new(4, [(3, 0, 60), (0, 3, 60)]);
-    let by_events = expanded_with(&table, &paths).earliest_arrival(&[(3, 28_700)], 2).unwrap();
-    let by_stops = earliest_arrival(&table, &[(3, 28_700)], 2, Transfer::instant(), &paths).unwrap();
-    assert_eq!(by_events.arrives, 30_000, "walk to 0 by 08:00, ride as before");
+    let by_events = expanded_with(&table, &paths)
+        .earliest_arrival(&[(3, 28_700)], 2)
+        .unwrap();
+    let by_stops =
+        earliest_arrival(&table, &[(3, 28_700)], 2, Transfer::instant(), &paths).unwrap();
+    assert_eq!(
+        by_events.arrives, 30_000,
+        "walk to 0 by 08:00, ride as before"
+    );
     assert_eq!(by_stops.arrives, by_events.arrives);
     assert!(matches!(by_events.legs[0], Leg::Walk(_)));
     assert!(matches!(by_stops.legs[0], Leg::Walk(_)));
@@ -455,7 +556,9 @@ fn both_models_agree_with_brute_force_when_walking() {
             for to in 0..6u32 {
                 let truth = best_by_brute_force(&table, &paths, from, 0, to, 6);
                 assert_eq!(
-                    expanded.earliest_arrival(&[(from, 0)], to).map(|i| i.arrives),
+                    expanded
+                        .earliest_arrival(&[(from, 0)], to)
+                        .map(|i| i.arrives),
                     truth,
                     "seed {seed}: time-expanded, {from} -> {to}"
                 );
@@ -618,7 +721,11 @@ fn changing_at_b_is_a_second_round() {
     assert_eq!((front[0].arrives, boardings(&front[0])), (30_600, 1));
     assert_eq!((front[1].arrives, boardings(&front[1])), (30_000, 2));
     assert_eq!(front[1].transfers(), 1);
-    assert_eq!(front[1].legs.len(), 2, "one leg per connection: 0->1 on trip 1, 1->2 on trip 3");
+    assert_eq!(
+        front[1].legs.len(),
+        2,
+        "one leg per connection: 0->1 on trip 1, 1->2 on trip 3"
+    );
     let best = rounds.earliest_arrival(0, 28_800, 2).unwrap();
     assert_eq!(best.arrives, 30_000);
     for itinerary in front {
@@ -636,7 +743,11 @@ fn a_walk_only_journey_is_round_zero() {
     assert_eq!(front[0].arrives, 28_800 + 300);
     assert!(front[0].rides().next().is_none());
     let search = rounds.search(&[(0, 28_800)], None, None, None);
-    assert_eq!(search.round_reached(3), Some(0), "reached before any vehicle");
+    assert_eq!(
+        search.round_reached(3),
+        Some(0),
+        "reached before any vehicle"
+    );
     assert_eq!(search.round_reached(2), Some(1), "one ride away");
 }
 
@@ -659,7 +770,15 @@ fn overtaking_trips_are_split_into_two_routes() {
     assert_eq!(best.arrives, 300);
     assert_eq!(
         best.arrives,
-        earliest_arrival(&table, &[(0, 100)], 2, Transfer::instant(), &Footpaths::none()).unwrap().arrives
+        earliest_arrival(
+            &table,
+            &[(0, 100)],
+            2,
+            Transfer::instant(),
+            &Footpaths::none()
+        )
+        .unwrap()
+        .arrives
     );
 }
 
@@ -669,7 +788,11 @@ fn a_trip_that_revisits_a_stop_can_be_boarded_at_the_later_visit() {
     // and the second is the ride to 2.
     let table = Timetable::new(
         3,
-        [c(7, 0, 1, 100, 200), c(7, 1, 0, 220, 300), c(7, 0, 2, 320, 400)],
+        [
+            c(7, 0, 1, 100, 200),
+            c(7, 1, 0, 220, 300),
+            c(7, 0, 2, 320, 400),
+        ],
     );
     let rounds = raptor(&table);
     assert_eq!(rounds.num_routes(), 1);
@@ -680,7 +803,15 @@ fn a_trip_that_revisits_a_stop_can_be_boarded_at_the_later_visit() {
         assert!(itinerary.is_valid(&[(from, at)], Transfer::instant(), &Footpaths::none()));
         assert_eq!(
             itinerary.arrives,
-            earliest_arrival(&table, &[(from, at)], 2, Transfer::instant(), &Footpaths::none()).unwrap().arrives
+            earliest_arrival(
+                &table,
+                &[(from, at)],
+                2,
+                Transfer::instant(),
+                &Footpaths::none()
+            )
+            .unwrap()
+            .arrives
         );
     }
 }
@@ -732,8 +863,14 @@ fn the_pareto_front_matches_a_trip_counting_oracle() {
                     if let Some(last) = front.last() {
                         assert_eq!(
                             Some(last.arrives),
-                            earliest_arrival(&table, &[(from, at)], to, Transfer::instant(), &paths)
-                                .map(|i| i.arrives)
+                            earliest_arrival(
+                                &table,
+                                &[(from, at)],
+                                to,
+                                Transfer::instant(),
+                                &paths
+                            )
+                            .map(|i| i.arrives)
                         );
                     }
                 }
@@ -751,7 +888,10 @@ fn max_rounds_caps_the_journeys() {
     assert_eq!(front.len(), 1, "one round: the through ride only");
     assert_eq!(front[0].arrives, 30_600);
     let none = rounds.search(&[(0, 28_800)], Some(2), Some(0), None);
-    assert!(rounds.itinerary(&none, 2).is_none(), "no rounds: nowhere to ride");
+    assert!(
+        rounds.itinerary(&none, 2).is_none(),
+        "no rounds: nowhere to ride"
+    );
 }
 
 #[test]
@@ -763,12 +903,19 @@ fn several_sources_each_carry_their_own_time() {
     // better single source does.
     let both = rounds.search(&[(0, 28_800), (1, 29_600)], Some(2), None, None);
     let one = rounds.search(&[(0, 28_800)], Some(2), None, None);
-    assert_eq!(rounds.itinerary(&both, 2).unwrap().arrives, rounds.itinerary(&one, 2).unwrap().arrives);
+    assert_eq!(
+        rounds.itinerary(&both, 2).unwrap().arrives,
+        rounds.itinerary(&one, 2).unwrap().arrives
+    );
     // And a source that is already ahead wins outright.
     let ahead = rounds.search(&[(0, 28_800), (1, 29_000)], Some(2), None, None);
     let itinerary = rounds.itinerary(&ahead, 2).unwrap();
     assert_eq!(itinerary.arrives, 30_000);
-    assert_eq!(itinerary.legs.len(), 1, "boarded trip 3 at stop 1 without riding from 0");
+    assert_eq!(
+        itinerary.legs.len(),
+        1,
+        "boarded trip 3 at stop 1 without riding from 0"
+    );
     assert_eq!(itinerary.legs[0].from(), 1);
 }
 
@@ -812,12 +959,24 @@ fn the_three_models_agree_from_several_sources() {
             for to in 0..10u32 {
                 let by_stops = earliest_arrival(&table, &sources, to, Transfer::instant(), &paths);
                 let by_events = expanded.earliest_arrival(&sources, to);
-                let by_rounds = rounds.itinerary(&rounds.search(&sources, Some(to), None, None), to);
+                let by_rounds =
+                    rounds.itinerary(&rounds.search(&sources, Some(to), None, None), to);
                 let want = by_stops.as_ref().map(|i| i.arrives);
-                assert_eq!(by_events.as_ref().map(|i| i.arrives), want, "seed {seed}: {sources:?} -> {to}");
-                assert_eq!(by_rounds.as_ref().map(|i| i.arrives), want, "seed {seed}: RAPTOR {sources:?} -> {to}");
+                assert_eq!(
+                    by_events.as_ref().map(|i| i.arrives),
+                    want,
+                    "seed {seed}: {sources:?} -> {to}"
+                );
+                assert_eq!(
+                    by_rounds.as_ref().map(|i| i.arrives),
+                    want,
+                    "seed {seed}: RAPTOR {sources:?} -> {to}"
+                );
                 for itinerary in [by_stops, by_events, by_rounds].into_iter().flatten() {
-                    assert!(itinerary.is_valid(&sources, Transfer::instant(), &paths), "seed {seed}: {sources:?} -> {to}: {itinerary:?}");
+                    assert!(
+                        itinerary.is_valid(&sources, Transfer::instant(), &paths),
+                        "seed {seed}: {sources:?} -> {to}: {itinerary:?}"
+                    );
                 }
             }
         }

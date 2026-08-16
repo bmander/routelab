@@ -12,19 +12,19 @@ use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
-use routelab_core::progress::Progress as CoreProgress;
+use routelab_core::util::progress::Progress as CoreProgress;
 use routelab_gtfs::{load as gtfs_load, Feed, Pairs};
 use routelab_osm::{load as osm_load, OsmNetwork, Profile as OsmProfile};
 
-use routelab_core::contraction::{
+use routelab_core::kernels::contraction::{
     ContractionHierarchy as CoreHierarchy, MeetingSearch as CoreMeetingSearch,
     Ordering as CoreOrdering, Policy,
 };
-use routelab_core::timedep::{
+use routelab_core::kernels::timedep::{
     time_dependent_dijkstra as core_timedep, Calendar as CoreCalendar, Departure as CoreDeparture,
     Waiting as CoreWaiting, Window as CoreWindow,
 };
-use routelab_core::timetable::{
+use routelab_core::kernels::timetable::{
     earliest_arrival as core_earliest_arrival, Footpaths as CoreFootpaths,
     Itinerary as CoreItinerary, Leg, Raptor as CoreRaptor, RaptorSearch as CoreRaptorSearch,
     TimeExpanded as CoreTimeExpanded, Timetable as CoreTimetable, Transfer,
@@ -979,9 +979,8 @@ impl PyTimeExpanded {
     fn build(py: Python<'_>, timetable: &PyTimetable, footpaths: Option<&PyFootpaths>) -> Self {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
-        let expanded = py.detach(|| {
-            CoreTimeExpanded::build(&timetable, Transfer::instant(), &footpaths)
-        });
+        let expanded =
+            py.detach(|| CoreTimeExpanded::build(&timetable, Transfer::instant(), &footpaths));
         PyTimeExpanded {
             inner: Arc::new(expanded),
         }
@@ -1152,7 +1151,9 @@ impl PyRaptorSearch {
 
     /// The earliest arrival at `stop`, however many changes it takes.
     fn itinerary(&self, stop: NodeId) -> Option<PyItinerary> {
-        self.raptor.itinerary(&self.inner, stop).map(PyItinerary::from)
+        self.raptor
+            .itinerary(&self.inner, stop)
+            .map(PyItinerary::from)
     }
 
     /// One itinerary per number of changes that arrives strictly earlier than

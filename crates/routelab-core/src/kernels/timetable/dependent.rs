@@ -37,7 +37,7 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use crate::graph::{NodeId, UNREACHABLE};
+use crate::model::graph::{NodeId, UNREACHABLE};
 
 use super::{Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk};
 

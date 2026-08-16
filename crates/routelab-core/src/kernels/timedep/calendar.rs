@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use crate::graph::{EdgeId, Graph, Weight};
+use crate::model::graph::{EdgeId, Graph, Weight};
 
 use super::{Clock, Waiting, WEEK};
 

@@ -1,7 +1,7 @@
 //! The shared shape of a one-to-all / one-to-many search: what it produced and
 //! what it was asked for.
 
-use crate::graph::{EdgeId, Graph, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
+use crate::model::graph::{EdgeId, Graph, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

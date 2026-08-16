@@ -3,8 +3,10 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use crate::graph::{Graph, NodeId, Weight, UNREACHABLE};
-use crate::search::{check_sources, SearchError, SearchOptions, SearchResult, TargetTracker};
+use crate::model::graph::{Graph, NodeId, Weight, UNREACHABLE};
+use crate::model::search::{
+    check_sources, SearchError, SearchOptions, SearchResult, TargetTracker,
+};
 
 /// Shortest paths from one or more sources, each with an initial cost.
 ///
@@ -67,7 +69,7 @@ pub fn dijkstra(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::NO_NODE;
+    use crate::model::graph::NO_NODE;
 
     /// 0 -> 1 -> 3 costs 3; 0 -> 2 -> 3 costs 30; 4 is isolated.
     fn diamond() -> Graph {

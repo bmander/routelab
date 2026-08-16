@@ -3,9 +3,9 @@
 //! how few nodes settled — is only interesting once that holds.
 
 use super::*;
-use crate::dijkstra::dijkstra;
-use crate::rng::Rng;
-use crate::search::SearchOptions;
+use crate::kernels::dijkstra::dijkstra;
+use crate::model::search::SearchOptions;
+use crate::util::rng::Rng;
 
 /// A `side` x `side` grid, four-connected both ways, with varied weights — the
 /// shape a road network has, and the one hierarchies are good at.

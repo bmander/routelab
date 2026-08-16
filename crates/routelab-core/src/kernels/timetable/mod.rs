@@ -33,7 +33,7 @@
 //! ## The clock is a line, not a cycle
 //!
 //! [`Time`] is seconds since the service day's midnight, and it does **not**
-//! wrap. That is deliberately different from [`crate::timedep::Clock`], which is
+//! wrap. That is deliberately different from [`crate::kernels::timedep::Clock`], which is
 //! weekly and cyclic because the restrictions it reads repeat weekly. A
 //! timetable does not repeat: a service day is a line, and it routinely runs
 //! past its own end — `25:30:00` is how a feed writes a bus that left before
@@ -59,8 +59,8 @@ pub use dependent::earliest_arrival;
 pub use expanded::TimeExpanded;
 pub use raptor::{Raptor, RaptorSearch};
 
-use crate::graph::{Graph, NodeId, Weight};
-use crate::search::SearchOptions;
+use crate::model::graph::{Graph, NodeId, Weight};
+use crate::model::search::SearchOptions;
 
 /// A moment, in seconds since the service day's midnight.
 ///
@@ -225,15 +225,21 @@ impl Footpaths {
     /// footpath graph is a scatter of small components — a street corner, a
     /// transit centre — so this is cheap; it is not, and need not be, an
     /// all-pairs pass over the network.
-    fn closure(stops: usize, given: &[(NodeId, NodeId, Weight)]) -> Vec<(NodeId, NodeId, Time, NodeId)> {
+    fn closure(
+        stops: usize,
+        given: &[(NodeId, NodeId, Weight)],
+    ) -> Vec<(NodeId, NodeId, Time, NodeId)> {
         let graph = Graph::from_edges(stops, given).expect("links were filtered to the stop set");
         let mut closed = Vec::new();
         for origin in 0..stops as NodeId {
             if graph.out_edges(origin).next().is_none() {
                 continue;
             }
-            let Ok(reached) = crate::dijkstra::dijkstra(&graph, &[(origin, 0)], &SearchOptions::default())
-            else {
+            let Ok(reached) = crate::kernels::dijkstra::dijkstra(
+                &graph,
+                &[(origin, 0)],
+                &SearchOptions::default(),
+            ) else {
                 continue;
             };
             for &stop in &reached.order {
@@ -267,7 +273,9 @@ impl Footpaths {
 
     /// Where you can walk from `stop`, as `(to, duration)`.
     pub fn from(&self, stop: NodeId) -> impl Iterator<Item = (NodeId, Time)> + '_ {
-        self.links_from(stop).iter().map(|&(to, duration, _)| (to, duration))
+        self.links_from(stop)
+            .iter()
+            .map(|&(to, duration, _)| (to, duration))
     }
 
     fn links_from(&self, stop: NodeId) -> &[(NodeId, Time, NodeId)] {
@@ -306,7 +314,11 @@ impl Footpaths {
             let Some((walked, via)) = self.link(from, here) else {
                 return Vec::new();
             };
-            let before = if via == from { 0 } else { self.duration(from, via).unwrap_or(0) };
+            let before = if via == from {
+                0
+            } else {
+                self.duration(from, via).unwrap_or(0)
+            };
             hops.push((via, here, walked - before));
             here = via;
         }
@@ -360,7 +372,7 @@ impl Footpaths {
 /// change time, and that is not a parameter this can honour yet — see
 /// [`earliest_arrival`] for why one label per stop cannot express it. Rather
 /// than offer a constructor whose every product would be rejected, the type
-/// makes the unsupported case unrepresentable, the way [`crate::timedep::Waiting`]
+/// makes the unsupported case unrepresentable, the way [`crate::kernels::timedep::Waiting`]
 /// is a closed set of the policies that actually exist.
 ///
 /// The parameter stays in both signatures so that the realistic model, when it
@@ -470,7 +482,7 @@ impl Timetable {
     /// caller — so there is no pair of parallel arrays to zip up wrongly.
     ///
     /// Keyed by input position and not by edge id for the reason
-    /// [`crate::timedep::Calendar::from_input_windows`] is: `Graph` permutes its
+    /// [`crate::kernels::timedep::Calendar::from_input_windows`] is: `Graph` permutes its
     /// edges into CSR order, and everything that produces edges holds input
     /// positions. Getting it backwards would put every bus on the wrong street
     /// without failing.
@@ -595,7 +607,7 @@ impl Itinerary {
     /// Is this a legal itinerary from one of `sources` — each a stop and the
     /// time you are standing there — under `transfer`, walking only `footpaths`?
     ///
-    /// The falsifiability check, in the manner of [`crate::graph::Graph::walk`]:
+    /// The falsifiability check, in the manner of [`crate::model::graph::Graph::walk`]:
     /// the first leg must start at a source no earlier than its time, every
     /// leg must start where the last one ended, no earlier than it arrived; a
     /// ride must leave enough time to change when the vehicle changes; a walk
@@ -644,7 +656,8 @@ impl Itinerary {
                     // A given link, not one the closure invented: an answer
                     // says which footpaths were walked, hop by hop.
                     if !footpaths.is_given(walk.from, walk.to)
-                        || footpaths.duration(walk.from, walk.to) != Some(walk.arrives - walk.departs)
+                        || footpaths.duration(walk.from, walk.to)
+                            != Some(walk.arrives - walk.departs)
                     {
                         return false;
                     }

@@ -3,10 +3,10 @@
 //! the same total. Everything after that is about what the clock adds.
 
 use super::*;
-use crate::dijkstra::dijkstra;
-use crate::graph::{EdgeId, Graph, NodeId, Weight};
-use crate::rng::Rng;
-use crate::search::{SearchOptions, SearchResult};
+use crate::kernels::dijkstra::dijkstra;
+use crate::model::graph::{EdgeId, Graph, NodeId, Weight};
+use crate::model::search::{SearchOptions, SearchResult};
+use crate::util::rng::Rng;
 
 const HOUR: Clock = 3_600;
 const DAY: Clock = 24 * HOUR;

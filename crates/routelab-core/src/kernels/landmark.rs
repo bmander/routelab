@@ -26,12 +26,12 @@
 //! them. It also needs no coordinates at all, which makes it the heuristic for
 //! networks that have no geometry to speak of.
 
-use crate::dijkstra::dijkstra;
-use crate::graph::{Graph, NodeId, Weight, UNREACHABLE};
-use crate::heuristic::Heuristic;
-use crate::progress::Progress;
-use crate::rng::Rng;
-use crate::search::SearchOptions;
+use crate::kernels::dijkstra::dijkstra;
+use crate::model::graph::{Graph, NodeId, Weight, UNREACHABLE};
+use crate::model::heuristic::Heuristic;
+use crate::model::search::SearchOptions;
+use crate::util::progress::Progress;
+use crate::util::rng::Rng;
 
 /// How to choose which nodes become landmarks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

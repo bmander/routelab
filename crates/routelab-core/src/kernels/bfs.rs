@@ -3,8 +3,8 @@
 
 use std::collections::VecDeque;
 
-use crate::graph::{Graph, NodeId, UNREACHABLE};
-use crate::search::{check_nodes, SearchError, SearchOptions, SearchResult, TargetTracker};
+use crate::model::graph::{Graph, NodeId, UNREACHABLE};
+use crate::model::search::{check_nodes, SearchError, SearchOptions, SearchResult, TargetTracker};
 
 /// Hop counts from one or more sources, all of which start at depth 0.
 ///
@@ -60,7 +60,7 @@ pub fn bfs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dijkstra::dijkstra;
+    use crate::kernels::dijkstra::dijkstra;
 
     /// A path 0->1->2->3 with a long shortcut 0->3, plus an isolated node 4.
     fn shortcut() -> Graph {

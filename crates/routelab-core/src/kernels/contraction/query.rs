@@ -1,7 +1,7 @@
 //! The query: two searches climbing the hierarchy, meeting somewhere above.
 //!
 //! The halves are kept **sparse**, which is the whole reason this file does not
-//! reuse [`crate::search::SearchResult`]. That type carries a cost, a parent and
+//! reuse [`crate::model::search::SearchResult`]. That type carries a cost, a parent and
 //! an edge for every node in the graph, which is right for a search that might
 //! settle all of them. A hierarchy query settles a couple of hundred nodes out
 //! of a quarter of a million, so sizing its result to the map rather than to the
@@ -14,8 +14,8 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
 use super::ContractionHierarchy;
-use crate::graph::{EdgeId, Graph, NodeId, Weight, UNREACHABLE};
-use crate::search::SearchError;
+use crate::model::graph::{EdgeId, Graph, NodeId, Weight, UNREACHABLE};
+use crate::model::search::SearchError;
 
 /// How a node was reached by whichever half reached it.
 #[derive(Debug, Clone, Copy)]

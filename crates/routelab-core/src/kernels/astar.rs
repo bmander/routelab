@@ -3,9 +3,9 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use crate::graph::{Graph, NodeId, Weight, UNREACHABLE};
-use crate::heuristic::Heuristic;
-use crate::search::{check_sources, SearchError, SearchOptions, SearchResult};
+use crate::model::graph::{Graph, NodeId, Weight, UNREACHABLE};
+use crate::model::heuristic::Heuristic;
+use crate::model::search::{check_sources, SearchError, SearchOptions, SearchResult};
 
 /// Cheapest path from one or more sources to `target`, guided by `heuristic`.
 ///
@@ -100,8 +100,8 @@ pub fn astar<H: Heuristic>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dijkstra::dijkstra;
-    use crate::heuristic::StandardHeuristic;
+    use crate::kernels::dijkstra::dijkstra;
+    use crate::model::heuristic::StandardHeuristic;
 
     /// Four nodes in a line at x = 0, 1, 2, 3, each hop costing 10, plus a
     /// dead-end spur off node 0 that a guided search should not bother with.

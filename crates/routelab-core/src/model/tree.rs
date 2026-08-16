@@ -13,8 +13,8 @@
 //! the frontier. The trunk is where a search committed; the capillaries are
 //! where it was still guessing.
 
-use crate::graph::{EdgeId, Graph, NodeId};
-use crate::search::SearchResult;
+use crate::model::graph::{EdgeId, Graph, NodeId};
+use crate::model::search::SearchResult;
 
 /// What a branch's thickness should mean.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,8 +97,8 @@ impl SearchResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dijkstra::dijkstra;
-    use crate::search::SearchOptions;
+    use crate::kernels::dijkstra::dijkstra;
+    use crate::model::search::SearchOptions;
 
     /// A trunk 0->1 that forks at 1 into 2 and 3, with 3 continuing to 4.
     /// Every edge costs 10, so magnitudes are easy to read off by hand.

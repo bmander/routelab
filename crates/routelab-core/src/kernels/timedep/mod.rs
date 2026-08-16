@@ -13,7 +13,7 @@
 //! Networks whose travel times themselves vary with the clock — congestion
 //! profiles, timetables — are a harder problem and a different algorithm.
 //!
-//! Nothing here changes [`crate::graph::Graph`]. The graph holds the same
+//! Nothing here changes [`crate::model::graph::Graph`]. The graph holds the same
 //! weights it always did; the schedule lives beside it in a [`Calendar`] passed
 //! per query. A technique may need extra data, but it should not make every
 //! other technique carry it.
@@ -36,12 +36,12 @@ pub const WEEK: Clock = 7 * 24 * 60 * 60;
 /// When a journey starts, and what it may do when it meets a shut edge.
 ///
 /// The two travel together because neither means anything without the other —
-/// the same shape as [`crate::contraction::Ordering`], which carries a
+/// the same shape as [`crate::kernels::contraction::Ordering`], which carries a
 /// contraction policy alongside the limits that policy is applied under. It also
 /// keeps them from being two bare `u32`-ish positionals next to the sources.
 ///
 /// ```
-/// # use routelab_core::timedep::{Departure, Waiting};
+/// # use routelab_core::kernels::timedep::{Departure, Waiting};
 /// let friday_rush = Departure::at(4 * 86_400 + 17 * 3_600);
 /// assert_eq!(friday_rush.waiting(Waiting::Forbidden).waiting, Waiting::Forbidden);
 /// ```

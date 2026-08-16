@@ -106,9 +106,9 @@ impl Progress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contraction::{ContractionHierarchy, Ordering};
-    use crate::graph::Graph;
-    use crate::landmark::{Landmarks, Selection};
+    use crate::kernels::contraction::{ContractionHierarchy, Ordering};
+    use crate::kernels::landmark::{Landmarks, Selection};
+    use crate::model::graph::Graph;
 
     #[test]
     fn a_counter_nobody_wrote_to_cannot_say() {

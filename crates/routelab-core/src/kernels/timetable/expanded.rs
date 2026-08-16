@@ -46,9 +46,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::dijkstra::dijkstra;
-use crate::graph::{Graph, NodeId, Weight};
-use crate::search::{SearchOptions, SearchResult};
+use crate::kernels::dijkstra::dijkstra;
+use crate::model::graph::{Graph, NodeId, Weight};
+use crate::model::search::{SearchOptions, SearchResult};
 
 use super::{Footpaths, Itinerary, Leg, Ride, Time, Timetable, Transfer, Walk};
 
@@ -215,7 +215,8 @@ impl TimeExpanded {
         self.events.len() * std::mem::size_of::<Event>()
             + self.rides.len() * std::mem::size_of::<Ride>()
             + self.footpaths.footprint()
-            + self.reached_by_foot
+            + self
+                .reached_by_foot
                 .iter()
                 .map(|links| links.len() * std::mem::size_of::<(NodeId, Time)>())
                 .sum::<usize>()
@@ -248,7 +249,11 @@ impl TimeExpanded {
                 standing = Some((arrives, walk));
             }
         };
-        let mut seed = |stop: NodeId, ready: Time, walk: Option<Walk>, seeds: &mut Vec<(NodeId, Time)>, walked_to: &mut HashMap<NodeId, Walk>| {
+        let mut seed = |stop: NodeId,
+                        ready: Time,
+                        walk: Option<Walk>,
+                        seeds: &mut Vec<(NodeId, Time)>,
+                        walked_to: &mut HashMap<NodeId, Walk>| {
             let Some(start) = first_departure(&self.departures, &self.events, stop, ready) else {
                 return;
             };
@@ -362,7 +367,13 @@ impl TimeExpanded {
         Itinerary {
             arrives,
             legs: walk
-                .map(|walk| self.footpaths.expand(walk).into_iter().map(Leg::Walk).collect())
+                .map(|walk| {
+                    self.footpaths
+                        .expand(walk)
+                        .into_iter()
+                        .map(Leg::Walk)
+                        .collect()
+                })
                 .unwrap_or_default(),
             settled: 0,
         }
@@ -412,7 +423,12 @@ impl TimeExpanded {
                 (first, settled)
             }
             Some(bound) => {
-                let again = dijkstra(&self.graph, seeds, &SearchOptions::default().with_max_cost(bound)).ok()?;
+                let again = dijkstra(
+                    &self.graph,
+                    seeds,
+                    &SearchOptions::default().with_max_cost(bound),
+                )
+                .ok()?;
                 let settled = first.order.len() + again.order.len();
                 (again, settled)
             }
@@ -423,17 +439,19 @@ impl TimeExpanded {
             .iter()
             .filter_map(|&event| found.cost(event).map(|time| (event, None, time)));
         let walked = by_foot.iter().flat_map(|&(stop, duration)| {
-            self.arrivals[stop as usize].iter().filter_map(move |&event| {
-                found.cost(event).map(|time| {
-                    let walk = Walk {
-                        from: stop,
-                        to,
-                        departs: time,
-                        arrives: time.saturating_add(duration),
-                    };
-                    (event, Some(walk), walk.arrives)
+            self.arrivals[stop as usize]
+                .iter()
+                .filter_map(move |&event| {
+                    found.cost(event).map(|time| {
+                        let walk = Walk {
+                            from: stop,
+                            to,
+                            departs: time,
+                            arrives: time.saturating_add(duration),
+                        };
+                        (event, Some(walk), walk.arrives)
+                    })
                 })
-            })
         });
         let (event, walk_in, arrives) = direct.chain(walked).min_by_key(|&(_, _, time)| time)?;
         Some(Found {

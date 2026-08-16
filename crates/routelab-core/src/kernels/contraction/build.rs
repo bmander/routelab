@@ -10,9 +10,9 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use super::{Expansion, Ordering, Policy};
-use crate::graph::{Graph, NodeId, Weight, UNREACHABLE};
-use crate::progress::Progress;
-use crate::rng::Rng;
+use crate::model::graph::{Graph, NodeId, Weight, UNREACHABLE};
+use crate::util::progress::Progress;
+use crate::util::rng::Rng;
 
 /// One direction of an arc in the working graph. `other` is the far end: the
 /// head for an outgoing arc, the tail for an incoming one.
