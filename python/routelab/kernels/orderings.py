@@ -6,7 +6,7 @@ across town needs a shortcut to stand in for it; contract the cul-de-sacs first
 and most of them cost nothing at all.
 
 Ordering is a policy, so it is a spec, the same shape as
-:mod:`routelab.heuristics` member for member: say what it cannot get from an
+:mod:`routelab.kernels.heuristics` member for member: say what it cannot get from an
 environment with ``missing_from``, and turn it into the artifact with ``bind``.
 The parallel is exact — ``Landmarks(16,
 selection="farthest")`` is also a policy for choosing nodes, and binding it runs
@@ -23,8 +23,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from . import _routelab
-from .model.environment import CompiledEnvironment
+from .. import _routelab
+from ..model.environment import CompiledEnvironment
 
 __all__ = ["EdgeDifference", "Ordering", "RandomOrder"]
 

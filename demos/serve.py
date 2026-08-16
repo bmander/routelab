@@ -200,7 +200,7 @@ def rides_transit(planner: rl.Planner) -> bool:
     The one question that decides which world a query happens in — street
     corners or bus stops.
     """
-    return isinstance(planner, rl.planners.TimetablePlanner)
+    return isinstance(planner, rl.kernels.TimetablePlanner)
 
 
 class Board(NamedTuple):

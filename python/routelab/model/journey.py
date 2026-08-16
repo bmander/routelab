@@ -66,7 +66,7 @@ class Journey:
     own length everywhere else.
 
     ``cost`` is what the planner was optimizing, which is not always the sum of
-    the leg weights: :class:`~routelab.planners.BFS` counts hops, so its journeys
+    the leg weights: :class:`~routelab.kernels.BFS` counts hops, so its journeys
     report a hop count while their legs still carry real edge weights.
     """
 
@@ -98,7 +98,7 @@ class Journey:
         individually.
 
         Zero for a search with no clock, and clamped at zero for one whose cost
-        is not seconds at all — :class:`~routelab.planners.BFS` counts hops, and
+        is not seconds at all — :class:`~routelab.kernels.BFS` counts hops, and
         the difference between a hop count and a sum of seconds is not a wait.
         """
         return max(0, self.cost - sum(leg.weight for leg in self.legs))

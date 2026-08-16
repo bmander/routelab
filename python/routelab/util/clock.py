@@ -82,7 +82,7 @@ def service_seconds(departing: Departure) -> int:
     folding its arrival back to 00:10 would put it before its own departure.
 
     A `datetime` is read for its time of day only — the *date* selects the
-    service day when the feed is loaded (:class:`~routelab.sources.gtfs.GTFS`),
+    service day when the feed is loaded (:class:`~routelab.data.gtfs.GTFS`),
     not when a query is asked, so it has nothing to say here.
     """
     if isinstance(departing, bool):

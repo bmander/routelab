@@ -19,7 +19,7 @@ is what a timetable technique derives from this layer at bind, as a
 
 One service day at a time. GTFS writes ``25:30:00`` for a bus that leaves before
 midnight and arrives after it, so a service day is a line rather than a cycle,
-and :mod:`routelab.clock`'s weekly seconds are a different clock — which is why a
+and :mod:`routelab.util.clock`'s weekly seconds are a different clock — which is why a
 walking layer and this one cannot yet share an environment.
 """
 
@@ -94,7 +94,7 @@ class GTFS(EdgeSource):
 
         ``(trip, departs, arrives)``, with times in seconds since the service
         day's midnight and possibly past 86400. The hook mirrors
-        :meth:`~routelab.sources.osm.OSM.windows`: indices are this layer's own,
+        :meth:`~routelab.data.osm.OSM.windows`: indices are this layer's own,
         and :class:`~routelab.Departures` — the derivation the timetable
         techniques bind — does the translation into the graph's numbering.
         """
@@ -162,7 +162,7 @@ class GTFS(EdgeSource):
         """Trips this reader could not represent, and so dropped.
 
         Reported rather than hidden, in the manner of
-        :attr:`~routelab.sources.osm.OSM.unreadable_schedules`. Frequency-based
+        :attr:`~routelab.data.osm.OSM.unreadable_schedules`. Frequency-based
         service is the big one; a feed built on it would come back nearly empty
         and should say so rather than look sparse.
         """

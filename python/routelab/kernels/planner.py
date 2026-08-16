@@ -1,4 +1,4 @@
-"""Planners: a technique you configure, then bind to an environment.
+"""The shape every technique has: configure, bind, then ask.
 
     technique = AStar(Landmarks(16))     # configuration, costing nothing
     planner = technique.bind(env)        # preprocessing, costing seconds
@@ -32,28 +32,19 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, Hashable, Iterable, List, Mapping, Optional, Tuple, Union
 
-from . import _routelab
-from .util.clock import service_seconds, weekly_seconds
+from .. import _routelab
+from ..model.environment import CompiledEnvironment, Environment
+from ..model.journey import Journey
+from ..model.search import Result, SearchResult
+from ..model.searchspace import SearchSpace, ShortestPathTree
+from ..util.clock import service_seconds, weekly_seconds
 from .departures import Departures, Walks
-from .model.environment import CompiledEnvironment, Environment
-from .heuristics import Heuristic
 from .schedule import Schedule
-from .model.journey import Journey
-from .orderings import EdgeDifference, Ordering
-from .model.search import Result, SearchResult, astar, bfs, dijkstra
-from .model.searchspace import MeetingTrees, Rounds, SearchSpace, ShortestPathTree
 
 __all__ = [
-    "AStar",
-    "BFS",
-    "ContractionHierarchy",
-    "Dijkstra",
+    "OPTIONS",
     "Origins",
     "Planner",
-    "RAPTOR",
-    "TimeDependent",
-    "TimeDependentDijkstra",
-    "TimeExpanded",
     "TimetablePlanner",
     "clock_readers",
     "names",
@@ -61,6 +52,7 @@ __all__ = [
     "route",
     "techniques",
 ]
+
 
 #: How a caller names where to start: one label, a list of labels, or a mapping
 #: of labels to the cost of already being there. Tuples and strings are single
@@ -467,218 +459,6 @@ class Planner:
         return f"{type(self).__name__}({inside}){bound}"
 
 
-class Dijkstra(Planner):
-    """Cheapest-cost routing over fixed-cost edges."""
-
-    options = frozenset({"max_cost"})
-
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> SearchResult:
-        return dijkstra(self._bound().graph, starts, **options)
-
-
-class BFS(Planner):
-    """Fewest-hops routing, ignoring edge costs.
-
-    Origins all start at depth 0: a hop count cannot express "you are already
-    part of the way there", so an initial cost has nowhere to go.
-    """
-
-    options = frozenset({"max_depth"})
-
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> SearchResult:
-        priced = {self.label(node) for node, cost in starts.items() if cost}
-        if priced:
-            raise ValueError(
-                f"BFS counts hops, so origins cannot carry an initial cost: "
-                f"{', '.join(repr(label) for label in sorted(priced, key=repr))}"
-            )
-        return bfs(self._bound().graph, list(starts), **options)
-
-
-class AStar(Planner):
-    """Cheapest-cost routing, guided toward the destination by a heuristic.
-
-        AStar(Euclidean()).bind(env).route("a", "b")
-
-    Returns exactly what :class:`Dijkstra` returns, by settling fewer nodes — how
-    many fewer is the whole question, and ``len(result.order)`` is how you answer
-    it.
-
-    The heuristic is required. A* whose heuristic quietly fell back to zero is
-    Dijkstra wearing its name, which is the one thing a benchmark must never be
-    unable to detect — so :class:`~routelab.heuristics.Zero` has to be asked for
-    out loud.
-    """
-
-    options = frozenset({"max_cost"})
-
-    def __init__(self, heuristic: Heuristic):
-        self.heuristic_spec = heuristic
-
-    def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
-        """Whatever the heuristic needs, on top of what any planner needs."""
-        return super().missing_from(compiled) | self.heuristic_spec.missing_from(compiled)
-
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        """Bind the heuristic to this environment — where a landmark table,
-        and any preprocessing after it, gets built."""
-        self.heuristic = self.heuristic_spec.bind(self._bound(), progress)
-
-    def _footprint(self) -> int:
-        return self.heuristic.footprint
-
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> SearchResult:
-        """Run the guided search. Requires exactly one target.
-
-        A* is goal-directed: the estimate is an estimate *to somewhere*. Without
-        a target there is nothing to aim at, and with several there is no single
-        thing the heuristic could be a bound on.
-        """
-        target = self._single_target(options, "A*")
-        return astar(self._bound().graph, starts, target, self.heuristic, **options)
-
-    def __repr__(self) -> str:
-        return self._describe(repr(self.heuristic_spec))
-
-
-class ContractionHierarchy(Planner):
-    """Exact routing by rewriting the graph, then only ever climbing it.
-
-        ContractionHierarchy().bind(env).route("a", "b")
-
-    Geisberger, Sanders, Schultes and Delling. Preprocessing contracts nodes one
-    at a time, least important first, inserting a **shortcut** wherever removing a
-    node would otherwise have lengthened a shortest path. What comes out is the
-    original graph plus shortcuts and a rank per node — and a query that searches
-    upward from the source and upward from the target and meets above the trip,
-    never looking sideways at the thousands of streets in between.
-
-    The answers are exact. Not approximately exact: the tests hold every distance
-    to Dijkstra's on every instance, because a routing technique that is usually
-    right is not a routing technique.
-
-    Unlike every other technique here, this one searches a graph the environment
-    has never seen. Its answers are unpacked back into the environment's own
-    edges before anyone sees them, so journeys, geometry and provenance work
-    exactly as they do for Dijkstra — a technique may search whatever it likes,
-    but it answers in the caller's terms.
-
-    A hierarchy query takes no bounds: its search is over the contracted graph,
-    where a cost bound would cut off paths that are still cheap in the original.
-
-    Args:
-        ordering: Which node to contract next; see :mod:`routelab.orderings`.
-            A policy, never a correctness choice — every ordering gives the same
-            distances, and a bad one just builds a bigger hierarchy.
-    """
-
-    def __init__(self, ordering: Optional[Ordering] = None):
-        self.ordering = ordering if ordering is not None else EdgeDifference()
-
-    def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
-        """Whatever the ordering needs, on top of what any planner needs."""
-        return super().missing_from(compiled) | self.ordering.missing_from(compiled)
-
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        """Contract the graph. The expensive step, and the whole technique."""
-        self.hierarchy = self.ordering.bind(self._bound(), progress)
-
-    def _footprint(self) -> int:
-        return self.hierarchy.footprint
-
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> Result:
-        """Run the bidirectional query. Requires exactly one target.
-
-        Returns a :class:`~routelab._routelab.MeetingSearch` rather than a
-        `SearchResult`: two searches met in the middle, and neither half alone
-        is the answer. It reports costs and paths in the environment's own edges,
-        which is all :class:`~routelab.Journey` ever asked of a result.
-        """
-        target = self._single_target(options, "A hierarchy")
-        return self.hierarchy.query(list(starts.items()), target)
-
-    def explored(self, result: Result, **options: Any) -> SearchSpace:
-        """The two halves of the search, and where they met."""
-        self._no_other(options, "meeting trees")
-        return MeetingTrees(self._bound(), result)
-
-    def __repr__(self) -> str:
-        return self._describe(repr(self.ordering))
-
-
-class TimeDependentDijkstra(Planner):
-    """Cheapest arrival when the network is not always open.
-
-        TimeDependentDijkstra().bind(env).route("a", "b", departing=time(8, 30))
-
-    Dreyfus, *An Appraisal of Some Shortest-Path Algorithms* (1969): Dijkstra's
-    algorithm generalises to a time-dependent network unchanged, provided
-    arrival is non-decreasing in departure. Here it is, because travel times are
-    constant and only availability varies — a gate is shut, a lane runs the
-    other way — so leaving later cannot arrive earlier.
-
-    This is a *different technique*, not :class:`Dijkstra` with an extra
-    argument, which is what keeps a schedule from being ignored by accident.
-    Ask for `Dijkstra` and you get the always-open network, honestly and
-    knowingly; ask for this one and you get the clock. A departure time is
-    required, and there is no default for it: a time-dependent query without a
-    time is not a query with a sensible fallback, it is a different question.
-
-    Args:
-        waiting: ``"unrestricted"`` waits at a shut edge and pays the wait as
-            travel time — arriving five minutes early beats an hour's detour,
-            and a ten-hour wait loses to one, without anyone deciding which.
-            ``"forbidden"`` treats a shut edge as absent, which is the control
-            that shows waiting is doing real work.
-    """
-
-    options = frozenset({"departing", "max_cost"})
-    required = frozenset({"departing"})
-
-    WAITING = ("unrestricted", "forbidden")
-
-    def __init__(self, waiting: str = "unrestricted"):
-        if waiting not in self.WAITING:
-            raise ValueError(
-                f"unknown waiting policy {waiting!r}; expected "
-                f"{' or '.join(repr(name) for name in self.WAITING)}"
-            )
-        self.waiting = waiting
-
-    def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
-        """A schedule to read, on top of what any planner needs. Without one
-        this is Dijkstra with extra steps, and this says so before anything
-        is built."""
-        return super().missing_from(compiled) | Schedule.missing_from(compiled)
-
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        """Gather the layers' schedules into the calendar every query reads.
-
-        The environment does not keep one; this technique is what reads it,
-        so this technique derives it — and refuses here, at bind, if there is
-        nothing to derive.
-        """
-        self.calendar = Schedule().bind(self._bound(), progress)
-
-    def _footprint(self) -> int:
-        return self.calendar.footprint
-
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> Result:
-        departing = options.pop("departing")
-        compiled = self._bound()
-        return _routelab.time_dependent_dijkstra(
-            compiled.graph,
-            self.calendar,
-            list(starts.items()),
-            weekly_seconds(departing),
-            waiting=self.waiting,
-            **options,
-        )
-
-    def __repr__(self) -> str:
-        return self._describe(repr(self.waiting) if self.waiting != "unrestricted" else "")
-
-
 class TimetablePlanner(Planner):
     """Earliest arrival over a timetable — what the timetable techniques share.
 
@@ -775,177 +555,6 @@ class TimetablePlanner(Planner):
             f"{type(self).__name__} answers with a journey and keeps no search "
             f"space, so there is nothing to draw. RAPTOR() reports its rounds."
         )
-
-
-class TimeDependent(TimetablePlanner):
-    """A node per stop, and a search that reads the clock (Pyrga et al. §4).
-
-        TimeDependent().bind(env).route("1_1234", "1_5678", departing=time(8, 30))
-
-    The graph stays the size of the network. Relaxing an edge is not reading a
-    weight but asking what leaves next along it, which is a binary search over
-    that edge's departures — so the model is small and the search is bespoke.
-    Only the timetable and the walks are built at bind, which is the other half
-    of the trade.
-
-    Changing vehicles is instantaneous here, which is the paper's *simple*
-    model. Its *realistic* one charges a minimum change time and is not
-    expressible with one label per stop: staying in your seat must not be
-    charged, so the cost of boarding depends on which vehicle you arrived on.
-    The paper's answer is more nodes (§4.2); RAPTOR's rounds are another.
-    """
-
-    def _earliest_arrival(
-        self, sources: "List[Tuple[int, int]]", target: int, options: "Dict[str, Any]"
-    ) -> "Optional[_routelab.Itinerary]":
-        return self.timetable.earliest_arrival(sources, target, self.footpaths)
-
-
-class TimeExpanded(TimetablePlanner):
-    """A node per event, and then it is just a graph (Pyrga et al. §3).
-
-        TimeExpanded().bind(env).route("1_1234", "1_5678", departing=time(8, 30))
-
-    Every departure and every arrival becomes its own node; riding and waiting
-    become edges. What comes out is an ordinary static graph, so
-    :func:`~routelab.dijkstra` routes it unchanged — and so would A*, or
-    landmarks, or a contraction hierarchy. That is the model's whole appeal.
-
-    Its cost is size. A city's weekday is a few thousand stops and hundreds of
-    thousands of events, so the graph is built once at bind time and
-    :attr:`footprint` is worth reading before you build one.
-    """
-
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        super().preprocess(progress)
-        self._expanded = _routelab.TimeExpanded.build(self.timetable, self.footpaths)
-
-    def _footprint(self) -> int:
-        return super()._footprint() + self._expanded.footprint
-
-    @property
-    def num_events(self) -> int:
-        """Nodes in the expanded graph — the number the model is judged on."""
-        self._bound()
-        return self._expanded.num_events
-
-    @property
-    def searches(self) -> "Tuple[str, int]":
-        return ("events", self.num_events)
-
-    def _earliest_arrival(
-        self, sources: "List[Tuple[int, int]]", target: int, options: "Dict[str, Any]"
-    ) -> "Optional[_routelab.Itinerary]":
-        return self._expanded.earliest_arrival(sources, target)
-
-
-class RAPTOR(TimetablePlanner):
-    """Round-based public transit routing (Delling, Pajor & Werneck, 2012).
-
-        RAPTOR().bind(env).route(origin, target, departing=time(8, 30))
-
-    No graph. Round `k` scans, once each, every route touched in round `k-1`
-    and rides the earliest trip that can be caught, so after `k` rounds every
-    stop holds its earliest arrival with at most `k-1` changes. That is
-    one-to-all by construction — a label per stop per round — which is why,
-    alone among the timetable techniques, this one has a real :meth:`search`
-    and something to draw. It is Pareto by construction too: arrival against
-    changes, one incomparable journey per round that improved something, which
-    is what :meth:`frontier` hands back.
-
-    ``max_transfers`` is a query option, not a constructor argument, for the
-    reason ``max_cost`` is: it bounds one question, not the technique.
-    Changing vehicles is instantaneous, as it is for the two Pyrga models it is
-    checked against; a minimum change time is a new kernel ``Transfer``
-    constructor and would land in all three at once, so it is not a knob here.
-    """
-
-    options = frozenset({"departing", "max_transfers"})
-
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        super().preprocess(progress)
-        self._raptor = _routelab.Raptor.build(self.timetable, self.footpaths)
-
-    def _footprint(self) -> int:
-        return super()._footprint() + self._raptor.footprint
-
-    @property
-    def num_routes(self) -> int:
-        """Routes in the paper's sense — distinct stop sequences whose trips
-        never overtake — which is more than a feed's own count of routes."""
-        self._bound()
-        return self._raptor.num_routes
-
-    @property
-    def num_trips(self) -> int:
-        self._bound()
-        return self._raptor.num_trips
-
-    @staticmethod
-    def _rounds(max_transfers: Optional[int]) -> Optional[int]:
-        """`k` changes is `k + 1` trips is `k + 1` rounds."""
-        if max_transfers is None:
-            return None
-        if max_transfers < 0:
-            raise ValueError(
-                f"max_transfers counts changes of vehicle, so it cannot be {max_transfers}"
-            )
-        return int(max_transfers) + 1
-
-    # RAPTOR keeps a label per stop per round, so it has a cost table like any
-    # graph search and `Planner.route` — search, then read the journey off the
-    # result — is the whole implementation. The itinerary hook the two Pyrga
-    # models need is not used here.
-    _route = Planner._route
-
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> "_routelab.RaptorSearch":
-        """Run the rounds — toward one target if given, else to every stop."""
-        sources, at = self._sources(starts, options)
-        target = None
-        if options.get("targets"):
-            target = self._single_target(options, "RAPTOR, pruning toward a target,")
-        return self._raptor.search(
-            sources, target, self._rounds(options.get("max_transfers")), at
-        )
-
-    def journey(self, result: Result, destination: Hashable) -> Optional[Journey]:
-        """The earliest arrival at ``destination`` a kept search holds."""
-        itinerary = result.itinerary(self.node_id(destination))  # type: ignore[attr-defined]
-        if itinerary is None:
-            return None
-        return Journey.from_itinerary(self._bound(), itinerary, destination, result.departing)
-
-    def journeys(self, result: Result, destination: Hashable) -> "List[Journey]":
-        """Every journey a kept search holds for ``destination``: the earliest
-        arrival for each number of changes, fewest changes first, none
-        dominated by another.
-
-        The counterpart to :meth:`journey`, and what :meth:`frontier` is in
-        terms of — so a caller holding a search never pays for a second one.
-        """
-        compiled = self._bound()
-        target = self.node_id(destination)
-        return [
-            Journey.from_itinerary(compiled, itinerary, destination, result.departing)
-            for itinerary in result.itineraries(target)  # type: ignore[attr-defined]
-        ]
-
-    def frontier(
-        self, origin: Origins, destination: Hashable, **options: Any
-    ) -> "List[Journey]":
-        """Every journey worth having, in one call: the Pareto front over
-        arrival time and changes, where :meth:`route` returns only its last
-        entry.
-        """
-        options = self._options(options)
-        starts = self._origin_ids(origin)
-        result = self._search(starts, targets=[self.node_id(destination)], **options)
-        return self.journeys(result, destination)
-
-    def explored(self, result: Result, **options: Any) -> SearchSpace:
-        """Every stop the rounds reached, by the round that first got there."""
-        self._no_other(options, "rounds")
-        return Rounds(self._bound(), result)
 
 
 def route(

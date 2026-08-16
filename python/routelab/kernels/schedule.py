@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Iterator, List, Optional, Tuple
 
-from . import _routelab
-from .model.environment import CompiledEnvironment, EdgeSource
+from .. import _routelab
+from ..model.environment import CompiledEnvironment, EdgeSource
 
 __all__ = ["Schedule"]
 
@@ -25,7 +25,7 @@ __all__ = ["Schedule"]
 def windows_of(source: EdgeSource, index: int) -> "Optional[List[Tuple[int, int]]]":
     """When a layer's ``index``-th edge may be travelled, or ``None`` for always.
 
-    Optional in the same way :func:`~routelab.environment.shape_of` is: a layer
+    Optional in the same way :func:`~routelab.model.environment.shape_of` is: a layer
     that knows nothing about time simply has no hook, and everything it
     contributes is open at every hour.
     """

@@ -26,9 +26,10 @@ benchmark an algorithm.
 
 from __future__ import annotations
 
-from . import _routelab, data, heuristics, orderings, planners, reference
+from . import _routelab, data, kernels, reference
+from .kernels import heuristics, orderings
 from .util._args import Nodes, Sources
-from .departures import Departures, Walks
+from .kernels.departures import Departures, Walks
 from .model.environment import (
     CompiledEnvironment,
     EdgeSource,
@@ -37,12 +38,12 @@ from .model.environment import (
     ScalarEdges,
 )
 from .model.graph import Graph
-from .heuristics import Euclidean, Heuristic, Landmarks, Pace, Plane, Zero
+from .kernels.heuristics import Euclidean, Heuristic, Landmarks, Pace, Plane, Zero
 from .model.journey import Journey, Leg
-from .orderings import EdgeDifference, Ordering, RandomOrder
+from .kernels.orderings import EdgeDifference, Ordering, RandomOrder
 from .util.clock import WEEK, service_seconds, weekly_seconds
-from .schedule import Schedule
-from .planners import (
+from .kernels.schedule import Schedule
+from .kernels import (
     BFS,
     RAPTOR,
     AStar,
@@ -53,10 +54,13 @@ from .planners import (
     TimeDependentDijkstra,
     TimeExpanded,
     TimetablePlanner,
+    astar,
+    bfs,
     clock_readers,
+    dijkstra,
     route,
 )
-from .model.search import EdgeResult, Result, SearchResult, astar, bfs, dijkstra
+from .model.search import EdgeResult, Result, SearchResult
 from .model.searchspace import (
     Branch,
     Leap,
@@ -129,7 +133,7 @@ __all__ = [
     "Reach",
     "Rounds",
     "clock_readers",
-    "planners",
+    "kernels",
     "service_seconds",
 ]
 

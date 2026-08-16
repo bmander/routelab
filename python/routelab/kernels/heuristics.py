@@ -24,8 +24,8 @@ from __future__ import annotations
 
 from typing import Hashable, List, Optional, Tuple
 
-from . import _routelab
-from .model.environment import CompiledEnvironment
+from .. import _routelab
+from ..model.environment import CompiledEnvironment
 
 __all__ = ["Euclidean", "Heuristic", "Landmarks", "Pace", "Plane", "Zero"]
 

@@ -21,8 +21,8 @@ from __future__ import annotations
 
 from typing import Hashable, Iterator, List, Optional, Set, Tuple
 
-from . import _routelab
-from .model.environment import CompiledEnvironment, EdgeSource
+from .. import _routelab
+from ..model.environment import CompiledEnvironment, EdgeSource
 
 __all__ = ["Departures", "Walks"]
 
