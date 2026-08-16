@@ -36,8 +36,8 @@ function dropPin(latlng) {
   const pin = L.marker(latlng, {icon: PIN, draggable: true}).addTo(map);
   // Live while moving, and the whole picture once it stops.
   pin.on('dragstart', () => space.clearLayers());
-  pin.on('drag', () => trace());
-  pin.on('dragend', () => request(true));
+  pin.on('drag', () => ask(false));
+  pin.on('dragend', () => ask(true));
   pins.push(pin);
   return pin;
 }
@@ -55,7 +55,7 @@ map.on('click', event => {
     readout.className = 'hint';
     readout.textContent = 'Now click a destination.';
   } else {
-    request(true);
+    ask(true);
   }
 });
 
@@ -66,7 +66,7 @@ const board = new Board(document.getElementById('board'), explore => {
   if (pins.length === 2) {
     // A slider still moving asks for the route alone; anything else — a wire,
     // a dropdown, a node let go of — asks for the whole picture.
-    if (explore === false) { space.clearLayers(); trace(); } else { request(true); }
+    if (explore === false) { space.clearLayers(); ask(false); } else { ask(true); }
   }
 });
 
@@ -145,7 +145,7 @@ document.addEventListener('mousedown', event => {
 document.getElementById('reset').addEventListener('click', () => {
   defaultGraph();
   syncUrl();
-  if (pins.length === 2) { request(true); }
+  if (pins.length === 2) { ask(true); }
 });
 
 // A node is deleted with the keyboard, the way it is in every editor that has
@@ -220,7 +220,7 @@ function restoreFromUrl() {
   if (points.length) {
     map.setView(points[0], points.length === 2 ? 14 : 16);
   }
-  if (pins.length === 2) { request(true); }
+  if (pins.length === 2) { ask(true); }
 }
 
 // --- what is already built ---------------------------------------------
@@ -239,7 +239,7 @@ const built = new Set();
 // single-digit milliseconds, and a spinner that appears and vanishes inside one
 // frame reads as a flicker rather than as work.
 const SETTLE = 150;
-let pending = null, generation = 0;
+let pending = null;
 
 /** Spin whatever this request will have to build, once it is clear it is slow.
  *
@@ -316,19 +316,36 @@ function building(job) {
 
 // --- asking ------------------------------------------------------------
 
-// One request in flight at a time, with the last drag position remembered.
+// One request in flight at a time, and one waiting behind it at most.
+//
 // Leaflet fires `drag` on every mousemove, and queueing sixty of those a second
-// would make the route lag further behind the cursor the longer you dragged.
-// This instead runs as fast as the server can answer and no faster.
-let busy = false, missed = false;
-async function trace() {
-  if (busy) { missed = true; return; }
-  busy = true;
-  try {
-    await request(false);
-  } finally {
-    busy = false;
-    if (missed) { missed = false; trace(); }
+// would make the route lag further behind the cursor the longer you dragged. So
+// only the newest pending ask survives — but **exploring is sticky**, and that
+// is the part worth stating, because getting it wrong is what made the search
+// tree stop appearing.
+//
+// A drag that lands while a request is in flight leaves an ask waiting. Let go
+// of the pin and `dragend` asks for the whole picture, tree included. If the
+// waiting route-only ask were allowed to replace that, or to run after it, the
+// tree would be requested and then immediately thrown away — the route would
+// keep working perfectly, which is exactly what made it puzzling.
+let inFlight = false, waiting = null;
+
+function ask(explore) {
+  waiting = {explore: explore || (waiting !== null && waiting.explore)};
+  if (!inFlight) { drain(); }
+}
+
+async function drain() {
+  while (waiting !== null) {
+    const {explore} = waiting;
+    waiting = null;
+    inFlight = true;
+    try {
+      await request(explore);
+    } finally {
+      inFlight = false;
+    }
   }
 }
 
@@ -339,10 +356,6 @@ async function request(explore) {
     readout.textContent = 'routing…';
   }
   markStale();
-  // A change made while an answer is in flight makes that answer the wrong one.
-  // Without this the slower of two overlapping requests wins, and the board
-  // ends up showing a route its own wiring no longer asks for.
-  const mine = ++generation;
 
   const query = new URLSearchParams({
     from: at(pins[0]), to: at(pins[1]),
@@ -362,7 +375,6 @@ async function request(explore) {
     readout.textContent = `the server did not answer: ${error}`;
     return;
   }
-  if (mine !== generation) { return; }
   settle(answer);
   board.blame(answer.node);
   if (answer.error) {
@@ -384,8 +396,12 @@ async function request(explore) {
   // `direction` is only present on spaces made of more than one search — a
   // hierarchy's two halves, climbing away from either end — and colouring by it
   // is what makes them tell apart. One colour when it is absent.
+  //
+  // Cleared only when this request asked for a tree: an answer with none is
+  // either a route-only refresh mid-drag, which must leave what is drawn
+  // alone, or a query whose `space` output goes nowhere, which must not.
   const halves = {forward: '#1d6fa5', backward: '#7a3b9c'};
-  space.clearLayers();
+  if (explore) { space.clearLayers(); }
   if (answer.tree) {
     L.geoJSON(answer.tree, {
       style: feature => ({
