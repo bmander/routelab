@@ -46,6 +46,10 @@ body { display: flex; flex-direction: column; }
   border: 1px solid #4a505a; border-radius: 4px; padding: 3px 9px; cursor: pointer;
 }
 #toolbar button:hover { background: #3d434b; }
+#toolbar select {
+  font: inherit; font-size: 12px; color: #d8dbe0; background: #33373e;
+  border: 1px solid #4a505a; border-radius: 4px; padding: 3px 6px;
+}
 
 #viewport { position: absolute; inset: 0; top: 29px; overflow: hidden; cursor: grab; }
 #viewport.panning { cursor: grabbing; }

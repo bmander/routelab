@@ -253,6 +253,12 @@ into `Dijkstra` and the node turns red with the library's own sentence:
 Dijkstra cannot route over timetable layers; it accepts scalar
 ```
 
+A dropdown in the board's toolbar loads a starting point — road with landmarks,
+road with a contraction hierarchy, plain Dijkstra as the control, walking that
+reads the clock, and either timetable model when the demo was given a feed. They
+are places to begin rather than modes: load one and then pull it apart. The pins
+stay put across a change, which is the point of having more than one.
+
 Rewiring is cheap because everything is cached by a canonical spelling of the
 node and everything upstream of it, so going back to a shape you had before is
 free. That matters because the expensive things are exactly the ones worth

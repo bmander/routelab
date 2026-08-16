@@ -25,6 +25,11 @@ and the heuristic says it has no rate to price a distance against. Those are the
 errors this project exists to raise, and they are easier to believe when you
 cause one yourself.
 
+A dropdown in the board's toolbar loads a starting point — the same query wired
+six different ways. They are places to begin, not modes: the pins stay where
+they are across a change, so the same two points can be routed by A*, by a
+contraction hierarchy, and by both of the timetable models in turn.
+
 Click once on the map to drop an origin, again for a destination, and the route
 draws over the search tree that found it — the part a routing engine normally
 throws away. Branch widths follow the total hanging off each one, so the tree

@@ -70,28 +70,96 @@ const board = new Board(document.getElementById('board'), explore => {
   }
 });
 
-/** The graph the demo opens with: the three lines of the README, wired up. */
-function defaultGraph() {
+// Wirings worth starting from. Each is one layer, one technique, and whatever
+// that technique needs configuring with — the smallest graph that demonstrates
+// something, rather than a gallery.
+//
+// They are starting points and not modes: load one and then pull it apart. The
+// pins stay where they are across a change, which is the point of having more
+// than one — the same two points, routed six different ways.
+const PRESETS = [
+  {
+    id: 'road-astar',
+    label: 'Road · A* with landmarks',
+    layer: ['OSM', {profile: 'driving'}],
+    technique: ['AStar', {}],
+    // A second input, and the node that fills it.
+    config: ['heuristic', 'Landmarks', {count: 16}],
+  },
+  {
+    id: 'road-dijkstra',
+    label: 'Road · Dijkstra',
+    layer: ['OSM', {profile: 'driving'}],
+    technique: ['Dijkstra', {}],
+  },
+  {
+    id: 'road-ch',
+    label: 'Road · contraction hierarchy',
+    layer: ['OSM', {profile: 'driving'}],
+    technique: ['ContractionHierarchy', {}],
+    config: ['ordering', 'EdgeDifference', {}],
+  },
+  {
+    id: 'walking-clock',
+    label: 'Walking · reads the clock',
+    layer: ['OSM', {profile: 'walking'}],
+    technique: ['TimeDependentDijkstra', {waiting: 'unrestricted'}],
+  },
+  {
+    id: 'transit-dependent',
+    label: 'Transit · time-dependent',
+    needs: 'feed',
+    layer: ['GTFS', {}],
+    technique: ['TimeDependent', {}],
+  },
+  {
+    id: 'transit-expanded',
+    label: 'Transit · time-expanded',
+    needs: 'feed',
+    layer: ['GTFS', {}],
+    technique: ['TimeExpanded', {}],
+  },
+];
+
+/** Lay a preset out on the board, replacing whatever was there. */
+function load(preset) {
   board.nodes = new Map();
   board.links = [];
   board.next = 1;
   const map_node = board.add('Map', 20, 10);
-  const osm = board.add('OSM', 232, 10);
+  const layer = board.add(preset.layer[0], 232, 10);
   const env = board.add('Environment', 444, 10);
-  const heuristic = board.add('Landmarks', 232, 148);
-  const technique = board.add('AStar', 656, 10);
+  const technique = board.add(preset.technique[0], 656, 10);
   const query = board.add('Query', 868, 10);
+  Object.assign(board.nodes.get(layer).params, preset.layer[1]);
+  Object.assign(board.nodes.get(technique).params, preset.technique[1]);
+
   board.links = [
-    {from: osm, fromPort: 'layer', to: env, toPort: 'layers'},
+    {from: layer, fromPort: 'layer', to: env, toPort: 'layers'},
     {from: env, fromPort: 'environment', to: technique, toPort: 'environment'},
-    {from: heuristic, fromPort: 'heuristic', to: technique, toPort: 'heuristic'},
     {from: technique, fromPort: 'planner', to: query, toPort: 'planner'},
+    // The map, on both sides of it.
     {from: map_node, fromPort: 'origin', to: query, toPort: 'origin'},
     {from: map_node, fromPort: 'destination', to: query, toPort: 'destination'},
     {from: query, fromPort: 'route', to: map_node, toPort: 'route'},
     {from: query, fromPort: 'space', to: map_node, toPort: 'space'},
   ];
+  if (preset.config) {
+    const [port, type, params] = preset.config;
+    const node = board.add(type, 232, 148);
+    Object.assign(board.nodes.get(node).params, params);
+    board.links.push({from: node, fromPort: TYPES[type].kind, to: technique, toPort: port});
+  }
   board.draw();
+}
+
+function available(preset) {
+  return preset.needs !== 'feed' || Boolean(SETUP.feed);
+}
+
+/** What the demo opens with, and what `reset` goes back to. */
+function defaultGraph() {
+  load(PRESETS[0]);
 }
 
 // --- add-node menu -----------------------------------------------------
@@ -144,6 +212,24 @@ document.addEventListener('mousedown', event => {
 
 document.getElementById('reset').addEventListener('click', () => {
   defaultGraph();
+  syncUrl();
+  if (pins.length === 2) { ask(true); }
+});
+
+// A menu of starting points, not a statement about what is on the board — pull
+// a preset apart and the board is no longer that preset, and a dropdown still
+// naming it would be lying. So it reads "load a preset" and goes back to saying
+// that as soon as it has loaded one.
+const presets = document.getElementById('preset');
+for (const preset of PRESETS) {
+  if (!available(preset)) { continue; }
+  presets.append(new Option(preset.label, preset.id));
+}
+presets.addEventListener('change', () => {
+  const preset = PRESETS.find(entry => entry.id === presets.value);
+  presets.value = '';
+  if (!preset) { return; }
+  load(preset);
   syncUrl();
   if (pins.length === 2) { ask(true); }
 });
