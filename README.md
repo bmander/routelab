@@ -970,11 +970,35 @@ necessity through the canonical MR of §3.1, which is not implemented — absent
 canonical tiebreaking this keeps a superset in which the rescued journeys are
 covered anyway. It stays because a superset is the safe direction.
 
-What is not here, each its own increment: the **canonical** tiebreaking of §3.1
-that picks one journey among equals, without which this keeps a sufficient but
-larger set than the paper's minimum; the **optimizations** of §3.3, chiefly the
-Dijkstra searches stopped once the last candidate is settled; and the
+The **canonical MR** of §3.1 is here, and turned out to already be: §3.1 spends
+its length on tiebreaking sequences, a total order on equivalent journeys, but
+Lemma 2 reduces the whole construction to two mechanical changes — scan routes
+in route-index order, key the transfer queue on `⟨arrival, vertex index⟩` — and
+both were satisfied incidentally. Nothing was testing either, and both are a
+`.rev()` away from wrong, so each is now pinned on an instance whose answer
+changes when it is reversed.
+
+Most of §3.3 is here as well. Round 2 collects only the routes serving what
+round 1 marked; each round's transfer search stops once nothing left in its
+queue can prune a candidate; and a candidate whose intermediate transfer is
+already a shortcut is demoted to a witness, which cuts candidates six-fold for
+the same shortcuts. Zero-distance clique contraction is *not applicable* here at
+all — every walk this library builds is `max(1, ceil(...))` seconds, so no two
+stops are ever zero apart.
+
+Two pieces of §3.3 remain, and one is worth more than the other: **round 1's
+departure-window route collection**, which a profile bounds at 12% of the time,
+and the **queue kept across runs** with label runs inherited from parents, which
+is what makes early stopping free rather than merely safe. Without it, stopping
+costs superfluous shortcuts rather than answers. Also out: the
 **event-to-event** variant that ULTRA-TB wants.
+
+A note on the numbers in this section. This machine spent the evening carrying
+other work at load averages between 6 and 240, and the same binary has spanned
+4.58s to 6.02s on consecutive runs. Every figure quoted here is from builds run
+interleaved, back to back, and where the effect is small it is a minimum over
+several runs rather than a single reading. Where an effect could not be
+separated from the noise, it says so.
 
 #### Contracting the streets away
 
