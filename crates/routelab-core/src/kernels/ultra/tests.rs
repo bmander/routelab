@@ -502,3 +502,82 @@ fn a_source_with_many_departures_still_answers() {
         }
     }
 }
+
+/// Two ways to reach one stop, equally good — which does the tiebreaking pick?
+///
+/// `s` rides to `p` or to `q`, arriving at both at the same moment, and each
+/// walks to `x` in the same time. So the walk into `x` is a tie, and canonical
+/// MR's Dijkstra key of `⟨arrival, vertex index⟩` decides it: `p` settles
+/// before `q`, writes `x`, and `q`'s equal-arrival walk is discarded.
+fn a_tie(swap: bool) -> (Timetable, Graph) {
+    let (p, q) = if swap { (2, 1) } else { (1, 2) };
+    let connections = vec![
+        crate::kernels::oracles::c(0, 0, p, 0, 10),
+        crate::kernels::oracles::c(1, 0, q, 0, 10),
+        crate::kernels::oracles::c(2, 3, 4, 20, 30),
+    ];
+    let links = vec![(1, 3, 5), (3, 1, 5), (2, 3, 5), (3, 2, 5)];
+    (
+        Timetable::new(5, connections),
+        Graph::from_edges(5, &links).expect("real vertices"),
+    )
+}
+
+#[test]
+fn canonical_mr_breaks_a_tie_by_vertex_index() {
+    for swap in [false, true] {
+        let (table, transfers) = a_tie(swap);
+        let ultra = Ultra::compute(&table, &transfers);
+        let walks: Vec<(NodeId, NodeId)> =
+            ultra.shortcuts().iter().map(|&(a, b, _)| (a, b)).collect();
+        assert!(
+            walks.contains(&(1, 3)),
+            "swap {swap}: tie went to the higher vertex index, not the lower: {walks:?}"
+        );
+        assert!(
+            !walks.contains(&(2, 3)),
+            "swap {swap}: both sides of a tie were kept: {walks:?}"
+        );
+    }
+}
+
+#[test]
+fn canonical_mr_breaks_a_tie_by_route_index() {
+    // Two vehicles leave two different stops at the same moment and reach the
+    // same stop at the same moment, and a rider stepping off the first trip
+    // walks to either of those stops equally quickly. So which stop the
+    // shortcut names is decided by nothing but the order the routes are
+    // scanned in: canonical MR scans them by route index, and the first to
+    // write a label keeps it against anything equal.
+    let connections = vec![
+        crate::kernels::oracles::c(0, 0, 4, 0, 10), // s -> a, the first vehicle
+        crate::kernels::oracles::c(1, 1, 3, 20, 30), // b1 -> z
+        crate::kernels::oracles::c(2, 2, 3, 20, 30), // b2 -> z, identical times
+    ];
+    let links = vec![(4, 1, 5), (1, 4, 5), (4, 2, 5), (2, 4, 5)];
+    let table = Timetable::new(5, connections);
+    let transfers = Graph::from_edges(5, &links).expect("real vertices");
+
+    // Which of b1, b2 its route indexes first is the timetable's business, not
+    // this test's; what is asserted is that the lower index wins.
+    let lines = crate::model::lines::Lines::from_timetable(&table);
+    let route_at = |stop: usize| lines.lines_at(stop as NodeId)[0].0;
+    let (lower, higher) = if route_at(1) < route_at(2) {
+        (1, 2)
+    } else {
+        (2, 1)
+    };
+
+    let ultra = Ultra::compute(&table, &transfers);
+    let walks: Vec<(NodeId, NodeId)> = ultra.shortcuts().iter().map(|&(a, b, _)| (a, b)).collect();
+    assert!(
+        walks.contains(&(4, lower)),
+        "the tie went to route index {}, not {}: {walks:?}",
+        route_at(higher as usize),
+        route_at(lower as usize)
+    );
+    assert!(
+        !walks.contains(&(4, higher)),
+        "both sides of a route tie were kept: {walks:?}"
+    );
+}

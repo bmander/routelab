@@ -52,33 +52,52 @@
 //! transfer back out — that is Algorithm 1 as written, in its *stop-to-stop*
 //! variant, the one RAPTOR and CSA take unchanged.
 //!
+//! The **canonical MR** of §3.1 is here, and is far less code than it is
+//! paper. §3.1 spends its length defining a *tiebreaking sequence* — a total
+//! order on equivalent journeys, read off the last leg backwards — but Lemma 2
+//! then says two mechanical changes to MR suffice to find journeys in
+//! increasing order of it, after which ordinary weak domination discards the
+//! rest. Both are here: routes are scanned in route-index order (`ride` walks
+//! `0..num_lines()`), and the transfer phase's priority queue is keyed on
+//! `⟨arrival, vertex index⟩` rather than on arrival alone. That a journey
+//! ending in a trip beats an equal one ending in a walk falls out of running
+//! `ride` before the transfer phase within a round. No sequence is ever built.
+//!
+//! Both orderings are load-bearing and trivial to break by accident — a
+//! `.rev()`, a plain-integer queue key — so
+//! `canonical_mr_breaks_a_tie_by_route_index` and `..._by_vertex_index` pin
+//! each on an instance whose shortcut changes when it is reversed.
+//!
 //! The **self-pruning** of §3.2 is here too: runs from one source go in
 //! descending departure order and keep each other's labels, so a run that
 //! leaves earlier and arrives no sooner stops instead of propagating. Worth
 //! 2.5x to 2.9x, with the shortcut set unchanged. Its **repair** — the
-//! three-part dominance rule that stops self-pruning from discarding a
-//! canonical journey — is implemented as stated in [`accepts`], and is live:
-//! stub it out and a fixture's shortcuts drop from seven to four. What is
-//! *not* established here is that it is necessary. Over 4,400 random
-//! instances, 241 had a different shortcut set with it than without, and none
-//! of those answered any query wrongly without it. That is consistent with
-//! the paper rather than against it — Theorem 3 routes the repair's necessity
-//! through Lemma 2, which is about the canonical MR of §3.1, and §3.1 is not
-//! implemented. Absent canonical tiebreaking this keeps a superset in which
-//! the rescued journeys are covered anyway. It stays because it is what the
-//! paper says and because a superset is the safe direction.
+//! three-part dominance rule of [`accepts`] that stops self-pruning from
+//! discarding a canonical journey — is implemented as stated, and is live:
+//! stub it out and a fixture's shortcuts drop from seven to four.
 //!
-//! Not here, and each its own increment: the **canonical** tiebreaking of
-//! §3.1, which shrinks the set by choosing one journey among equals — without
-//! it this keeps every intermediate transfer of every Pareto-optimal two-trip
-//! journey, a superset of the paper's, and so sufficient but larger than it
-//! needs to be. The **optimizations** of §3.3 — precomputed initial route
-//! collection, Dijkstra searches stopped once the last candidate is settled
-//! (with the witness limit that then becomes necessary, and the label runs
-//! inherited from parents rather than set to the current run), and pruning
-//! candidates against shortcuts already found. And the **event-to-event**
-//! variant, which computes shortcuts between stop events rather than stops
-//! and is what a trip-based query wants.
+//! What is *not* established is that the repair is **necessary**. Across
+//! roughly 10,400 generated instances — 4,400 random, 6,000 corridors, the
+//! shape built precisely so that a walk between vehicles is load-bearing —
+//! 756 had a different shortcut set with it than without, and not one of those
+//! answered any query wrongly without it. A guess at why, which is a guess and
+//! not the paper's: Theorem 3 promises that every intermediate transfer of
+//! every *canonical* journey is represented, and that is strictly stronger
+//! than what a correct query needs, which is that *some* optimal journey is.
+//! Dropping the repair may lose a canonical journey's shortcut while leaving
+//! an equally good journey answerable by shortcuts that were kept. The repair
+//! stays regardless: it is what the paper says, and a superset is the safe
+//! direction.
+//!
+//! Not here, and each its own increment: the **optimizations** of §3.3 —
+//! precomputed initial route collection, Dijkstra searches stopped once the
+//! last candidate is settled (with the witness limit that then becomes
+//! necessary, and the label runs inherited from parents rather than set to the
+//! current run), pruning candidates against shortcuts already found, and
+//! contracting cliques of stops a zero-length walk apart so they make one run
+//! instead of several. And the **event-to-event** variant, which computes
+//! shortcuts between stop events rather than stops and is what a trip-based
+//! query wants.
 
 #[cfg(test)]
 mod tests;
