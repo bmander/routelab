@@ -992,12 +992,59 @@ fifth of the time. The distances are exact, which is what the tests hold it
 to: on random networks against plain Dijkstra, and on Seattle's own pavements,
 2,356 stop-pair walks with nothing to report.
 
-What is still missing is the half that answers a query from a vertex the
-contraction retired — the upward and downward searches. Every query the core
-serves today starts and ends at a core vertex, so ULTRA does not read one yet
-and the shelf still walks stop to stop. Clicking a doorway on the map is
-waiting on that, and on an access layer to join a stop to the pavement outside
-it.
+#### Starting from a doorway
+
+Streets and a timetable in one environment need one more thing, and it is the
+thing neither layer knows: that a stop and the pavement outside it are the same
+place. `Access` is that and nothing else — an edge each way between every stop
+and the street node nearest it, costed as a walk:
+
+```python
+feed    = rl.GTFS("data/kcm.zip", date(2026, 8, 17))
+streets = rl.OSM("data/Seattle.osm.pbf", rl.Walking())
+env     = rl.Environment(streets, feed, rl.Access(feed, streets, within=400))
+
+planner = rl.ULTRA(rl.RAPTOR()).bind(env)
+planner.route(doorstep, office, departing=time(8, 30))   # walk, ride, walk
+```
+
+It is an ordinary scalar layer, which is the whole design: nothing about the
+environment had to change to carry it, and a walk along it is a leg like any
+other, with provenance and geometry. `within` is the modelling knob, and what
+falls outside it is **counted, not invented** — `access.stranded` is 880 on
+this pair, King County stops standing outside the Seattle extract. Attaching
+them to the nearest corner regardless would have made journeys nobody could
+take.
+
+Two graphs come out of that environment and ULTRA reads both. Preprocessing
+runs on the **core**, because it searches the transfer graph once per departure
+event and Seattle's pavements are half a million vertices; the query runs on
+the **full** graph, because a query starts and ends wherever the caller stood.
+So the upward and downward searches Core-CH would otherwise need never arise —
+not because they were skipped, but because the only search that has to be fast
+is the one between stops, and the stops are exactly what the core kept.
+
+| | |
+|---|---:|
+| stops joined to the pavement | 5,433 |
+| stops the extract does not reach | 880 |
+| compiled environment | 560,706 nodes, 1,498,026 edges |
+| transfer graph | 1,490,988 arcs |
+| core, `max_degree=12` | 180,767 arcs |
+
+The cost to state plainly: **preprocessing here is minutes rather than the
+minute the stop-to-stop case takes**, and that is structural rather than a
+missing optimisation. ULTRA searches once per departure event — 421,604 of
+them — and unlimited walking means each of those searches relaxes the whole
+core, which has four times the arcs a 400 m stop-to-stop transfer graph gave
+it. So the demo board's `Multimodal · streets + transit` preset is a bench you
+set running, not a page you click and wait on.
+
+The sizes above are exact; the wall-clock is deliberately not quoted, because
+the machine it was measured on was carrying thirteen times its cores in other
+work and a number from that would be fiction. Bringing the real one down is the
+paper's own remaining work — self-pruning across descending departure times,
+and the event-to-event variant — rather than a bigger machine.
 
 ### Underneath
 
@@ -1073,7 +1120,8 @@ crates/routelab-core/     Rust. No Python.
                           lines-and-trips layout RAPTOR and trip-based both read.
                           Names nothing above it: the dependency runs one way.
   util/                   Progress counters, seeded RNG.
-crates/routelab-osm/      Reading OpenStreetMap extracts. Kernel-free; wraps `osmpbf`.
+crates/routelab-osm/      Reading OpenStreetMap extracts. Kernel-free; wraps
+                          `osmpbf`, and `rstar` for the index a snap reads.
 crates/routelab-gtfs/     Reading GTFS feeds. Kernel-free; wraps `gtfs-structures`.
 crates/routelab-py/       PyO3 bindings, one module per wrapped subsystem.
                           Conversion and GIL release, nothing else.

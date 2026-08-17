@@ -96,6 +96,12 @@ const LOOKS = {
     sub: () => 'labels over the events',
     available: () => Boolean(SETUP.feed),
   },
+  Access: {
+    title: 'Access', group: 'layers',
+    sub: () => 'stops onto the pavement',
+    available: () => Boolean(SETUP.feed),
+    fields: [{id: 'within', label: 'within (m)', type: 'number', value: 400, min: 10, max: 2000}],
+  },
   ULTRA: {
     title: 'ULTRA', group: 'techniques',
     sub: () => 'no radius',

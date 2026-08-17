@@ -44,27 +44,33 @@ class Transfers:
     #: The word :meth:`missing_from` answers with.
     name = "transfers"
 
-    @staticmethod
-    def _positions(compiled: CompiledEnvironment) -> "List[int]":
-        """Input positions of every scalar edge joining two stops.
+    def __init__(self, max_degree: float = 12.0):
+        self.max_degree = float(max_degree)
 
-        Exactly :meth:`~routelab.Walks.bind`'s rule, and for its reason: an
-        edge to somewhere no vehicle serves is not a transfer between two
-        vehicles, whatever else it might be.
-        """
+    @staticmethod
+    def _stops(compiled: CompiledEnvironment) -> "Set[Hashable]":
+        """The labels a vehicle calls at."""
         stops: "Set[Hashable]" = set()
         for _, _, source in compiled.spans:
             if source.cost_model == "timetable":
                 for tail, head, _ in source.edges():
                     stops.add(tail)
                     stops.add(head)
+        return stops
+
+    @staticmethod
+    def _positions(compiled: CompiledEnvironment) -> "List[int]":
+        """Input positions of every scalar edge.
+
+        All of them, not only the ones between stops the way
+        :meth:`~routelab.Walks.bind` takes: a street is a leg of a transfer
+        even though neither of its ends is a stop, and the whole point of
+        walking without a radius is that the long walks are paths.
+        """
         found: "List[int]" = []
-        for start, _, source in compiled.spans:
-            if source.cost_model != "scalar":
-                continue
-            for offset, (tail, head, _) in enumerate(source.edges()):
-                if tail in stops and head in stops:
-                    found.append(start + offset)
+        for start, stop, source in compiled.spans:
+            if source.cost_model == "scalar":
+                found.extend(range(start, stop))
         return found
 
     @classmethod
@@ -101,6 +107,31 @@ class Transfers:
         self.backward = _routelab.Graph(
             len(compiled), [(head, tail, weight) for tail, head, weight in links]
         )
+
+        # The core, and why there are two graphs. ULTRA's preprocessing
+        # searches this once per departure event, so a city's pavements are out
+        # of reach — Core-CH contracts every vertex that is not a stop and
+        # leaves a graph a hundredth the size with the same distances between
+        # stops, which is all an intermediate transfer ever runs between. The
+        # full graph stays for the query, whose walks start and end wherever
+        # the caller stood rather than at a stop.
+        stops = self._stops(compiled)
+        #: The vertices a vehicle calls at. Kept because a query has to ask
+        #: every one of them where it would get off, and on a street network
+        #: those are a few thousand against half a million corners.
+        self.stops: "List[int]" = sorted(compiled.node_id(label) for label in stops)
+        keep = self.stops
+        streets = len(compiled) - len(stops)
+        if streets > 0 and keep:
+            self.contraction = _routelab.CoreHierarchy.build(
+                self.graph, keep, self.max_degree, progress=progress
+            )
+            self.core = self.contraction.core
+        else:
+            # Nothing to contract: every vertex is already a stop, which is
+            # what a footpath layer on its own gives.
+            self.contraction = None
+            self.core = self.graph
         return self
 
     def compiled_edge(self, edge: int, backward: bool = False) -> int:
@@ -113,7 +144,8 @@ class Transfers:
         return len(self.edges)
 
     def __repr__(self) -> str:
-        return "Transfers()"
+        inside = "" if self.max_degree == 12.0 else f"max_degree={self.max_degree:g}"
+        return f"Transfers({inside})"
 
 
 class ULTRA(TimetablePlanner):
@@ -173,7 +205,7 @@ class ULTRA(TimetablePlanner):
         compiled = self._bound()
         self.timetable = Departures().bind(compiled, progress)
         self.transfers = Transfers().bind(compiled, progress)
-        self.shortcuts = _routelab.Ultra.compute(self.timetable, self.transfers.graph, progress)
+        self.shortcuts = _routelab.Ultra.compute(self.timetable, self.transfers.core, progress)
         # The technique underneath reads the shortcuts rather than a closure,
         # which is the whole of the integration: `walks()` is the seam.
         inner = copy.copy(self.technique)
@@ -207,8 +239,12 @@ class ULTRA(TimetablePlanner):
         same query every technique here takes, asked of the walking.
         """
         search = _routelab.dijkstra(self.transfers.graph, list(starts.items()))
-        reach = {stop: search.cost(stop) for stop in range(len(self._bound()))}
-        return {stop: cost for stop, cost in reach.items() if cost is not None}, search
+        # `reached()` rather than every node: on a street network the two agree
+        # in the end but the walk is over what was settled, not over the
+        # numbering, and the numbering is half a million long.
+        costs = search.costs
+        walk = {stop: costs[stop] for stop in search.reached()}
+        return {stop: cost for stop, cost in walk.items() if cost is not None}, search
 
     def _walk_legs(self, search: Any, forward: bool, at: int, to: int) -> "List[Leg]":
         """A walk through the transfer graph, told as the caller's own edges.
@@ -312,9 +348,12 @@ class ULTRA(TimetablePlanner):
             result = self.inner._search(dict(out), **options)  # noqa: SLF001
             # Where to get off: any stop that walks to the target. That is the
             # final transfer, and it has nothing to do with where the journey
-            # started walking.
-            for stop in range(len(compiled)):
-                walk = home.cost(stop)
+            # started walking. Over what the timetable reached rather than over
+            # the numbering — on a street network those are a few thousand
+            # stops against half a million corners.
+            walks = home.costs
+            for stop in self.transfers.stops:
+                walk = walks[stop]
                 reached = None if walk is None else result.cost(stop)
                 if reached is None:
                     continue

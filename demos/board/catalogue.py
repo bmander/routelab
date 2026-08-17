@@ -78,6 +78,10 @@ NODES: "dict[str, dict]" = {
     # and how far a rider will walk is the knob — which is why it is a node
     # and not something the environment does behind your back.
     "Footpaths": {"kind": "layer", "inputs": {"stops": "layer"}},
+    # The step from a stop onto the pavement outside it. Two layers in,
+    # because it is the only thing that knows they are the same place, and
+    # edges out like any other layer.
+    "Access": {"kind": "layer", "inputs": {"stops": "layer", "streets": "layer"}},
     # A query takes its endpoints from wires like everything else, so "where
     # from" is an argument rather than an ambient fact about the page. Its two
     # answers are separate outputs because they cost different amounts: the

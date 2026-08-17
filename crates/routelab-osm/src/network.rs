@@ -6,6 +6,10 @@
 //! falls in between as the edge's shape rather than as graph nodes.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
+
+use rstar::primitives::GeomWithData;
+use rstar::RTree;
 
 use crate::conditional::Window;
 use crate::profile::{Profile, Travel, WayTags};
@@ -55,6 +59,12 @@ pub struct OsmNetwork {
 
     /// `(min_lat, min_lon, max_lat, max_lon)` over the graph's nodes.
     pub bounds: (f64, f64, f64, f64),
+
+    /// Nodes in an R*-tree, for [`OsmNetwork::nearest`]. Built on first ask
+    /// rather than at read time, because most work over an extract never
+    /// snaps a coordinate to it, and bulk-loading half a million points is
+    /// not free.
+    index: OnceLock<RTree<GeomWithData<[f64; 2], usize>>>,
 }
 
 impl OsmNetwork {
@@ -81,30 +91,56 @@ impl OsmNetwork {
         }
     }
 
+    /// Where a coordinate sits in the flat local space the index is built in.
+    ///
+    /// The same projection [`OsmNetwork::projected`] uses — longitude scaled
+    /// by the cosine of the extract's own extreme latitude — so that a
+    /// straight line in it is a straight line on the ground, near enough for
+    /// deciding which of two nodes is closer.
+    fn flatten(&self, lat: f64, lon: f64) -> [f64; 2] {
+        let (min_lat, _, max_lat, _) = self.bounds;
+        let scale = min_lat.abs().max(max_lat.abs()).to_radians().cos();
+        [lat, lon * scale]
+    }
+
+    /// The nodes in an R*-tree, built the first time anything asks.
+    fn index(&self) -> &RTree<GeomWithData<[f64; 2], usize>> {
+        self.index.get_or_init(|| {
+            RTree::bulk_load(
+                (0..self.num_nodes())
+                    .map(|node| {
+                        GeomWithData::new(self.flatten(self.lats[node], self.lons[node]), node)
+                    })
+                    .collect(),
+            )
+        })
+    }
+
     /// The graph node closest to a coordinate, as the crow flies.
     ///
-    /// A linear scan. At a few hundred thousand nodes it costs under a
-    /// millisecond, which is far less than the spatial index it would take to
-    /// beat it is worth.
+    /// An R*-tree lookup, over an index built on the first call. It used to be
+    /// a linear scan, on the grounds that a scan of a few hundred thousand
+    /// nodes is cheap next to the routing that follows it — which is true of
+    /// one snap and false of a great many. Attaching a feed's six thousand
+    /// stops to a city's pavements is six thousand of them, and that is forty
+    /// seconds of scanning against under one of asking a tree.
     ///
     /// `within` limits the search to the given OSM node ids. Extracts are full
     /// of stubs that connect to nothing under a given profile, and snapping to
     /// one produces a query with no answer for reasons that have nothing to do
     /// with routing — so a caller that knows which nodes are useful can say so.
+    /// The tree is walked in order of distance and the first allowed node
+    /// wins, so a permissive set costs no more than no set at all.
     pub fn nearest(&self, lat: f64, lon: f64, within: Option<&HashSet<i64>>) -> Option<usize> {
-        let scale = lat.to_radians().cos();
-        let distance = |i: usize| {
-            let dlat = self.lats[i] - lat;
-            let dlon = (self.lons[i] - lon) * scale;
-            dlat * dlat + dlon * dlon
-        };
-        (0..self.num_nodes())
-            .filter(|&i| within.is_none_or(|allowed| allowed.contains(&self.node_ids[i])))
-            .min_by(|&a, &b| {
-                distance(a)
-                    .partial_cmp(&distance(b))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+        let query = self.flatten(lat, lon);
+        match within {
+            None => self.index().nearest_neighbor(query).map(|found| found.data),
+            Some(allowed) => self
+                .index()
+                .nearest_neighbor_iter(query)
+                .find(|found| allowed.contains(&self.node_ids[found.data]))
+                .map(|found| found.data),
+        }
     }
 
     /// Project every node into local metres, as `(xs, ys)`.

@@ -180,6 +180,18 @@ const PRESETS = [
     inner: ['technique', 'RAPTOR', {}],
   },
   {
+    // The multimodal one: streets and a timetable in the same environment,
+    // joined at the stops, so a query starts wherever you clicked rather than
+    // at whichever pole happened to be nearest.
+    id: 'multimodal',
+    label: 'Multimodal · streets + transit',
+    layer: ['OSM', {profile: 'walking'}],
+    feed: ['GTFS', {}],
+    access: ['Access', {within: 400}],
+    technique: ['ULTRA', {}],
+    inner: ['technique', 'RAPTOR', {}],
+  },
+  {
     id: 'transit-csa',
     label: 'Transit · CSA',
     layer: ['GTFS', {}],
@@ -252,6 +264,22 @@ function load(preset) {
     spec.links.push({from: 'layer', fromPort: out(layer), to: 'walks', toPort: 'stops'});
     spec.links.push({from: 'walks', fromPort: out(type), to: 'env', toPort: 'layers'});
   }
+  if (preset.feed) {
+    // A second layer, and the one that joins it to the first. This is the
+    // multimodal shape: streets wired in ahead of the feed, because the
+    // layer registered first is the one a click snaps against and clicking
+    // a doorway is the whole point.
+    const [type, params] = preset.feed;
+    spec.nodes.push({id: 'feed', type, x: 232, y: 148, params});
+    spec.links.push({from: 'feed', fromPort: out(type), to: 'env', toPort: 'layers'});
+    if (preset.access) {
+      const [joiner, joinerParams] = preset.access;
+      spec.nodes.push({id: 'access', type: joiner, x: 444, y: 148, params: joinerParams});
+      spec.links.push({from: 'feed', fromPort: out(type), to: 'access', toPort: 'stops'});
+      spec.links.push({from: 'layer', fromPort: out(layer), to: 'access', toPort: 'streets'});
+      spec.links.push({from: 'access', fromPort: out(joiner), to: 'env', toPort: 'layers'});
+    }
+  }
   board.load(spec);
 }
 
@@ -262,7 +290,8 @@ function load(preset) {
  */
 function available(preset) {
   return [preset.layer[0], preset.technique[0], preset.config && preset.config[1],
-          preset.inner && preset.inner[1], preset.walks && preset.walks[0]]
+          preset.inner && preset.inner[1], preset.walks && preset.walks[0],
+          preset.feed && preset.feed[0], preset.access && preset.access[0]]
     .filter(Boolean)
     .every(type => !TYPES[type].available || TYPES[type].available());
 }

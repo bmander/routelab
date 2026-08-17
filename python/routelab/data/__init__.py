@@ -7,8 +7,9 @@ feeds — into the labelled layers the kernels understand.
 
 from __future__ import annotations
 
+from .access import Access
 from .footpaths import Footpaths
 from .gtfs import GTFS
 from .osm import OSM, Cycling, Driving, Profile, Walking
 
-__all__ = ["GTFS", "OSM", "Cycling", "Driving", "Footpaths", "Profile", "Walking"]
+__all__ = ["GTFS", "OSM", "Access", "Cycling", "Driving", "Footpaths", "Profile", "Walking"]

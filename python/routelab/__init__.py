@@ -78,10 +78,11 @@ from .model.searchspace import (
     Segments,
     ShortestPathTree,
 )
-from .data import GTFS, OSM, Cycling, Driving, Footpaths, Profile, Walking
+from .data import GTFS, OSM, Access, Cycling, Driving, Footpaths, Profile, Walking
 
 __all__ = [
     "AStar",
+    "Access",
     "Arrival",
     "BFS",
     "Branch",

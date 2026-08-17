@@ -93,3 +93,87 @@ def test_several_origins_each_carry_a_head_start(feed):
     planner = rl.ULTRA(rl.RAPTOR()).bind(env)
     journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0))
     assert (journey.origin, journey.arrives, journey.cost) == ("C", 8 * 3600 + 360, 360)
+
+
+class Streets(rl.ScalarEdges):
+    """A stand-in street network: corners, the ways between them, and the
+    nearest corner to a point — the three things :class:`~routelab.Access` and
+    a click both ask of a map."""
+
+    def __init__(self, places, edges):
+        super().__init__(list(edges))
+        self._places = places
+
+    def coordinates(self):
+        return self._places
+
+    def nearest(self, lat, lon, within=None):
+        return min(
+            self._places.items(),
+            key=lambda item: (item[1][0] - lat) ** 2 + (item[1][1] - lon) ** 2,
+        )[0]
+
+
+@pytest.fixture
+def multimodal(feed):
+    """Streets beside each stop, joined to it — the multimodal environment.
+
+    A corner outside every stop, a pavement running the length of them, and an
+    Access layer saying which corner is which stop's. Nothing here is a
+    stop-to-stop footpath: every walk is along a street, which is the whole
+    difference.
+    """
+    corners = {
+        "corner-A": (47.6000, -122.3301),
+        "corner-B": (47.6100, -122.3301),
+        "corner-C": (47.6200, -122.3301),
+        "doorstep": (47.5999, -122.3302),
+    }
+    pavement = [
+        ("corner-A", "corner-B", 600), ("corner-B", "corner-A", 600),
+        ("corner-B", "corner-C", 600), ("corner-C", "corner-B", 600),
+        ("doorstep", "corner-A", 30), ("corner-A", "doorstep", 30),
+    ]
+    streets = Streets(corners, pavement)
+    return rl.Environment(streets, feed, rl.Access(feed, streets, within=400))
+
+
+def test_a_journey_can_start_on_a_doorstep(multimodal):
+    # The multimodal query: begin where the caller stood rather than at a
+    # stop, walk to one, ride, and walk off the other end. None of those three
+    # walks is a shortcut — the ends are searched when the query is asked.
+    planner = rl.ULTRA(rl.RAPTOR()).bind(multimodal)
+    journey = planner.route("doorstep", "corner-C", departing=time(8, 0))
+    assert journey is not None
+    assert journey.origin == "doorstep"
+    assert journey.destination == "corner-C"
+    # It rode something, rather than walking the whole way.
+    assert any(leg.trip is not None for leg in journey.legs)
+    # And the legs join up, doorstep to corner, every one an edge of this
+    # environment rather than a straight line somebody invented.
+    chain = [journey.legs[0].tail] + [leg.head for leg in journey.legs]
+    assert chain[0] == "doorstep" and chain[-1] == "corner-C"
+    for before, after in zip(journey.legs, journey.legs[1:]):
+        assert before.head == after.tail
+    assert journey.legs[-1].arrives == journey.arrives
+
+
+def test_walking_the_streets_beats_waiting_when_it_should(multimodal):
+    # Not every multimodal answer rides: from one corner to the next, the
+    # pavement is ten minutes and the bus does not come sooner.
+    planner = rl.ULTRA(rl.RAPTOR()).bind(multimodal)
+    journey = planner.route("doorstep", "corner-A", departing=time(12, 0))
+    assert journey is not None
+    assert all(leg.trip is None for leg in journey.legs), "nothing runs at noon"
+    assert journey.cost == 30
+
+
+def test_the_streets_are_contracted_away_before_the_shortcuts(multimodal):
+    # Core-CH is what makes the transfer graph searchable: the vertices a
+    # vehicle never calls at go, and the stops stay.
+    planner = rl.ULTRA(rl.RAPTOR()).bind(multimodal)
+    transfers = planner.transfers
+    assert transfers.contraction is not None, "a street network should be contracted"
+    assert transfers.core.num_edges <= transfers.graph.num_edges
+    for stop in ("A", "B", "C"):
+        assert transfers.contraction.is_core(planner.node_id(stop))

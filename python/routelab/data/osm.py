@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
-from typing import Hashable, Iterable, Iterator, List, Mapping, Optional, Tuple
+from typing import Hashable, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from .. import _routelab
 from ..model.environment import EdgeSource, LabelledEdge
@@ -173,6 +173,7 @@ class OSM(EdgeSource):
         if not os.path.isfile(self.path):
             raise FileNotFoundError(f"no OSM extract at {self.path!r}")
         self._network: "Optional[_routelab.OsmNetwork]" = None
+        self._node_ids: "Optional[Sequence[int]]" = None
         self._coordinates: "Optional[Mapping[int, Tuple[float, float]]]" = None
         self._positions: "Optional[Mapping[int, Tuple[float, float]]]" = None
         self._windows: "Optional[Mapping[int, List[Tuple[int, int]]]]" = None
@@ -287,7 +288,19 @@ class OSM(EdgeSource):
                 if within is None
                 else f"none of the given nodes are in {self!r}"
             )
-        return self.network.node_ids[index]
+        return self.node_ids()[index]
+
+    def node_ids(self) -> "Sequence[int]":
+        """The OSM id of each graph node, in dense order, kept once.
+
+        The kernel hands these over as a list of every node, so reading one of
+        them is half a million conversions — which is nothing once and eighty
+        milliseconds a time if a caller asks per lookup. Attaching a feed's
+        stops to a city asks thousands of times.
+        """
+        if self._node_ids is None:
+            self._node_ids = self.network.node_ids
+        return self._node_ids
 
     @property
     def bounds(self) -> "Tuple[float, float, float, float]":

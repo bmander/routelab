@@ -242,6 +242,10 @@ class Router:
             value = rl.GTFS(self.feed, self.date).load()
         elif kind == "Footpaths":
             value = rl.Footpaths(one("stops"), within=float(params.get("within", 200))).load()
+        elif kind == "Access":
+            value = rl.Access(
+                one("stops"), one("streets"), within=float(params.get("within", 400))
+            ).load()
         elif kind == "Environment":
             layers = wired("layers")
             if not layers:
@@ -320,11 +324,12 @@ class Router:
     def _snappable(planner: rl.Planner):
         """The layer a click resolves against.
 
-        The first one that can answer "what is nearest here", which with the
-        usual one-layer environment is the only one. An environment of several
-        would want a rule about which wins; there is no such environment on this
-        board yet, and inventing the rule before the case exists would be
-        guessing at it.
+        The first one that can answer "what is nearest here". With a single
+        layer that is the only one; with a feed and a street network both
+        registered, it is whichever was wired into the environment first, and
+        that is the rule rather than an accident — a multimodal board wants
+        clicks to land on the pavement, so the streets go in first and a
+        stop-to-stop board puts the feed there instead.
         """
         for source in planner.environment.sources:
             if hasattr(source, "nearest"):
@@ -458,8 +463,13 @@ class Router:
             end = layer.nearest(end, within=self.reachable(board, planner_id, start))
             result, journey, settled, elapsed = ask(planner.node_id(end))
         if journey is None:
+            # Named where the layer has names — a feed does, a street network
+            # does not, and a multimodal environment snaps against whichever
+            # was registered first.
+            names = getattr(layer, "names", None)
+            here = names().get(start, start) if names else start
             error = (
-                f"no journey from {layer.names()[start]} at that hour"
+                f"no journey from {here} at that hour"
                 if rides_transit(planner)
                 else "no route between those points"
             )
