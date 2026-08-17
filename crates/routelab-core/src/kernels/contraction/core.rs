@@ -52,8 +52,9 @@ pub struct CoreHierarchy {
     upward: Graph,
     /// The same, reversed, for a search that ends below the core.
     downward: Graph,
-    standing: Vec<bool>,
-    /// Rank per vertex, [`UNRANKED`] for one the contraction left standing.
+    /// Rank per vertex, [`UNRANKED`] for one the contraction left standing —
+    /// which is also what says whether a vertex is in the core, so there is no
+    /// second table saying the same thing in another shape.
     ranks: Vec<u32>,
     retired: usize,
 }
@@ -91,7 +92,6 @@ impl CoreHierarchy {
         let ranks = builder.contract_core(&kept, max_degree, progress);
         let retired = ranks.iter().filter(|rank| **rank != UNRANKED).count();
         let core = builder.core_edges();
-        let standing = builder.standing();
 
         // The component's hierarchy, for a search that starts below the core and
         // has to climb into it. Arcs are split the way an ordinary contraction
@@ -119,7 +119,6 @@ impl CoreHierarchy {
             core: Graph::from_edges(graph.num_nodes(), &core)?,
             upward: Graph::from_edges(graph.num_nodes(), &upward)?,
             downward: Graph::from_edges(graph.num_nodes(), &downward)?,
-            standing,
             ranks,
             retired,
         })
@@ -150,12 +149,12 @@ impl CoreHierarchy {
 
     /// Did this vertex survive the contraction?
     pub fn is_core(&self, node: NodeId) -> bool {
-        self.standing.get(node as usize).copied().unwrap_or(false)
+        self.rank(node) == UNRANKED
     }
 
     /// How many vertices are in the core.
     pub fn num_core(&self) -> usize {
-        self.standing.iter().filter(|standing| **standing).count()
+        self.ranks.len() - self.retired
     }
 
     /// How many were contracted away.
@@ -170,7 +169,13 @@ impl CoreHierarchy {
     }
 
     /// Bytes held, as every other preprocessed structure here reports it.
+    /// Bytes held — the core, the two graphs a query climbs, and the ranks
+    /// that tell them apart. All of it, because a footprint that leaves out the
+    /// largest thing it holds is worse than none.
     pub fn footprint(&self) -> usize {
-        self.core.footprint() + self.standing.len()
+        self.core.footprint()
+            + self.upward.footprint()
+            + self.downward.footprint()
+            + self.ranks.len() * std::mem::size_of::<u32>()
     }
 }

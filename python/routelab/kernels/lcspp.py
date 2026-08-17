@@ -10,6 +10,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 from .. import _routelab
 from ..model.environment import CompiledEnvironment
 from .planner import TimetablePlanner
+from .ultra import Transfers
 
 __all__ = ["Modes", "LabelConstrained", "UCCH"]
 
@@ -22,6 +23,10 @@ class Language(NamedTuple):
     labels: bytes
     riding: int
     symbol_of: "Dict[str, int]"
+
+#: A mode the environment does not have, so no arc carries it. Distinct from
+#: `_SCHEDULED`, which every timetable arc carries.
+_NO_MODE = 254
 
 #: The label an arc carries when no language may walk it. Timetable arcs get
 #: this: they are relaxed by asking what leaves next along them, not by adding a
@@ -168,9 +173,7 @@ class Modes:
             mode = _mode_of(source)
             if mode == "transit":
                 continue  # relaxed by its schedule, not by a weight
-            symbol = symbol_of[mode]
-            for position in range(first, last):
-                labels[position] = symbol
+            labels[first:last] = bytes([symbol_of[mode]]) * (last - first)
         return Language(
             automaton,
             bytes(labels),
@@ -252,7 +255,11 @@ class LabelConstrained(TimetablePlanner):
         """Read the layers, label the arcs, build the automaton. No search."""
         super().preprocess(progress)
         compiled = self._bound()
-        language = self.modes.compile(compiled)
+        #: The language read against this environment, kept because UCCH builds
+        #: its hierarchy from the same labels and compiling twice is a byte
+        #: written per arc twice — and two objects that must agree.
+        self.language = self.modes.compile(compiled)
+        language = self.language
         self.automaton = language.automaton
         if self.automaton.is_empty:
             raise ValueError(
@@ -287,15 +294,11 @@ def _served(compiled: CompiledEnvironment) -> "List[int]":
     a stop is joined to the pavement outside it — but a stop the streets never
     reach is joined to nothing, and contracting it would take it out from under
     a trip that rides straight through.
+
+    Which labels those are is :class:`~routelab.kernels.Transfers`'s question
+    too, and asked there first, so it is asked there.
     """
-    stops: "set[int]" = set()
-    for _, _, source in compiled.spans:
-        if source.cost_model != "timetable":
-            continue
-        for tail, head, _ in source.edges():
-            stops.add(compiled.node_id(tail))
-            stops.add(compiled.node_id(head))
-    return sorted(stops)
+    return sorted(compiled.node_id(label) for label in Transfers._stops(compiled))
 
 
 class UCCH(LabelConstrained):
@@ -351,14 +354,19 @@ class UCCH(LabelConstrained):
         rest. Minutes on a city, paid once."""
         super().preprocess(progress)
         compiled = self._bound()
-        language = self.modes.compile(compiled)
+        language = self.language
         # An environment with nothing to contract — no streets, or nothing
         # joining them to the feed — is the plain model rather than a refusal,
         # for the reason ULTRA's `Transfers` gives: there is simply no core
         # distinct from the network, and the search underneath runs as it would
-        # have anyway. A symbol no arc carries contracts nothing.
-        walking = language.symbol_of.get("foot", _SCHEDULED)
-        link = language.symbol_of.get("link", _SCHEDULED)
+        # have anyway.
+        #
+        # A mode this environment does not have is _NO_MODE, which is not
+        # `_SCHEDULED`: that one is what every timetable arc carries, so reusing
+        # it here would hand the whole timetable to the contractor as a walking
+        # network.
+        walking = language.symbol_of.get("foot", _NO_MODE)
+        link = language.symbol_of.get(self.modes.link, _NO_MODE)
         self.hierarchy = _routelab.Ucch.build(
             compiled.graph,
             language.labels,

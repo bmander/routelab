@@ -69,11 +69,11 @@ mod tests;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use super::{Modes, Multimodal};
+use super::{Modes, Multimodal, StateSet};
 use crate::kernels::contraction::{CoreHierarchy, Ordering};
 use crate::kernels::dijkstra::dijkstra;
 use crate::model::graph::{Graph, GraphError, NodeId, Weight, UNREACHABLE};
-use crate::model::search::SearchOptions;
+use crate::model::search::{SearchOptions, SearchResult};
 use crate::model::timetable::{Itinerary, Leg, Time, Walk};
 use crate::util::progress::Progress;
 
@@ -106,7 +106,6 @@ impl Ucch {
     /// numbering, so a stop is the vertex it always was even where no pavement
     /// reaches it. `links` are the arcs that join networks; they are never
     /// contracted, and their endpoints are therefore the core.
-    #[allow(clippy::too_many_arguments)]
     pub fn build(
         walkable: &Graph,
         walking: u8,
@@ -257,11 +256,11 @@ impl Ucch {
         // initial state to walk out of the source, in a final one to walk into
         // the target. The component is one mode, so that is the only question
         // the automaton is asked below the core.
-        let leaving = self.within(allowed, allowed.initial);
-        let arriving = self.within(allowed, allowed.accepting);
+        let leaving = self.any_walks(allowed, allowed.initial);
+        let arriving = self.any_walks(allowed, allowed.accepting);
 
-        let access = self.climb(self.hierarchy.upward(), sources, departure, leaving);
-        let egress = self.climb(
+        let (access, climbed) = self.climb(self.hierarchy.upward(), sources, departure, leaving);
+        let (egress, _) = self.climb(
             self.hierarchy.downward(),
             &[(to, departure)],
             departure,
@@ -300,7 +299,7 @@ impl Ucch {
                     continue;
                 }
                 // Only a final state that walks may use a non-empty egress.
-                if back > 0 && allowed.step(state, self.walking) & (1 << state) == 0 {
+                if back > 0 && !self.walks(allowed, state) {
                     continue;
                 }
                 let arrives = at.saturating_add(back);
@@ -312,7 +311,7 @@ impl Ucch {
         }
 
         let found = answer?;
-        let legs = self.tell(network, sources, &crossing, allowed, found, to);
+        let legs = self.tell(network, sources, climbed.as_ref(), &crossing, found, to);
         Some(Itinerary {
             arrives: best,
             legs,
@@ -320,11 +319,14 @@ impl Ucch {
         })
     }
 
-    /// Does any state in `set` travel `self.walking` without leaving itself?
-    fn within(&self, allowed: &Modes, set: u32) -> bool {
-        (0..allowed.num_states()).any(|state| {
-            set & (1 << state) != 0 && allowed.step(state, self.walking) & (1 << state) != 0
-        })
+    /// May a journey in this state walk the contracted mode?
+    fn walks(&self, allowed: &Modes, state: usize) -> bool {
+        allowed.step(state, self.walking) & (1 << state) != 0
+    }
+
+    /// May any state in `set`?
+    fn any_walks(&self, allowed: &Modes, set: StateSet) -> bool {
+        (0..allowed.num_states()).any(|state| set & (1 << state) != 0 && self.walks(allowed, state))
     }
 
     /// A one-mode climb through the component, as a duration from `departure`.
@@ -337,7 +339,7 @@ impl Ucch {
         sources: &[(NodeId, Time)],
         departure: Time,
         allowed: bool,
-    ) -> Vec<Time> {
+    ) -> (Vec<Time>, Option<SearchResult>) {
         let seeds: Vec<(NodeId, Weight)> = sources
             .iter()
             .filter(|&&(node, _)| (node as usize) < graph.num_nodes())
@@ -348,11 +350,12 @@ impl Ucch {
             for (node, cost) in seeds {
                 standing[node as usize] = standing[node as usize].min(cost);
             }
-            return standing;
+            return (standing, None);
         }
-        dijkstra(graph, &seeds, &SearchOptions::default())
-            .map(|found| found.costs)
-            .unwrap_or_else(|_| vec![UNREACHABLE; graph.num_nodes()])
+        match dijkstra(graph, &seeds, &SearchOptions::default()) {
+            Ok(found) => (found.costs.clone(), Some(found)),
+            Err(_) => (vec![UNREACHABLE; graph.num_nodes()], None),
+        }
     }
 
     /// The product search over the core: Dijkstra on `(core vertex, state)`.
@@ -366,6 +369,7 @@ impl Ucch {
         let states = allowed.num_states();
         let core = self.core_nodes.len();
         let mut crossing = Crossing {
+            states,
             arrivals: vec![UNREACHABLE; core * states],
             parents: vec![None; core * states],
             settled: 0,
@@ -373,12 +377,8 @@ impl Ucch {
         let mut queue: BinaryHeap<Reverse<(Time, usize)>> = BinaryHeap::new();
 
         // Climb in wherever the source's own search reached the core.
-        for (node, &there) in self
-            .core_nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| (index, &access[*node as usize]))
-        {
+        for (index, &node) in self.core_nodes.iter().enumerate() {
+            let there = access[node as usize];
             if there == UNREACHABLE {
                 continue;
             }
@@ -389,10 +389,10 @@ impl Ucch {
                 }
                 // A walk to get here needs a state that walks; standing on the
                 // source needs nothing.
-                if there > 0 && allowed.step(state, self.walking) & (1 << state) == 0 {
+                if there > 0 && !self.walks(allowed, state) {
                     continue;
                 }
-                let product = node * states + state;
+                let product = index * states + state;
                 if at < crossing.arrivals[product] {
                     crossing.arrivals[product] = at;
                     queue.push(Reverse((at, product)));
@@ -412,33 +412,30 @@ impl Ucch {
             for edge in self.core.out_edges(index as NodeId) {
                 let given = self.core.input_index(edge) as usize;
                 let symbol = self.core_labels.get(given).copied().unwrap_or(u8::MAX);
-                let mut next = allowed.step(state, symbol);
+                let next = allowed.step(state, symbol);
                 if next == 0 {
                     continue;
                 }
                 let head = self.core.head(edge) as usize;
-                let arrives = now.saturating_add(self.core.weight(edge));
-                // The leg is told in the network's own vertices, not the core's,
-                // because that is what a caller draws and what a walk is
-                // expanded against.
-                let leg = Leg::Walk(Walk {
-                    from: vertex,
-                    to: self.core_nodes[head],
-                    departs: now,
-                    arrives,
-                });
-                while next != 0 {
-                    let onto = next.trailing_zeros() as usize;
-                    next &= next - 1;
-                    crossing.improve(
-                        head * states + onto,
-                        arrives,
-                        product,
-                        leg,
-                        symbol,
-                        &mut queue,
-                    );
-                }
+                let weight = self.core.weight(edge);
+                // Told in the network's own vertices, not the core's, because
+                // that is what a caller draws and what a walk is expanded
+                // against. Only the contracted mode's arcs can be shortcuts; a
+                // link arc was never contracted, so it is already an arc.
+                let (from, to) = (vertex, self.core_nodes[head]);
+                let made = if symbol == self.walking {
+                    Move::Walk { from, to }
+                } else {
+                    Move::Arc { from, to, weight }
+                };
+                crossing.improve(
+                    head,
+                    next,
+                    now.saturating_add(weight),
+                    product,
+                    made,
+                    &mut queue,
+                );
             }
 
             // The one relaxation a static graph does not have.
@@ -456,36 +453,30 @@ impl Ucch {
                     continue;
                 }
                 let connection = network.timetable.soonest_from(first + boarding);
-                let mut onto_states = riding;
-                while onto_states != 0 {
-                    let onto = onto_states.trailing_zeros() as usize;
-                    onto_states &= onto_states - 1;
-                    crossing.improve(
-                        onto_core as usize * states + onto,
-                        connection.arrives,
-                        product,
-                        Leg::Ride(connection),
-                        u8::MAX,
-                        &mut queue,
-                    );
-                }
+                crossing.improve(
+                    onto_core as usize,
+                    riding,
+                    connection.arrives,
+                    product,
+                    Move::Ride(connection),
+                    &mut queue,
+                );
             }
         }
         crossing
     }
 
     /// The journey, as the arcs it actually took.
-    #[allow(clippy::too_many_arguments)]
     fn tell(
         &self,
         network: &Multimodal<'_>,
         sources: &[(NodeId, Time)],
+        climbed: Option<&SearchResult>,
         crossing: &Crossing,
-        allowed: &Modes,
         found: Found,
         to: NodeId,
     ) -> Vec<Leg> {
-        let states = allowed.num_states();
+        let states = crossing.states;
         let mut moves: Vec<Move> = Vec::new();
         // When the clock starts: not the earliest of the sources but the one
         // this journey actually left from, since each carries its own head start
@@ -494,7 +485,7 @@ impl Ucch {
         let start;
         match found {
             Found::Walked(meeting) => {
-                let (origin, at) = self.nearest_source(sources, meeting, network);
+                let (origin, at) = self.nearest_source(sources, meeting, climbed);
                 start = at;
                 moves.push(Move::Walk {
                     from: origin,
@@ -506,26 +497,13 @@ impl Ucch {
                 // Back through the core, then the climbs either side of it.
                 let mut product = exit * states + state;
                 let mut crossed: Vec<Move> = Vec::new();
-                while let Some((previous, leg, mode)) = crossing.parents[product] {
-                    crossed.push(match leg {
-                        // Only the contracted mode's arcs can be shortcuts; a
-                        // link arc was never contracted, so it is already an arc.
-                        Leg::Walk(walk) if mode == self.walking => Move::Walk {
-                            from: walk.from,
-                            to: walk.to,
-                        },
-                        Leg::Walk(walk) => Move::Arc {
-                            from: walk.from,
-                            to: walk.to,
-                            weight: walk.arrives.saturating_sub(walk.departs),
-                        },
-                        Leg::Ride(ride) => Move::Ride(ride),
-                    });
+                while let Some((previous, made)) = crossing.parents[product] {
+                    crossed.push(made);
                     product = previous;
                 }
                 crossed.reverse();
                 let entry = self.core_nodes[product / states];
-                let (origin, at) = self.nearest_source(sources, entry, network);
+                let (origin, at) = self.nearest_source(sources, entry, climbed);
                 start = at;
                 moves.push(Move::Walk {
                     from: origin,
@@ -580,28 +558,30 @@ impl Ucch {
     }
 
     /// Which source a journey through `entry` actually left from, and when.
+    ///
+    /// Read off the climb that got there rather than searched for: a
+    /// multi-source Dijkstra's path to a vertex begins at whichever source
+    /// reached it, so the answer is already in hand. Asking each source how far
+    /// it is from `entry` would be one search apiece for something the first
+    /// search settled.
     fn nearest_source(
         &self,
         sources: &[(NodeId, Time)],
         entry: NodeId,
-        network: &Multimodal<'_>,
+        climbed: Option<&SearchResult>,
     ) -> (NodeId, Time) {
         if sources.len() == 1 {
             return sources[0];
         }
+        let origin = climbed
+            .and_then(|found| found.path(entry))
+            .and_then(|path| path.first().copied())
+            .unwrap_or(entry);
         sources
             .iter()
-            .min_by_key(|&&(node, at)| {
-                let hops = self.hops(network, node, entry);
-                let walked: u64 = hops.iter().map(|&(_, _, weight)| u64::from(weight)).sum();
-                if node != entry && hops.is_empty() {
-                    u64::MAX
-                } else {
-                    u64::from(at) + walked
-                }
-            })
             .copied()
-            .unwrap_or((entry, departure_of(sources)))
+            .find(|&(node, _)| node == origin)
+            .unwrap_or((origin, departure_of(sources)))
     }
 
     /// One walk, as the arcs of the uncontracted subnetwork it is made of.
@@ -693,28 +673,41 @@ enum Found {
 
 /// What the product search over the core found.
 struct Crossing {
+    /// How many automaton states a vertex is crossed with — fixed for the whole
+    /// crossing, so the tables are indexed state-minor without being told.
+    states: usize,
     arrivals: Vec<Time>,
-    /// How each product vertex was reached, and by an arc of which mode —
-    /// `u8::MAX` for a ride, which is no mode of the scalar network.
-    parents: Vec<Option<(usize, Leg, u8)>>,
+    /// How each product vertex was reached: the move itself, since that is all
+    /// telling the journey needs. A `Leg` here would carry times that get spent
+    /// again from the clock anyway, and a mode byte only to say which of two
+    /// kinds of move it was.
+    parents: Vec<Option<(usize, Move)>>,
     settled: usize,
 }
 
 impl Crossing {
-    #[allow(clippy::too_many_arguments)]
+    /// Settle `made` into every automaton state the arc's label allowed, the
+    /// way [`super::relax`] does — the bit walk belongs here rather than at
+    /// each call site.
     fn improve(
         &mut self,
-        product: usize,
+        head: usize,
+        onto: StateSet,
         arrives: Time,
         from: usize,
-        leg: Leg,
-        mode: u8,
+        made: Move,
         queue: &mut BinaryHeap<Reverse<(Time, usize)>>,
     ) {
-        if arrives < self.arrivals[product] {
-            self.arrivals[product] = arrives;
-            self.parents[product] = Some((from, leg, mode));
-            queue.push(Reverse((arrives, product)));
+        let mut onto = onto;
+        while onto != 0 {
+            let state = onto.trailing_zeros() as usize;
+            onto &= onto - 1;
+            let product = head * self.states + state;
+            if arrives < self.arrivals[product] {
+                self.arrivals[product] = arrives;
+                self.parents[product] = Some((from, made));
+                queue.push(Reverse((arrives, product)));
+            }
         }
     }
 }

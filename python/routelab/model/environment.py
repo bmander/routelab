@@ -378,6 +378,25 @@ class CompiledEnvironment:
         """
         return shape_of(*self.locate(edge_id))
 
+    def coordinates(self) -> "Dict[Hashable, Tuple[float, float]]":
+        """``{label: (lat, lon)}`` from every layer that knows where its nodes
+        are on the ground — the ``coordinates()`` hook a feed and an extract
+        both have.
+
+        Here rather than in whoever wants to draw, because an environment is
+        the thing that knows it is a merge: a multimodal journey walks a street,
+        boards at a stop and gets off at another, so its labels come from more
+        than one layer and one layer's table cannot place them. Later layers
+        win. Not ``positions()``, which is whatever planar unit a distance
+        bound is priced in.
+        """
+        points: "Dict[Hashable, Tuple[float, float]]" = {}
+        for source in self.sources:
+            getter = getattr(source, "coordinates", None)
+            if getter is not None:
+                points.update(getter())
+        return points
+
     def locate(self, edge_id: int) -> "Tuple[EdgeSource, int]":
         """The layer that produced ``edge_id``, and its position within it.
 

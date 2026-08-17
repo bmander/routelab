@@ -363,19 +363,6 @@ class MeetingTrees(SearchSpace):
         return f"MeetingTrees({len(self)} branches, longest span={self.peak})"
 
 
-def _coordinates(compiled) -> dict:
-    """``{label: (lat, lon)}`` from every layer that knows where its nodes are
-    on the ground — the ``coordinates()`` hook a feed and an extract both have.
-    Later layers win. Not ``positions()``, which is whatever planar unit a
-    distance bound is priced in."""
-    points: dict = {}
-    for source in compiled.sources:
-        getter = getattr(source, "coordinates", None)
-        if getter is not None:
-            points.update(getter())
-    return points
-
-
 class Rounds(SearchSpace):
     """Every stop a round-based search reached, by the round that first got there.
 
@@ -391,7 +378,7 @@ class Rounds(SearchSpace):
     def __init__(self, compiled, result):
         self._compiled = compiled
         self._reached = result.reached()
-        self._points = _coordinates(compiled)
+        self._points = compiled.coordinates()
 
     def __len__(self) -> int:
         return len(self._reached)
@@ -470,7 +457,7 @@ class Scan(SearchSpace):
         self._compiled = compiled
         self._reached = result.reached()
         self._departing = result.departing
-        self._points = _coordinates(compiled)
+        self._points = compiled.coordinates()
         self._peak = max(
             (arrives - self._departing for _, arrives in self._reached), default=0
         )
@@ -551,7 +538,7 @@ class Segments(SearchSpace):
     def __init__(self, compiled, result):
         self._compiled = compiled
         self._reached = result.reached()
-        self._points = _coordinates(compiled)
+        self._points = compiled.coordinates()
 
     def __len__(self) -> int:
         return len(self._reached)

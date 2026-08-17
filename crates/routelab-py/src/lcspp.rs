@@ -115,6 +115,19 @@ pub struct PyMultimodal {
     riding: u8,
 }
 
+impl PyMultimodal {
+    /// The kernel's borrowed view of this network. Both searches take one, and
+    /// there is no reason for each to spell it out.
+    fn borrow(&self) -> Multimodal<'_> {
+        Multimodal {
+            scalar: &self.graph,
+            labels: &self.labels,
+            timetable: &self.timetable,
+            riding: self.riding,
+        }
+    }
+}
+
 #[pymethods]
 impl PyMultimodal {
     /// `labels` is the mode of each arc, by **position in the graph's input
@@ -143,12 +156,7 @@ impl PyMultimodal {
         sources: Vec<(NodeId, u32)>,
         target: NodeId,
     ) -> Option<PyItinerary> {
-        let network = Multimodal {
-            scalar: &self.graph,
-            labels: &self.labels,
-            timetable: &self.timetable,
-            riding: self.riding,
-        };
+        let network = self.borrow();
         py.detach(|| label_constrained(&network, &modes.inner, &sources, target))
             .map(PyItinerary::from)
     }
@@ -253,12 +261,7 @@ impl PyUcch {
         sources: Vec<(NodeId, u32)>,
         target: NodeId,
     ) -> Option<PyItinerary> {
-        let borrowed = Multimodal {
-            scalar: &network.graph,
-            labels: &network.labels,
-            timetable: &network.timetable,
-            riding: network.riding,
-        };
+        let borrowed = network.borrow();
         py.detach(|| {
             self.inner
                 .earliest_arrival(&borrowed, &modes.inner, &sources, target)

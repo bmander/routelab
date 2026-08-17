@@ -287,11 +287,6 @@ impl Builder {
         edges
     }
 
-    /// Which vertices were left standing.
-    pub(super) fn standing(&self) -> Vec<bool> {
-        self.contracted.iter().map(|gone| !gone).collect()
-    }
-
     /// What contracting this node would cost, smaller being sooner.
     fn cost(&mut self, node: NodeId) -> Cost {
         match self.ordering.policy {

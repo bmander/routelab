@@ -76,7 +76,7 @@ use crate::model::graph::{Graph, NodeId, UNREACHABLE};
 use crate::model::timetable::{Itinerary, Leg, Time, Timetable, Walk};
 
 /// The states an automaton may be in at once, one bit each.
-type StateSet = u32;
+pub(crate) type StateSet = u32;
 
 /// How many states [`Modes`] will hold. The automata §2.2 draws have two to
 /// four — one per mode of transport, give or take — so a machine word is room
