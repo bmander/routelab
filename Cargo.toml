@@ -22,3 +22,8 @@ routelab-osm = { path = "crates/routelab-osm" }
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Release, but symbolicated, so a sampling profiler can name what it caught.
+[profile.profiling]
+inherits = "release"
+debug = true

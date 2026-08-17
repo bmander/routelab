@@ -341,7 +341,16 @@ impl<'a> Worker<'a> {
                     // "at most `k` trips" is what makes a witness with fewer
                     // trips prune a candidate with more.
                     let (earlier, later) = self.rounds.split_at_mut(round);
-                    later[0].clone_from(&earlier[round - 1]);
+                    // Only what this run has written. Everything else is
+                    // UNREACHED in both, since the rounds were cleared over
+                    // `touched` when the run began — and that clear is what
+                    // keeps a run proportional to what it reached rather than
+                    // to the numbering, which a whole-array copy here would
+                    // undo. On a multimodal environment the numbering is every
+                    // street corner and the run touches the core.
+                    for &v in &self.touched {
+                        later[0][v as usize] = earlier[round - 1][v as usize];
+                    }
                     ride(lines, &earlier[round - 1], &mut later[0], &mut self.touched);
                     self.walk.relax(transfers, &mut later[0], &mut self.touched);
                 }
