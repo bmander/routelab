@@ -99,7 +99,8 @@
 //!
 //! **Limited Dijkstra searches.** Both stopping criteria are here, each
 //! counting what its round can: see [`Until`]. The witness limit is here as
-//! `WITNESS_LIMIT`, a choice rather than a value from the paper. What is *not*
+//! `WITNESS_LIMIT`, set to the zero §5.2 measures and every experiment in the
+//! paper uses. What is *not*
 //! here is the part that makes stopping free rather than merely safe — keeping
 //! leftover labels queued across runs, in two separate queues, removing
 //! dominated labels from them explicitly, and inheriting a new label's run from
@@ -107,7 +108,8 @@
 //! witnesses that would have pruned non-canonical candidates, so the cost is
 //! superfluous shortcuts. Measured on the harness the criteria are worth about
 //! 10%, which on a contended machine is inside the noise; the harness averages
-//! under one candidate a run, so it likely understates them.
+//! under one candidate a run, so it understates them — on King County Metro the
+//! witness limit alone is worth 1.39x.
 //!
 //! **Pruning with found shortcuts.** Here, in [`Final`]: a candidate whose
 //! intermediate transfer is already a shortcut this thread found is demoted to
@@ -411,10 +413,18 @@ struct Worker<'a> {
 ///
 /// Stopping the moment the candidates are all settled is correct but loses
 /// witnesses that would have dominated non-canonical candidates in *later*
-/// runs, and each one lost is a superfluous shortcut. The paper leaves the
-/// limit as a tunable and does not fix a value; this one is a choice, measured
-/// on the harness rather than taken from the paper.
-const WITNESS_LIMIT: Time = 300;
+/// runs, and each one lost is a superfluous shortcut. So there is a trade, and
+/// §5.2 measures it: on Switzerland, zero against unbounded "nearly cuts the
+/// preprocessing time in half", while Figure 3 shows the shortcut count moving
+/// by 0.03% across the whole range — 170.67k to 170.72k. The paper therefore
+/// uses zero for every experiment it reports, and so does this. On King County
+/// Metro stop to stop, interleaved, three runs each: zero is 16.1s for 9,197
+/// shortcuts, unbounded is 22.3s for 9,133 — 1.39x for 0.7% more shortcuts.
+///
+/// Zero does not mean the search stops at the last candidate: it stops at the
+/// first queue entry that arrives strictly later, which is a hop further, not
+/// none.
+const WITNESS_LIMIT: Time = 0;
 
 /// The stops a round's riding improved with a candidate label — what §3.3's
 /// stopping criterion counts down as the transfer search settles them.
