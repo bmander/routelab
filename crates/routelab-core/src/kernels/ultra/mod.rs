@@ -89,21 +89,53 @@
 //! stays regardless: it is what the paper says, and a superset is the safe
 //! direction.
 //!
-//! Not here, and each its own increment: the **optimizations** of §3.3 —
-//! precomputed initial route collection, Dijkstra searches stopped once the
-//! last candidate is settled (with the witness limit that then becomes
-//! necessary, and the label runs inherited from parents rather than set to the
-//! current run), pruning candidates against shortcuts already found, and
-//! contracting cliques of stops a zero-length walk apart so they make one run
-//! instead of several. And the **event-to-event** variant, which computes
-//! shortcuts between stop events rather than stops and is what a trip-based
-//! query wants.
+//! ## §3.3, optimization by optimization
+//!
+//! **Route collection.** Algorithm 1's line 9 is here: round 2 scans only the
+//! routes serving what round 1 marked, in route-index order. Line 6 — round 1's
+//! set, the routes boardable in this run's departure window, precomputed with
+//! `DT` — is not. Round 1 still scans every route, which a profile puts at 12%
+//! of the time, so that is the size of what is left on the table.
+//!
+//! **Limited Dijkstra searches.** Both stopping criteria are here, each
+//! counting what its round can: see [`Until`]. The witness limit is here as
+//! `WITNESS_LIMIT`, a choice rather than a value from the paper. What is *not*
+//! here is the part that makes stopping free rather than merely safe — keeping
+//! leftover labels queued across runs, in two separate queues, removing
+//! dominated labels from them explicitly, and inheriting a new label's run from
+//! its parent instead of the current run. Without it, stopping early loses
+//! witnesses that would have pruned non-canonical candidates, so the cost is
+//! superfluous shortcuts. Measured on the harness the criteria are worth about
+//! 10%, which on a contended machine is inside the noise; the harness averages
+//! under one candidate a run, so it likely understates them.
+//!
+//! **Pruning with found shortcuts.** Here, in [`Final`]: a candidate whose
+//! intermediate transfer is already a shortcut this thread found is demoted to
+//! a witness. Cuts candidates six-fold on the harness — 11,205 to 1,840 — for
+//! the same 175 shortcuts, and costs nothing measurable either way. The paper's
+//! own note that per-thread shortcuts are enough is what makes it safe beside
+//! the parallel sweep. Not here: turning *queued* candidates into witnesses
+//! when a shortcut is inserted, which needs the per-stop candidate lists.
+//!
+//! **Transfer graph contraction.** Core-CH is here, though a rung up — the
+//! caller passes the core, see [`Ultra::compute`]. Contracting cliques of stops
+//! a zero-length walk apart, so they make one run instead of several, is *not
+//! applicable*: every walk this library can build is `max(1, ceil(...))`
+//! seconds, so no two stops are ever zero apart and the clique is always a
+//! single stop.
+//!
+//! **Parallelization.** Here, over blocks of source stops.
+//!
+//! Still out, and each its own increment: the **event-to-event** variant, which
+//! computes shortcuts between stop events rather than stops and is what a
+//! trip-based query wants, and the two pieces named above.
 
 #[cfg(test)]
 mod tests;
 
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -444,6 +476,53 @@ struct Writing<'a> {
     run: u32,
 }
 
+/// A shortcut set keyed on both its stops at once.
+type Known = HashSet<u64, BuildHasherDefault<PairHash>>;
+
+/// `(from, to)` as one key.
+fn pair(from: NodeId, to: NodeId) -> u64 {
+    (u64::from(from) << 32) | u64::from(to)
+}
+
+/// A multiplicative hash for those keys.
+///
+/// The standard hasher is SipHash, which is the right default for keys a
+/// stranger chose and the wrong one for a lookup on this inner loop: measured,
+/// it cost more than the pruning it enables saved, turning a 6x cut in
+/// candidates into a net loss. These keys are two of our own node ids.
+#[derive(Default)]
+struct PairHash(u64);
+
+impl Hasher for PairHash {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.write_u64(u64::from(byte));
+        }
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0 ^ n).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        self.0 ^= self.0 >> 29;
+    }
+}
+
+/// What only the final round has business with: the candidates its transfer
+/// search must settle before it may stop, and the shortcuts already found.
+///
+/// The second is §3.3's last pruning. A candidate whose intermediate transfer
+/// is already a shortcut has nothing left to contribute, so it is demoted to a
+/// witness — where it still prunes others, and no longer has to be waited for.
+/// The set is this thread's own, which the paper says is enough: missing a
+/// shortcut another thread found costs a duplicate, not an answer.
+struct Final<'a> {
+    awaited: &'a mut Awaited,
+    known: &'a Known,
+}
+
 /// What a round's transfer search waits for before it is allowed to stop.
 ///
 /// Two criteria because the two rounds count different things, which is how
@@ -546,6 +625,9 @@ impl<'a> Worker<'a> {
         } = *self.sweep;
         let mut found = Vec::new();
         let mut candidates = 0usize;
+        // Shortcuts this thread has already produced, so a candidate that
+        // would only repeat one is demoted to a witness before it is waited on.
+        let mut known: Known = Known::default();
         for &source in sources {
             // One Dijkstra per source, reused by every run from it: the
             // initial transfer does not depend on when you leave.
@@ -611,13 +693,17 @@ impl<'a> Worker<'a> {
                         marked: &mut self.marked,
                         run,
                     };
+                    let mut closing = last.then_some(Final {
+                        awaited: &mut self.awaited,
+                        known: &known,
+                    });
                     ride(
                         lines,
                         &self.routes,
                         &earlier[round - 1],
                         &mut later[0],
                         &mut writing,
-                        last.then_some(&mut self.awaited),
+                        closing.as_mut(),
                     );
                     self.walk.relax(
                         transfers,
@@ -659,6 +745,7 @@ impl<'a> Worker<'a> {
                     candidates += 1;
                     let duration = before.arrival - self.rounds[1][left as usize].arrival;
                     found.push((left, boarded, duration));
+                    known.insert(pair(left, boarded));
                 }
             }
             self.walk.reached = reach;
@@ -701,10 +788,10 @@ fn ride(
     before: &[Label],
     now: &mut [Label],
     writing: &mut Writing<'_>,
-    awaited: Option<&mut Awaited>,
+    last: Option<&mut Final<'_>>,
 ) {
     let run = writing.run;
-    let mut awaited = awaited;
+    let mut last = last;
     for &line in routes {
         let stops = lines.stops_of(line);
         let mut aboard: Option<u32> = None;
@@ -713,13 +800,28 @@ fn ride(
             let stop = stops[i as usize];
             if let Some(trip) = aboard {
                 let arrival = lines.time(trip, i).arrival;
-                let fresh = Label {
+                let boarded = stops[boarded_at as usize];
+                let mut fresh = Label {
                     arrival,
-                    parent: stops[boarded_at as usize],
+                    parent: boarded,
                     rode: true,
-                    direct: before[stops[boarded_at as usize] as usize].direct,
+                    direct: before[boarded as usize].direct,
                     run,
                 };
+                // The shortcut this would produce, if it is a candidate: the
+                // walk it took to reach where it boarded. Already found makes
+                // it a witness instead — §3.3's last pruning.
+                if fresh.direct {
+                    if let Some(last) = last.as_deref() {
+                        let prior = before[boarded as usize];
+                        if !prior.rode
+                            && prior.parent != NO_NODE
+                            && last.known.contains(&pair(prior.parent, boarded))
+                        {
+                            fresh.direct = false;
+                        }
+                    }
+                }
                 if accepts(now[stop as usize], before[stop as usize], fresh, run) {
                     now[stop as usize] = fresh;
                     writing.touched.mark(stop);
@@ -728,8 +830,8 @@ fn ride(
                     // at the source. The transfer search after this has to
                     // settle it before it can stop.
                     if fresh.direct {
-                        if let Some(awaited) = awaited.as_deref_mut() {
-                            awaited.mark(stop);
+                        if let Some(last) = last.as_deref_mut() {
+                            last.awaited.mark(stop);
                         }
                     }
                 }
