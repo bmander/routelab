@@ -60,8 +60,11 @@ toolbar and back, and on a phone it starts folded, the map having the screen.
 Nodes, wires and the grip answer to a finger as they do to a mouse.
 
 Nothing here is a production server: it is the standard library's `http.server`,
-bound to localhost, with no cache and no rate limiting. It is a way to look at
-what the algorithms do.
+with no cache, no rate limiting and no authentication, while a single query can
+set every core preprocessing for minutes. It is a way to look at what the
+algorithms do. So it binds loopback unless told otherwise; `--host` will hand it
+to a network, and is worth pointing at one interface — a Tailscale address, say
+— rather than at `0.0.0.0`.
 """
 
 from __future__ import annotations
@@ -83,6 +86,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("extract", type=Path, help="an .osm.pbf file")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help=(
+            "the address to bind, loopback by default. Naming an interface here "
+            "hands this server to whoever can reach it, and it has no "
+            "authentication, no rate limiting and no cache, while one query can "
+            "set every core preprocessing for minutes. Prefer a specific "
+            "address — a Tailscale one, say — over 0.0.0.0, which is every "
+            "network this machine happens to be on."
+        ),
+    )
     parser.add_argument("--profile", choices=sorted(PROFILES), default="driving")
     parser.add_argument(
         "--gtfs", type=Path, help="a GTFS .zip or directory, to offer transit too"
@@ -122,8 +137,11 @@ def main() -> int:
 
     Handler.router = router
     Handler.center = ((min_lat + max_lat) / 2, (min_lon + max_lon) / 2)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"\nhttp://localhost:{args.port}  — wire up a planner, click two points\n")
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    where = "localhost" if args.host in ("127.0.0.1", "::1") else args.host
+    print(f"\nhttp://{where}:{args.port}  — wire up a planner, click two points\n")
+    if where != "localhost":
+        print(f"  bound to {args.host}, so anything that can reach it can drive it\n")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
