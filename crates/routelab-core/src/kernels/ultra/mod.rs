@@ -357,11 +357,74 @@ struct Worker<'a> {
     walk: Relaxation,
     rounds: [Vec<Label>; 3],
     /// Every vertex written since the source changed, so the labels can be
-    /// cleared without walking the numbering. Holds duplicates; both the clear
-    /// and the carry-forward are idempotent.
-    touched: Vec<NodeId>,
-    /// What the current round improved: the transfer phase's frontier.
+    /// cleared without walking the numbering.
+    touched: Dirty,
+    /// What the current round improved: the transfer phase's frontier, and
+    /// what the next round collects its routes from.
     marked: Vec<NodeId>,
+    /// The routes this round scans, in route-index order — Algorithm 1's
+    /// lines 6 and 9. Round 1 takes every route, since round 0 reached
+    /// everything the source can walk to; round 2 takes only those serving a
+    /// stop round 1 improved, which is most of what this saves.
+    routes: Vec<u32>,
+    /// Which routes are already in `routes`, so collecting them is linear.
+    listed: Vec<bool>,
+}
+
+/// The vertices written since the source changed, each listed once.
+///
+/// The clear, the carry-forward and the extraction all walk this list, and all
+/// three are idempotent — so pushing a vertex again on every improvement, which
+/// under self-pruning means many times over a source's runs, is repetition
+/// three loops then pay for. A seen flag keeps it to one entry a vertex, which
+/// also bounds the list by the core rather than by the work done in it.
+struct Dirty {
+    seen: Vec<bool>,
+    list: Vec<NodeId>,
+}
+
+impl Dirty {
+    fn new(vertices: usize) -> Self {
+        Dirty {
+            seen: vec![false; vertices],
+            list: Vec::new(),
+        }
+    }
+
+    fn mark(&mut self, v: NodeId) {
+        if !self.seen[v as usize] {
+            self.seen[v as usize] = true;
+            self.list.push(v);
+        }
+    }
+
+    fn clear(&mut self) {
+        for &v in &self.list {
+            self.seen[v as usize] = false;
+        }
+        self.list.clear();
+    }
+}
+
+/// The routes serving anything in `marked`, in route-index order.
+///
+/// Algorithm 1 line 9. The sort is not tidiness: canonical MR needs routes
+/// scanned by index, and [`accepts`] resolves an equal arrival in favour of
+/// whichever route reached it first.
+fn routes_serving(lines: &Lines, marked: &[NodeId], listed: &mut [bool], out: &mut Vec<u32>) {
+    out.clear();
+    for &v in marked {
+        for &(line, _) in lines.lines_at(v) {
+            if !listed[line as usize] {
+                listed[line as usize] = true;
+                out.push(line);
+            }
+        }
+    }
+    for &line in out.iter() {
+        listed[line as usize] = false;
+    }
+    out.sort_unstable();
 }
 
 impl<'a> Worker<'a> {
@@ -375,8 +438,10 @@ impl<'a> Worker<'a> {
                 vec![Label::UNREACHED; vertices],
                 vec![Label::UNREACHED; vertices],
             ],
-            touched: Vec::new(),
+            touched: Dirty::new(vertices),
             marked: Vec::new(),
+            routes: Vec::new(),
+            listed: vec![false; sweep.lines.num_lines()],
         }
     }
 
@@ -405,7 +470,7 @@ impl<'a> Worker<'a> {
             // and stops instead of propagating. Clearing here would be what
             // makes each run pay for the whole timetable again.
             for round in &mut self.rounds {
-                for &v in &self.touched {
+                for &v in &self.touched.list {
                     round[v as usize] = Label::UNREACHED;
                 }
             }
@@ -428,10 +493,15 @@ impl<'a> Worker<'a> {
                     };
                     if accepts(self.rounds[0][v as usize], Label::UNREACHED, fresh, run) {
                         self.rounds[0][v as usize] = fresh;
-                        self.touched.push(v);
+                        self.touched.mark(v);
                     }
                 }
 
+                // Round 1 scans everything, because round 0 reached every stop
+                // the source can walk to; round 2 scans only what round 1
+                // touched.
+                self.routes.clear();
+                self.routes.extend(0..lines.num_lines() as u32);
                 for round in 1..=2 {
                     // A round begins knowing whatever one trip fewer knew:
                     // "at most `k` trips" is what makes a witness with fewer
@@ -439,7 +509,7 @@ impl<'a> Worker<'a> {
                     // overwrite, because what stands here may be a better
                     // label from a later-departing run.
                     let (earlier, later) = self.rounds.split_at_mut(round);
-                    for &v in &self.touched {
+                    for &v in &self.touched.list {
                         let carried = earlier[round - 1][v as usize];
                         if carried.arrival < later[0][v as usize].arrival {
                             later[0][v as usize] = carried;
@@ -448,6 +518,7 @@ impl<'a> Worker<'a> {
                     self.marked.clear();
                     ride(
                         lines,
+                        &self.routes,
                         &earlier[round - 1],
                         &mut later[0],
                         &mut self.touched,
@@ -462,13 +533,16 @@ impl<'a> Worker<'a> {
                         &mut self.marked,
                         run,
                     );
+                    if round == 1 {
+                        routes_serving(lines, &self.marked, &mut self.listed, &mut self.routes);
+                    }
                 }
 
                 // A stop still aboard after the last walk is a candidate: its
                 // final transfer is empty, and nothing at most as long got
                 // there sooner. Only what this run found — the labels outlive
                 // the run now, and an older run's candidate was already taken.
-                for &v in &self.touched {
+                for &v in &self.touched.list {
                     let arrived = self.rounds[2][v as usize];
                     if arrived.run != run || !arrived.rode || !arrived.direct || !serves[v as usize]
                     {
@@ -523,13 +597,14 @@ fn departures_at(lines: &Lines, stop: NodeId) -> Vec<Time> {
 /// transfer phase after it starts from.
 fn ride(
     lines: &Lines,
+    routes: &[u32],
     before: &[Label],
     now: &mut [Label],
-    touched: &mut Vec<NodeId>,
+    touched: &mut Dirty,
     marked: &mut Vec<NodeId>,
     run: u32,
 ) {
-    for line in 0..lines.num_lines() as u32 {
+    for &line in routes {
         let stops = lines.stops_of(line);
         let mut aboard: Option<u32> = None;
         let mut boarded_at = 0u32;
@@ -546,7 +621,7 @@ fn ride(
                 };
                 if accepts(now[stop as usize], before[stop as usize], fresh, run) {
                     now[stop as usize] = fresh;
-                    touched.push(stop);
+                    touched.mark(stop);
                     marked.push(stop);
                 }
             }
@@ -632,7 +707,7 @@ impl Relaxation {
         transfers: &Graph,
         before: &[Label],
         round: &mut [Label],
-        touched: &mut Vec<NodeId>,
+        touched: &mut Dirty,
         marked: &mut Vec<NodeId>,
         run: u32,
     ) {
@@ -663,7 +738,7 @@ impl Relaxation {
                 };
                 if accepts(round[head as usize], before[head as usize], fresh, run) {
                     round[head as usize] = fresh;
-                    touched.push(head);
+                    touched.mark(head);
                     marked.push(head);
                     self.queue.push(Reverse((next, head)));
                 }
