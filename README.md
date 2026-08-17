@@ -46,6 +46,7 @@ each one buys and what it costs.
 | Witt, *Trip-based public transit routing* (2015) | `TripBased()`, `TripBased().bind(env).profile(...)` | [Trips, and the transfers between them](#trips-and-the-transfers-between-them) |
 | Delling, Dibbelt, Pajor & Werneck, *Public transit labeling* (2015) — PTL | `PTL()`, `PTL().bind(env).profile(...)` | [Labels over the events](#labels-over-the-events) |
 | Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for multi-modal route planning: an efficient solution* (2019) — ULTRA | `ULTRA(RAPTOR())`, `ULTRA(CSA())` | [Walking without a radius](#walking-without-a-radius) |
+| Barrett, Jacob & Marathe, *Formal-language-constrained path problems* (2000) — LCSPP, in the multimodal form of Dibbelt, Pajor & Wagner, *User-constrained multi-modal route planning* (2012) §2.2 | `LabelConstrained()`, `Modes(...)` | [Saying which modes, and nothing precomputed](#saying-which-modes-and-nothing-precomputed) |
 
 The rows marked *not yet implemented* are the shelf's gaps, in the order the
 literature filled them: after Pyrga et al. the timetable graphs were engineered
@@ -1123,6 +1124,61 @@ the multiplier is the whole story.
 The stop-to-stop case is the same algorithm on a 13,982-arc transfer graph and
 takes **16 s**, which is where the 39× between them comes from: 13× the arcs and
 2.8× the reachable vertices.
+
+### Saying which modes, and nothing precomputed
+
+ULTRA buys a fast multimodal query with minutes of preprocessing. The other
+corner of that trade is to precompute nothing at all, and there is a paper for
+it: Barrett, Jacob & Marathe's **label-constrained shortest path problem**.
+Label every arc with the mode of transport it belongs to, hand the query a
+regular language over those labels, and take the shortest path whose labels,
+read in order, spell a word of it. They proved it solvable in deterministic
+polynomial time for regular languages, which is more than enough for "walk,
+ride, walk".
+
+```python
+env = Environment(streets, feed, Access(feed, streets))
+
+LabelConstrained().bind(env).route(doorstep, office, departing=time(8, 30))
+```
+
+The multimodal shape is Dibbelt, Pajor & Wagner's §2.2, and it needed nothing
+new here. Their link arcs are *"each station node linked to its geographically
+closest node of the road network, only nodes no more than distance δ apart"*,
+costed at walking speed — which is what `Access` already builds. Every compiled
+arc already knows the layer it came from, so the alphabet was already there
+too. `Access` simply declares `mode = "link"`, the way a layer already declares
+its cost model.
+
+The automaton takes the shape §2.2 prescribes: a state stands for one or more
+modes, travelling within one is a self-loop, and **distinct states are joined
+only by the link label** — so a journey may change mode exactly where the
+networks were stitched together and nowhere else. `Modes()` reads it off the
+environment: where a link layer joins separate networks it builds the paper's
+Figure 1(a), a walking state and a riding state; where there is none the stops
+*are* the walking network's nodes, so one state stands for both and a rider
+changes vehicles standing still.
+
+The query is Dijkstra over the product of the graph and the automaton, settling
+`(vertex, state)`. Two relaxations in one search, which is the whole of the
+multimodal part: a scalar arc has a duration and is added, a timetable arc has a
+schedule so relaxing it asks what leaves next along it.
+
+On King County Metro and Seattle's pavements — 560,706 vertices, 1,498,026 arcs:
+
+| | bind | query |
+|---|---:|---:|
+| `LabelConstrained()` | **1.9 s** | ~70 ms |
+| `ULTRA(RAPTOR())` | ~8 min | ~3 ms |
+
+Both answer the same question the same way, which is what
+`test_it_agrees_with_ultra_on_the_same_network` holds them to.
+
+Two costs, and the survey names them: to write a constraint you must know what
+modes the network has, and a language admits no journey that combines the modes
+differently, so this answers with one journey rather than a set of
+alternatives. What is not here is UCCH, the contribution of the paper the model
+comes from, which is the speedup that sits between these two corners.
 
 ### Underneath
 

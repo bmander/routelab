@@ -66,6 +66,14 @@ NODES: "dict[str, dict]" = {
     "CSA": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
     "TripBased": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
     "PTL": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
+    # Multimodality with nothing precomputed: the modes each arc belongs to are
+    # already in the environment, and the language decides which sequences of
+    # them a journey may use.
+    "LabelConstrained": {
+        "kind": "planner",
+        "inputs": {"environment": "environment"},
+        "clock": "day",
+    },
     # A technique that wraps a technique: ULTRA works out the transfers and
     # the one wired into it does the routing, which is the paper's own shape.
     "ULTRA": {
@@ -121,6 +129,7 @@ TECHNIQUES: "dict[str, type]" = {
     "CSA": rl.CSA,
     "TripBased": rl.TripBased,
     "PTL": rl.PTL,
+    "LabelConstrained": rl.LabelConstrained,
     "ULTRA": rl.ULTRA,
 }
 for _kind, _cls in TECHNIQUES.items():

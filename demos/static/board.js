@@ -96,6 +96,11 @@ const LOOKS = {
     sub: () => 'labels over the events',
     available: () => Boolean(SETUP.feed),
   },
+  LabelConstrained: {
+    title: 'LabelConstrained', group: 'techniques',
+    sub: () => 'modes, no preprocessing',
+    available: () => Boolean(SETUP.feed),
+  },
   Access: {
     title: 'Access', group: 'layers',
     sub: () => 'stops onto the pavement',

@@ -434,7 +434,17 @@ class Router:
         """
         planner = self.build(board, planner_id)
         compiled = planner.compiled
-        coordinates = layer.coordinates()
+        # Every layer that places its own nodes, not just the one a click snaps
+        # against: a multimodal journey walks a street, boards at a stop and
+        # gets off at another, so the labels along it come from more than one
+        # layer and a table built from one of them cannot draw it. Labels are
+        # disjoint across layers — a stop id is not a street id — so this is a
+        # merge and not a precedence.
+        coordinates: "dict" = {}
+        for source in planner.environment.sources:
+            places = getattr(source, "coordinates", None)
+            if places is not None:
+                coordinates.update(places())
         target = planner.node_id(end)
 
         def ask(target):

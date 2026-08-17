@@ -180,11 +180,23 @@ const PRESETS = [
     inner: ['technique', 'RAPTOR', {}],
   },
   {
+    // The same network as the preset below, routed by a technique that
+    // precomputes nothing: every arc already knows which mode it belongs to,
+    // and the language says which sequences of modes a journey may use. Binds
+    // in the time it takes to read the files; pays for it per query.
+    id: 'multimodal-lcspp',
+    label: 'Multimodal · no preprocessing',
+    layer: ['OSM', {profile: 'walking'}],
+    feed: ['GTFS', {}],
+    access: ['Access', {within: 400}],
+    technique: ['LabelConstrained', {}],
+  },
+  {
     // The multimodal one: streets and a timetable in the same environment,
     // joined at the stops, so a query starts wherever you clicked rather than
     // at whichever pole happened to be nearest.
     id: 'multimodal',
-    label: 'Multimodal · streets + transit',
+    label: 'Multimodal · ULTRA (minutes to bind)',
     layer: ['OSM', {profile: 'walking'}],
     feed: ['GTFS', {}],
     access: ['Access', {within: 400}],
