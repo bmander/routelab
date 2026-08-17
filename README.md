@@ -956,11 +956,48 @@ Preprocessing is a minute at 200 m and several at 400, parallel over source
 stops. What is not here, each its own increment: the **canonical** tiebreaking
 that picks one journey among equals, without which this keeps a sufficient but
 larger set than the paper's minimum; the **self-pruning** across descending
-departure times; **Core-CH**, which contracts every non-stop vertex so the
-transfer relaxation runs over stops rather than streets — the reason this walks
-between stops and not yet along a city's pavements; and the **event-to-event**
-variant that ULTRA-TB wants. That last pair is what the multimodal query — click
-anywhere, walk to transit — is waiting on.
+departure times; and the **event-to-event** variant that ULTRA-TB wants.
+
+#### Contracting the streets away
+
+The walking above is between stops, because ULTRA's preprocessing searches the
+transfer graph once per departure event — 421,604 of them on a Monday of King
+County Metro — and Seattle's pavements are 554,393 vertices. The paper's answer
+is **Core-CH**, the variant of contraction it names and UCCH and MCR used
+before it: contract every vertex that is not a stop, and what is left is a
+graph over the stops whose arcs already carry the walking distance through
+everything that went.
+
+```python
+core = rl._routelab.CoreHierarchy.build(compiled.graph, stops, max_degree=12)
+core.core            # a graph in the same numbering, so a stop is the node it was
+```
+
+Two rules make it that rather than contraction with a list. A vertex in the
+core is never contracted whatever its priority, which is what guarantees every
+stop survives. And contraction **stops early**, once what is left standing
+averages more than a given degree — not an optimisation but a necessity, since
+a core of stops alone has arcs quadratic in the stops, "which slows down both
+the precomputation and query algorithms to the point where they become
+impractical". Seattle's walking network, keeping 6,313 stops:
+
+| `max_degree` | core vertices | core arcs | contracted | build |
+|---|---:|---:|---:|---:|
+| 12 | 17,454 | 203,975 | 536,939 | 72 s |
+| 30 | 7,708 | 225,641 | 546,685 | 384 s |
+
+A thirty-fold smaller graph, and the last vertices are the expensive ones —
+tightening the bound from 30 to 12 leaves twice as many standing and costs a
+fifth of the time. The distances are exact, which is what the tests hold it
+to: on random networks against plain Dijkstra, and on Seattle's own pavements,
+2,356 stop-pair walks with nothing to report.
+
+What is still missing is the half that answers a query from a vertex the
+contraction retired — the upward and downward searches. Every query the core
+serves today starts and ends at a core vertex, so ULTRA does not read one yet
+and the shelf still walks stop to stop. Clicking a doorway on the map is
+waiting on that, and on an access layer to join a stop to the pavement outside
+it.
 
 ### Underneath
 
@@ -1028,9 +1065,9 @@ plumbing with no routing content.
 
 ```
 crates/routelab-core/     Rust. No Python.
-  kernels/                Dijkstra, BFS, A*, ALT landmarks, contraction,
-                          time-dependent, Pyrga's two timetable models, RAPTOR,
-                          CSA, trip-based, PTL, ULTRA.
+  kernels/                Dijkstra, BFS, A*, ALT landmarks, contraction and its
+                          core variant, time-dependent, Pyrga's two timetable
+                          models, RAPTOR, CSA, trip-based, PTL, ULTRA.
   model/                  CSR graph, search options and results, search trees,
                           the heuristic trait, the timetable structures, and the
                           lines-and-trips layout RAPTOR and trip-based both read.

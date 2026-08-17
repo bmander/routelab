@@ -194,6 +194,100 @@ impl Builder {
         ranks
     }
 
+    /// Contract everything except `keep`, and stop early once the graph left
+    /// standing gets dense — the *Core-CH* of the multimodal literature.
+    ///
+    /// Two changes to [`Builder::contract_all`], both from the same place. A
+    /// vertex the caller wants to keep is never a candidate, so it survives
+    /// whatever its priority. And contraction stops once the vertices still
+    /// standing average more than `max_degree` arcs, because a core of stops
+    /// alone would be quadratic in them: the last vertices to go are the most
+    /// connected, and each one costs more shortcuts than the one before.
+    /// Stopping leaves extra vertices in the core and keeps it sparse, which
+    /// is the trade the papers make.
+    ///
+    /// Returns how many vertices were retired.
+    pub(super) fn contract_core(
+        &mut self,
+        keep: &[bool],
+        max_degree: f64,
+        progress: &Progress,
+    ) -> usize {
+        let num_nodes = self.out.len();
+        let candidates = keep.iter().filter(|kept| !**kept).count();
+        progress.expect("contracting", candidates as u64);
+        let mut queue: BinaryHeap<Reverse<(i64, NodeId)>> = BinaryHeap::new();
+        for node in 0..num_nodes as NodeId {
+            if !keep[node as usize] {
+                queue.push(Reverse((self.cost(node).priority, node)));
+            }
+        }
+
+        // The core as it stands: every vertex not yet retired, and every arc
+        // still running between two of them. Counted along rather than
+        // measured, since measuring is a walk over the whole graph and this is
+        // asked after every contraction.
+        let mut standing = num_nodes;
+        let mut arcs: usize = self.edges.len();
+        let mut retired = 0;
+        while let Some(Reverse((priority, node))) = queue.pop() {
+            if self.contracted[node as usize] {
+                continue;
+            }
+            if standing > 0 && arcs as f64 / standing as f64 > max_degree {
+                break;
+            }
+            let mut shortcuts = None;
+            if self.ordering.recomputes() {
+                let cost = self.cost(node);
+                if cost.priority > priority {
+                    if let Some(&Reverse((next, _))) = queue.peek() {
+                        if cost.priority > next {
+                            queue.push(Reverse((cost.priority, node)));
+                            continue;
+                        }
+                    }
+                }
+                shortcuts = cost.shortcuts;
+            }
+
+            let shortcuts = shortcuts.unwrap_or_else(|| self.shortcuts_for(node));
+            // What the core loses and gains by this one contraction: the arcs
+            // at the vertex go, and the shortcuts standing in for them arrive.
+            arcs = arcs + shortcuts.len() - self.degree(node).min(arcs);
+            for shortcut in shortcuts {
+                self.add_shortcut(shortcut);
+            }
+            self.retire(node);
+            standing -= 1;
+            retired += 1;
+            progress.step();
+        }
+        retired
+    }
+
+    /// Every arc still running between two vertices that were not retired —
+    /// the core graph, originals and shortcuts alike.
+    pub(super) fn core_edges(&self) -> Vec<(NodeId, NodeId, Weight)> {
+        let mut edges = Vec::new();
+        for tail in 0..self.out.len() {
+            if self.contracted[tail] {
+                continue;
+            }
+            for arc in &self.out[tail] {
+                if !self.contracted[arc.other as usize] {
+                    edges.push((tail as NodeId, arc.other, arc.weight));
+                }
+            }
+        }
+        edges
+    }
+
+    /// Which vertices were left standing.
+    pub(super) fn standing(&self) -> Vec<bool> {
+        self.contracted.iter().map(|gone| !gone).collect()
+    }
+
     /// What contracting this node would cost, smaller being sooner.
     fn cost(&mut self, node: NodeId) -> Cost {
         match self.ordering.policy {

@@ -25,6 +25,7 @@ pub(crate) fn check_index(id: u32, count: usize, what: &str) -> PyResult<()> {
 }
 
 pub mod contraction;
+pub mod core;
 pub mod csa;
 pub mod graph;
 pub mod gtfs;
@@ -40,6 +41,7 @@ pub mod tripbased;
 pub mod ultra;
 
 use crate::contraction::*;
+use crate::core::*;
 use crate::csa::*;
 use crate::graph::*;
 use crate::gtfs::*;
@@ -62,6 +64,7 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCalendar>()?;
     m.add_class::<PyConnectionScan>()?;
     m.add_class::<PyContractionHierarchy>()?;
+    m.add_class::<PyCoreHierarchy>()?;
     m.add_class::<PyFeed>()?;
     m.add_class::<PyGraph>()?;
     m.add_class::<PyHeuristic>()?;

@@ -24,8 +24,11 @@
 //! query time but never accuracy.
 
 mod build;
+mod core;
 mod query;
 
+#[cfg(test)]
+mod core_tests;
 #[cfg(test)]
 mod tests;
 
@@ -34,6 +37,7 @@ use crate::model::search::SearchError;
 use crate::util::progress::Progress;
 use build::Builder;
 
+pub use core::CoreHierarchy;
 pub use query::{Half, MeetingSearch};
 
 /// What an arc of the augmented graph stands for.

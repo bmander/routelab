@@ -25,7 +25,7 @@ pub mod util;
 pub use kernels::astar::astar;
 pub use kernels::bfs::bfs;
 pub use kernels::contraction::{
-    ContractionHierarchy, Expansion, Half, MeetingSearch, Ordering, Policy,
+    ContractionHierarchy, CoreHierarchy, Expansion, Half, MeetingSearch, Ordering, Policy,
 };
 pub use kernels::csa::{ConnectionScan, ScanProfile, ScanSearch};
 pub use kernels::dijkstra::dijkstra;
