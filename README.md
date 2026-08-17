@@ -986,19 +986,39 @@ the same shortcuts. Zero-distance clique contraction is *not applicable* here at
 all — every walk this library builds is `max(1, ceil(...))` seconds, so no two
 stops are ever zero apart.
 
-Two pieces of §3.3 remain, and one is worth more than the other: **round 1's
-departure-window route collection**, which a profile bounds at 12% of the time,
-and the **queue kept across runs** with label runs inherited from parents, which
-is what makes early stopping free rather than merely safe. Without it, stopping
-costs superfluous shortcuts rather than answers. Also out: the
-**event-to-event** variant that ULTRA-TB wants.
+The **witness limit** is §3.3's other tunable, and the paper measures it rather
+than leaving it open: zero against unbounded "nearly cuts the preprocessing time
+in half" while the shortcut count moves 0.03%. Confirmed here rather than taken
+on faith — stop to stop, builds interleaved, three runs each:
 
-A note on the numbers in this section. This machine spent the evening carrying
-other work at load averages between 6 and 240, and the same binary has spanned
-4.58s to 6.02s on consecutive runs. Every figure quoted here is from builds run
-interleaved, back to back, and where the effect is small it is a minimum over
-several runs rather than a single reading. Where an effect could not be
-separated from the noise, it says so.
+| τ_wit | stop-to-stop | shortcuts | multimodal |
+|---|---:|---:|---:|
+| **0** | **16.1 s** | 9,197 | **389 s** |
+| 300 | 17.1 s | 9,191 | 853 s |
+| unbounded | 22.3 s | 9,133 | — |
+
+1.39× stop to stop and 2.19× multimodal, for 0.7% more shortcuts.
+
+Two pieces of §3.3 remain. The **queue kept across runs**, with label runs
+inherited from parents, is by far the larger: a profile of the multimodal build
+puts `relax` and its heap at **59%** of the time against `ride`'s 16%, and
+carrying the queue is what stops a transfer search being re-run from scratch
+every one of those 421,604 times.
+
+**Round 1's departure-window route collection** (Algorithm 1 line 6) was
+written, measured at 1.27×, and reverted: on a ten-stop instance with thirty
+trips it loses two shortcuts a query needs and answers 3984 where the closure
+says 3302. §3.3 introduces line 6 alongside the persistent queues, and labels
+persisting is not queues persisting — a run's unfinished witnesses live in its
+queue. So it waits on them. Also out: the **event-to-event** variant that
+ULTRA-TB wants.
+
+A note on the numbers in this section. This machine has spent the last day
+carrying other work at load averages between 3 and 240, and the same binary has
+spanned 4.58 s to 6.02 s on consecutive runs. Every figure quoted here is from
+builds run interleaved, back to back, and where the effect is small it is a
+minimum over several runs rather than a single reading. Where an effect could not
+be separated from the noise, it says so.
 
 #### Contracting the streets away
 
@@ -1074,19 +1094,35 @@ is the one between stops, and the stops are exactly what the core kept.
 | transfer graph | 1,490,988 arcs |
 | core, `max_degree=12` | 180,767 arcs |
 
-The cost to state plainly: **preprocessing here is minutes rather than the
-minute the stop-to-stop case takes**, and that is structural rather than a
-missing optimisation. ULTRA searches once per departure event — 421,604 of
-them — and unlimited walking means each of those searches relaxes the whole
-core, which has four times the arcs a 400 m stop-to-stop transfer graph gave
-it. So the demo board's `Multimodal · streets + transit` preset is a bench you
-set running, not a page you click and wait on.
+The cost, now that there is a number worth quoting:
 
-The sizes above are exact; the wall-clock is deliberately not quoted, because
-the machine it was measured on was carrying thirteen times its cores in other
-work and a number from that would be fiction. Bringing the real one down is the
-paper's own remaining work — self-pruning across descending departure times,
-and the event-to-event variant — rather than a bigger machine.
+| stage | |
+|---|---:|
+| Core-CH contraction | 81 s |
+| shortcut computation | 389 s |
+| **preprocessing, end to end** | **~8 min** |
+| shortcuts | 24,551 |
+| candidates enumerated | 986,836 |
+
+That is a `Multimodal · streets + transit` preset you set running and come back
+to, not one you click and wait on — but it is minutes, not the *hour and a
+quarter* an earlier draft of this section reported. That figure was wrong twice
+over. It was extrapolated from a partial run on a machine carrying eleven times
+its cores and 12 GB of swap, which cost about 6×; and the witness limit was set
+to 300 seconds rather than the zero the paper measures, which cost another 2.2×.
+
+Where the time goes, since the shape is not obvious. A progress tick is one
+**source stop**, and a source stop is not one search: it is `|DT(s)|` runs —
+421,604 connections over 6,313 stops, so about **67 runs each** — and every run
+rides, walks, rides, and walks again. So per source stop it is roughly **134
+Dijkstras over the core plus 67 scans of the collected routes**. At ~76 ms a
+source that works out to about a millisecond per traversal of a 180,767-arc
+graph, which is simply what a binary-heap Dijkstra costs. Nothing is anomalous;
+the multiplier is the whole story.
+
+The stop-to-stop case is the same algorithm on a 13,982-arc transfer graph and
+takes **16 s**, which is where the 39× between them comes from: 13× the arcs and
+2.8× the reachable vertices.
 
 ### Underneath
 
