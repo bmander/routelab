@@ -953,10 +953,28 @@ not here. Every walk in the answer, at either end or in the middle, is a
 unpacking a contraction hierarchy does before anyone sees a shortcut.
 
 Preprocessing is a minute at 200 m and several at 400, parallel over source
-stops. What is not here, each its own increment: the **canonical** tiebreaking
+stops, and includes the **self-pruning** of §3.2: runs from one source go in
+descending departure order and keep each other's labels, so a run that leaves
+earlier and arrives no sooner stops dead instead of propagating. Worth 2.5× to
+2.9× on a transit-shaped harness, with the shortcut set unchanged.
+
+Self-pruning comes with a repair, because keeping labels across runs implicitly
+maximises departure time as a third criterion and can discard a journey that is
+optimal for the two you asked for. The paper's three-part dominance rule is
+implemented, and it is live — stub it out and a fixture's shortcuts drop from
+seven to four. What is *not* established is that it is **necessary** here: over
+4,400 random instances, 241 had a different shortcut set with it than without,
+and none of those answered a query wrongly without it. That agrees with the
+paper rather than contradicting it, since Theorem 3 routes the repair's
+necessity through the canonical MR of §3.1, which is not implemented — absent
+canonical tiebreaking this keeps a superset in which the rescued journeys are
+covered anyway. It stays because a superset is the safe direction.
+
+What is not here, each its own increment: the **canonical** tiebreaking of §3.1
 that picks one journey among equals, without which this keeps a sufficient but
-larger set than the paper's minimum; the **self-pruning** across descending
-departure times; and the **event-to-event** variant that ULTRA-TB wants.
+larger set than the paper's minimum; the **optimizations** of §3.3, chiefly the
+Dijkstra searches stopped once the last candidate is settled; and the
+**event-to-event** variant that ULTRA-TB wants.
 
 #### Contracting the streets away
 

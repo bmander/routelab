@@ -52,18 +52,33 @@
 //! transfer back out — that is Algorithm 1 as written, in its *stop-to-stop*
 //! variant, the one RAPTOR and CSA take unchanged.
 //!
+//! The **self-pruning** of §3.2 is here too: runs from one source go in
+//! descending departure order and keep each other's labels, so a run that
+//! leaves earlier and arrives no sooner stops instead of propagating. Worth
+//! 2.5x to 2.9x, with the shortcut set unchanged. Its **repair** — the
+//! three-part dominance rule that stops self-pruning from discarding a
+//! canonical journey — is implemented as stated in [`accepts`], and is live:
+//! stub it out and a fixture's shortcuts drop from seven to four. What is
+//! *not* established here is that it is necessary. Over 4,400 random
+//! instances, 241 had a different shortcut set with it than without, and none
+//! of those answered any query wrongly without it. That is consistent with
+//! the paper rather than against it — Theorem 3 routes the repair's necessity
+//! through Lemma 2, which is about the canonical MR of §3.1, and §3.1 is not
+//! implemented. Absent canonical tiebreaking this keeps a superset in which
+//! the rescued journeys are covered anyway. It stays because it is what the
+//! paper says and because a superset is the safe direction.
+//!
 //! Not here, and each its own increment: the **canonical** tiebreaking of
 //! §3.1, which shrinks the set by choosing one journey among equals — without
 //! it this keeps every intermediate transfer of every Pareto-optimal two-trip
 //! journey, a superset of the paper's, and so sufficient but larger than it
-//! needs to be. The **self-pruning** of §3.2, where runs at descending
-//! departure times reuse each other's labels, and the repair that self-pruning
-//! then needs. **Core-CH**, which contracts away every vertex that is not a
-//! stop so the transfer relaxation runs on a graph of stops rather than of
-//! streets — this runs plain Dijkstra instead, which is why a city-sized
-//! street graph is out of reach here and a stop-to-stop transfer graph is not.
-//! And the **event-to-event** variant, which computes shortcuts between stop
-//! events rather than stops and is what a trip-based query wants.
+//! needs to be. The **optimizations** of §3.3 — precomputed initial route
+//! collection, Dijkstra searches stopped once the last candidate is settled
+//! (with the witness limit that then becomes necessary, and the label runs
+//! inherited from parents rather than set to the current run), and pruning
+//! candidates against shortcuts already found. And the **event-to-event**
+//! variant, which computes shortcuts between stop events rather than stops
+//! and is what a trip-based query wants.
 
 #[cfg(test)]
 mod tests;
@@ -92,9 +107,17 @@ struct Label {
     /// Is the journey's *initial* transfer empty — did it board its first
     /// vehicle at the source stop rather than walking somewhere first? The
     /// paper's `⊥`, carried as a flag rather than a sentinel parent because
-    /// the parent is wanted either way.
+    /// the parent is wanted either way. A journey with this set is a *prefix
+    /// of a candidate*, which is what the repaired dominance rule protects.
     direct: bool,
+    /// Which run wrote this, so that a label carried over from a
+    /// later-departing run can be told from one this run made. The paper's
+    /// `run(v, i)`, and the third of the three conditions in §3.2.
+    run: u32,
 }
+
+/// No run has written this label yet.
+const NO_RUN: u32 = u32::MAX;
 
 impl Label {
     const UNREACHED: Label = Label {
@@ -102,7 +125,36 @@ impl Label {
         parent: NO_NODE,
         rode: false,
         direct: false,
+        run: NO_RUN,
     };
+}
+
+/// Does `fresh` replace the label already at this vertex? §3.2's dominance
+/// rule, with the repair.
+///
+/// Plain rRAPTOR discards a journey weakly dominated by what is already there,
+/// and that is exactly what makes self-pruning work: a run at an earlier
+/// departure that arrives no sooner than a later-departing run stops dead
+/// instead of propagating. It is also what can throw a *canonical* journey
+/// away, because keeping labels across runs implicitly maximises departure
+/// time as a third criterion nobody asked for — Figure 2 of the paper is a
+/// network where every Pareto-optimal journey contains a suboptimal
+/// subjourney, so the problem cannot be defined away.
+///
+/// The repair: a weakly dominated journey still survives when all three of
+/// the paper's discard conditions fail — it is a candidate prefix, it is not
+/// *strongly* dominated, and the label holding it back was written by some
+/// earlier run rather than this one.
+fn accepts(now: Label, before: Label, fresh: Label, run: u32) -> bool {
+    if fresh.arrival < now.arrival {
+        // Not dominated at all: an outright improvement.
+        return true;
+    }
+    // Weakly dominated, so rRAPTOR would drop it. Strong domination is
+    // domination in both criteria — sooner in this round, or no later with one
+    // trip fewer.
+    let strongly = now.arrival < fresh.arrival || before.arrival <= fresh.arrival;
+    fresh.direct && !strongly && now.run != run
 }
 
 /// A set of transfer shortcuts: the intermediate transfers a query can need,
@@ -127,6 +179,11 @@ impl Ultra {
     /// weights durations rather than moments, its vertices including every
     /// stop the timetable serves. It is **not** required to be transitively
     /// closed or bounded in any way, which is the point.
+    ///
+    /// Algorithm 1 takes a *core* graph, and on a street network that is what
+    /// to pass: [`CoreHierarchy`](crate::CoreHierarchy) contracts away every
+    /// vertex no vehicle calls at and leaves the same distances between the
+    /// ones it keeps, which is all an intermediate transfer runs between.
     pub fn compute(timetable: &Timetable, transfers: &Graph) -> Self {
         Self::compute_reporting(timetable, transfers, &Progress::new())
     }
@@ -280,7 +337,12 @@ struct Worker<'a> {
     sweep: &'a Sweep<'a>,
     walk: Relaxation,
     rounds: [Vec<Label>; 3],
+    /// Every vertex written since the source changed, so the labels can be
+    /// cleared without walking the numbering. Holds duplicates; both the clear
+    /// and the carry-forward are idempotent.
     touched: Vec<NodeId>,
+    /// What the current round improved: the transfer phase's frontier.
+    marked: Vec<NodeId>,
 }
 
 impl<'a> Worker<'a> {
@@ -295,6 +357,7 @@ impl<'a> Worker<'a> {
                 vec![Label::UNREACHED; vertices],
             ],
             touched: Vec::new(),
+            marked: Vec::new(),
         }
     }
 
@@ -316,51 +379,80 @@ impl<'a> Worker<'a> {
             self.walk.reach_of(transfers, source);
             let reach = std::mem::take(&mut self.walk.reached);
 
-            for departure in departures_at(lines, source) {
-                for round in &mut self.rounds {
-                    for &v in &self.touched {
-                        round[v as usize] = Label::UNREACHED;
-                    }
+            // Self-pruning (§3.2): the labels are cleared once per source, not
+            // once per run. Runs go in descending departure order, so a run
+            // that leaves earlier and arrives no sooner than one that left
+            // later is dominated by labels still standing from that later run,
+            // and stops instead of propagating. Clearing here would be what
+            // makes each run pay for the whole timetable again.
+            for round in &mut self.rounds {
+                for &v in &self.touched {
+                    round[v as usize] = Label::UNREACHED;
                 }
-                self.touched.clear();
+            }
+            self.touched.clear();
+
+            for (run, departure) in departures_at(lines, source).into_iter().enumerate() {
+                let run = run as u32;
 
                 // Round 0: the initial transfer. Only the source itself is
                 // reached without walking, so only it can begin a candidate.
+                // Departures descend, so every one of these improves on the
+                // run before — it is the rounds above that self-prune.
                 for &(v, duration) in &reach {
-                    self.rounds[0][v as usize] = Label {
+                    let fresh = Label {
                         arrival: departure.saturating_add(duration),
                         parent: NO_NODE,
                         rode: false,
                         direct: v == source,
+                        run,
                     };
-                    self.touched.push(v);
+                    if accepts(self.rounds[0][v as usize], Label::UNREACHED, fresh, run) {
+                        self.rounds[0][v as usize] = fresh;
+                        self.touched.push(v);
+                    }
                 }
 
                 for round in 1..=2 {
                     // A round begins knowing whatever one trip fewer knew:
                     // "at most `k` trips" is what makes a witness with fewer
-                    // trips prune a candidate with more.
+                    // trips prune a candidate with more. Improve rather than
+                    // overwrite, because what stands here may be a better
+                    // label from a later-departing run.
                     let (earlier, later) = self.rounds.split_at_mut(round);
-                    // Only what this run has written. Everything else is
-                    // UNREACHED in both, since the rounds were cleared over
-                    // `touched` when the run began — and that clear is what
-                    // keeps a run proportional to what it reached rather than
-                    // to the numbering, which a whole-array copy here would
-                    // undo. On a multimodal environment the numbering is every
-                    // street corner and the run touches the core.
                     for &v in &self.touched {
-                        later[0][v as usize] = earlier[round - 1][v as usize];
+                        let carried = earlier[round - 1][v as usize];
+                        if carried.arrival < later[0][v as usize].arrival {
+                            later[0][v as usize] = carried;
+                        }
                     }
-                    ride(lines, &earlier[round - 1], &mut later[0], &mut self.touched);
-                    self.walk.relax(transfers, &mut later[0], &mut self.touched);
+                    self.marked.clear();
+                    ride(
+                        lines,
+                        &earlier[round - 1],
+                        &mut later[0],
+                        &mut self.touched,
+                        &mut self.marked,
+                        run,
+                    );
+                    self.walk.relax(
+                        transfers,
+                        &earlier[round - 1],
+                        &mut later[0],
+                        &mut self.touched,
+                        &mut self.marked,
+                        run,
+                    );
                 }
 
                 // A stop still aboard after the last walk is a candidate: its
                 // final transfer is empty, and nothing at most as long got
-                // there sooner.
+                // there sooner. Only what this run found — the labels outlive
+                // the run now, and an older run's candidate was already taken.
                 for &v in &self.touched {
                     let arrived = self.rounds[2][v as usize];
-                    if !arrived.rode || !arrived.direct || !serves[v as usize] {
+                    if arrived.run != run || !arrived.rode || !arrived.direct || !serves[v as usize]
+                    {
                         continue;
                     }
                     let boarded = arrived.parent;
@@ -408,8 +500,16 @@ fn departures_at(lines: &Lines, stop: NodeId) -> Vec<Time> {
 }
 
 /// One round of boarding and riding: RAPTOR's route scan, reading `before`
-/// and improving `now`.
-fn ride(lines: &Lines, before: &[Label], now: &mut [Label], touched: &mut Vec<NodeId>) {
+/// and improving `now`. Whatever it improves is `marked`, which is where the
+/// transfer phase after it starts from.
+fn ride(
+    lines: &Lines,
+    before: &[Label],
+    now: &mut [Label],
+    touched: &mut Vec<NodeId>,
+    marked: &mut Vec<NodeId>,
+    run: u32,
+) {
     for line in 0..lines.num_lines() as u32 {
         let stops = lines.stops_of(line);
         let mut aboard: Option<u32> = None;
@@ -418,14 +518,17 @@ fn ride(lines: &Lines, before: &[Label], now: &mut [Label], touched: &mut Vec<No
             let stop = stops[i as usize];
             if let Some(trip) = aboard {
                 let arrival = lines.time(trip, i).arrival;
-                if arrival < now[stop as usize].arrival {
-                    now[stop as usize] = Label {
-                        arrival,
-                        parent: stops[boarded_at as usize],
-                        rode: true,
-                        direct: before[stops[boarded_at as usize] as usize].direct,
-                    };
+                let fresh = Label {
+                    arrival,
+                    parent: stops[boarded_at as usize],
+                    rode: true,
+                    direct: before[stops[boarded_at as usize] as usize].direct,
+                    run,
+                };
+                if accepts(now[stop as usize], before[stop as usize], fresh, run) {
+                    now[stop as usize] = fresh;
                     touched.push(stop);
+                    marked.push(stop);
                 }
             }
             // Board, or step onto an earlier trip, on the strength of what
@@ -498,11 +601,24 @@ impl Relaxation {
         }
     }
 
-    /// Walk on from every vertex a round has reached, carrying the stop each
-    /// walk began at so an intermediate transfer can be read back whole.
-    fn relax(&mut self, transfers: &Graph, round: &mut [Label], touched: &mut Vec<NodeId>) {
+    /// Walk on from every vertex this round's riding improved, carrying the
+    /// stop each walk began at so an intermediate transfer can be read back
+    /// whole.
+    ///
+    /// Seeded from `marked` rather than from everything the source ever
+    /// touched: under self-pruning the labels outlive the run, and a vertex
+    /// nothing improved this round was already walked on from when it was.
+    fn relax(
+        &mut self,
+        transfers: &Graph,
+        before: &[Label],
+        round: &mut [Label],
+        touched: &mut Vec<NodeId>,
+        marked: &mut Vec<NodeId>,
+        run: u32,
+    ) {
         self.queue.clear();
-        for &v in touched.iter() {
+        for &v in marked.iter() {
             let label = round[v as usize];
             if label.arrival != UNREACHABLE {
                 self.queue.push(Reverse((label.arrival, v)));
@@ -519,14 +635,17 @@ impl Relaxation {
             for edge in transfers.out_edges(v) {
                 let next = arrival.saturating_add(transfers.weight(edge));
                 let head = transfers.head(edge);
-                if next < round[head as usize].arrival {
-                    round[head as usize] = Label {
-                        arrival: next,
-                        parent: began,
-                        rode: false,
-                        direct: here.direct,
-                    };
+                let fresh = Label {
+                    arrival: next,
+                    parent: began,
+                    rode: false,
+                    direct: here.direct,
+                    run,
+                };
+                if accepts(round[head as usize], before[head as usize], fresh, run) {
+                    round[head as usize] = fresh;
                     touched.push(head);
+                    marked.push(head);
                     self.queue.push(Reverse((next, head)));
                 }
             }

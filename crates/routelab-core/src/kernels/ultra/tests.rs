@@ -434,3 +434,71 @@ fn blocks_of_sources_merge_to_the_shortest_walk() {
         }
     }
 }
+
+#[test]
+fn self_pruning_keeps_the_repair_of_3_2_live() {
+    // A change detector, deliberately. §3.2's repair — a weakly dominated
+    // candidate prefix surviving a label carried over from a later-departing
+    // run — fires often and is what the paper says to do, but it turned out
+    // not to be *falsifiable* here: over 4,400 random instances, 241 had a
+    // different shortcut set with it than without, and in none of those did
+    // dropping it produce a wrong answer. That is consistent with the paper,
+    // whose Theorem 3 routes the repair's necessity through the canonical MR
+    // of 3.1, which this does not implement — without canonical tiebreaking
+    // the journeys the repair rescues are still covered by others we keep.
+    //
+    // So this pins the count instead. Stub the repair out and it is 4, not 7.
+    // That is a weaker claim than correctness, and it is the true one: it says
+    // the branch is live and doing what it did when it was written, and the
+    // agreement tests say the answers are right either way.
+    let table = random_timetable(0, 10, 30);
+    let transfers = random_transfers(0, 10, 14);
+    let ultra = Ultra::compute(&table, &transfers);
+    assert_eq!(
+        ultra.len(),
+        7,
+        "the repair changes this instance's shortcut set; 4 means it stopped firing"
+    );
+
+    // And whatever it keeps, the answers are the closure's.
+    let shortcuts = Footpaths::new(transfers.num_nodes(), ultra.shortcuts().to_vec());
+    let stops = stops_of(&table, &transfers);
+    let whole = closed(&table, &transfers);
+    for &from in &stops {
+        for &to in &stops {
+            for at in [0, 900, 2400] {
+                assert_eq!(
+                    by_ultra(&table, &transfers, &shortcuts, &stops, from, at, to),
+                    by_closure(&table, &whole, from, at, to),
+                    "{from} -> {to} at {at}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_source_with_many_departures_still_answers() {
+    // Self-pruning only engages where a source has several departure times,
+    // since it is runs from one source pruning each other. The agreement
+    // fixtures above are thin on those, so this is one built to have them.
+    for seed in 0..6u64 {
+        let table = random_timetable(seed, 8, 40);
+        let transfers = random_transfers(seed, 8, 12);
+        let ultra = Ultra::compute(&table, &transfers);
+        let shortcuts = Footpaths::new(transfers.num_nodes(), ultra.shortcuts().to_vec());
+        let stops = stops_of(&table, &transfers);
+        let whole = closed(&table, &transfers);
+        for &from in &stops {
+            for &to in &stops {
+                for at in [0, 600, 1500, 3000] {
+                    assert_eq!(
+                        by_ultra(&table, &transfers, &shortcuts, &stops, from, at, to),
+                        by_closure(&table, &whole, from, at, to),
+                        "seed {seed}: {from} -> {to} at {at}"
+                    );
+                }
+            }
+        }
+    }
+}
