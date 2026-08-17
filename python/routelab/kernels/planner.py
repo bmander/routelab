@@ -528,7 +528,19 @@ class TimetablePlanner(Planner):
         """
         compiled = self._bound()
         self.timetable = Departures().bind(compiled, progress)
-        self.footpaths = Walks().bind(compiled, progress)
+        self.footpaths = self.walks().bind(compiled, progress)
+
+    def walks(self) -> Walks:
+        """Which walks this technique reads — a derivation, like the timetable.
+
+        :class:`~routelab.Walks` for every model here: the scalar edges between
+        stops, closed under composition, which is what a one-hop transfer set
+        has to be. Declared rather than assumed so that a technique which walks
+        something else can say so — :class:`~routelab.ULTRA` computes a far
+        smaller set that needs no closure, and overriding this is the whole of
+        how it hands that set to the model underneath it.
+        """
+        return Walks()
 
     def _footprint(self) -> int:
         """The timetable and the walks, in kernel form: what every model holds

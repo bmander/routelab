@@ -176,13 +176,13 @@ def test_an_option_a_model_cannot_honour_names_the_one_that_can(model, env: rl.E
     planner = model().bind(env)
     with pytest.raises(ValueError, match="takes no max_cost; a cost bound belongs to"):
         planner.route("A", "C", departing=time(8, 0), max_cost=10)
-    if model not in (rl.RAPTOR, rl.TripBased):
+    if model not in (rl.RAPTOR, rl.TripBased, rl.ULTRA):
         with pytest.raises(
             ValueError,
-            match=r"takes no max_transfers; a cap on changes belongs to RAPTOR\(\) or TripBased\(\)",
+            match=r"takes no max_transfers; a cap on changes belongs to RAPTOR\(\), TripBased\(\) or ULTRA\(\)",
         ):
             planner.route("A", "C", departing=time(8, 0), max_transfers=1)
-    if model not in (rl.CSA, rl.TripBased):
+    if model not in (rl.CSA, rl.TripBased, rl.PTL):
         with pytest.raises(
             ValueError, match=r"takes no until; .*profile\(\) on CSA\(\), PTL\(\) or TripBased\(\)"
         ):

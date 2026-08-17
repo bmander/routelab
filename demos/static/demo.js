@@ -172,6 +172,14 @@ const PRESETS = [
     technique: ['RAPTOR', {}],
   },
   {
+    id: 'transit-ultra',
+    label: 'Transit · ULTRA',
+    layer: ['GTFS', {}],
+    walks: ['Footpaths', {within: 200}],
+    technique: ['ULTRA', {}],
+    inner: ['technique', 'RAPTOR', {}],
+  },
+  {
     id: 'transit-csa',
     label: 'Transit · CSA',
     layer: ['GTFS', {}],
@@ -229,6 +237,13 @@ function load(preset) {
     spec.nodes.push({id: 'config', type, x: 232, y: 148, params});
     spec.links.push({from: 'config', fromPort: out(type), to: 'technique', toPort: port});
   }
+  if (preset.inner) {
+    // A technique wired into a technique: its own slot under the wrapper,
+    // since the one at x=232 is where a layer's layer goes.
+    const [port, type, params] = preset.inner;
+    spec.nodes.push({id: 'inner', type, x: 656, y: 148, params});
+    spec.links.push({from: 'inner', fromPort: out(type), to: 'technique', toPort: port});
+  }
   if (preset.walks) {
     // A layer fed by the layer: the feed's stops in, walks between them out,
     // and both plugged into the environment.
@@ -247,7 +262,7 @@ function load(preset) {
  */
 function available(preset) {
   return [preset.layer[0], preset.technique[0], preset.config && preset.config[1],
-          preset.walks && preset.walks[0]]
+          preset.inner && preset.inner[1], preset.walks && preset.walks[0]]
     .filter(Boolean)
     .every(type => !TYPES[type].available || TYPES[type].available());
 }

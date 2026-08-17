@@ -66,6 +66,13 @@ NODES: "dict[str, dict]" = {
     "CSA": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
     "TripBased": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
     "PTL": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
+    # A technique that wraps a technique: ULTRA works out the transfers and
+    # the one wired into it does the routing, which is the paper's own shape.
+    "ULTRA": {
+        "kind": "planner",
+        "inputs": {"environment": "environment", "technique": "planner"},
+        "clock": "day",
+    },
     # Walks between nearby stops, made from another layer's coordinates. A
     # layer that takes a layer: its output is edges like any other layer's,
     # and how far a rider will walk is the knob — which is why it is a node
@@ -110,6 +117,7 @@ TECHNIQUES: "dict[str, type]" = {
     "CSA": rl.CSA,
     "TripBased": rl.TripBased,
     "PTL": rl.PTL,
+    "ULTRA": rl.ULTRA,
 }
 for _kind, _cls in TECHNIQUES.items():
     # `departing` is covered by `clock`; the rest are the knobs a Query node

@@ -41,6 +41,7 @@ TECHNIQUES = [
     ("CSA", rl.CSA()),
     ("TripBased", rl.TripBased()),
     ("PTL", rl.PTL()),
+    ("ULTRA", rl.ULTRA(rl.RAPTOR())),
 ]
 
 

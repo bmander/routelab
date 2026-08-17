@@ -1,0 +1,412 @@
+"""Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for
+multi-modal route planning* (2019) — ULTRA."""
+
+from __future__ import annotations
+
+import copy
+from typing import Any, Dict, Hashable, List, Optional, Set, Tuple
+
+from .. import _routelab
+from ..model.environment import CompiledEnvironment
+from ..model.journey import Journey, Leg, _edge_between, _leg
+from ..model.search import Result
+from ..model.searchspace import SearchSpace
+from ..util.clock import service_seconds
+from .departures import Departures
+from .planner import Origins, Planner, TimetablePlanner, names, techniques
+
+__all__ = ["ULTRA", "Transfers"]
+
+
+class Transfers:
+    """The scalar edges between stops, as a graph rather than a closure.
+
+        >>> Transfers()
+        Transfers()
+
+    The same edges :class:`~routelab.Walks` gathers, read the other way. A
+    timetable technique needs its walks as *one-hop transfers*, so `Walks`
+    closes them under composition — walk A→B and B→C and it writes A→C — and
+    that closure is what forces a radius: two hundred metres of King County
+    Metro closes to five times its own size, four hundred to a hundred and
+    thirty times.
+
+    ULTRA does not need the closure, so this does not build one. It hands back
+    the links exactly as the layers gave them, as a graph a search can walk
+    without limit: a long walk is a path of short hops rather than an edge
+    somebody had to write down in advance.
+
+    Each edge remembers the compiled edge it came from, in
+    :attr:`Transfers.edges`, so a walk found here can be told in the caller's
+    own edges — with the layer it came from and the shape it follows.
+    """
+
+    #: The word :meth:`missing_from` answers with.
+    name = "transfers"
+
+    @staticmethod
+    def _positions(compiled: CompiledEnvironment) -> "List[int]":
+        """Input positions of every scalar edge joining two stops.
+
+        Exactly :meth:`~routelab.Walks.bind`'s rule, and for its reason: an
+        edge to somewhere no vehicle serves is not a transfer between two
+        vehicles, whatever else it might be.
+        """
+        stops: "Set[Hashable]" = set()
+        for _, _, source in compiled.spans:
+            if source.cost_model == "timetable":
+                for tail, head, _ in source.edges():
+                    stops.add(tail)
+                    stops.add(head)
+        found: "List[int]" = []
+        for start, _, source in compiled.spans:
+            if source.cost_model != "scalar":
+                continue
+            for offset, (tail, head, _) in enumerate(source.edges()):
+                if tail in stops and head in stops:
+                    found.append(start + offset)
+        return found
+
+    @classmethod
+    def missing_from(cls, compiled: CompiledEnvironment) -> "frozenset[str]":
+        """Nothing, ever — the same answer :class:`~routelab.Walks` gives.
+
+        An environment where nothing walks is the plain model, not a refusal:
+        there is simply no intermediate transfer to work out, and the
+        technique underneath runs as it would have anyway.
+        """
+        return frozenset()
+
+    def bind(
+        self, compiled: CompiledEnvironment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "Transfers":
+        """Build the graph, keeping which compiled edge each of its edges was.
+
+        ``progress`` is accepted for parity with every other ``bind`` and left
+        alone: this is a filter over edges the environment already has.
+        """
+        positions = self._positions(compiled)
+        by_input = {compiled.graph.input_index(e): e for e in range(compiled.graph.num_edges)}
+        links: "List[Tuple[int, int, int]]" = []
+        self.edges: "List[int]" = []
+        for position in positions:
+            edge = by_input[position]
+            tail, head, weight = compiled.graph.edge(edge)
+            links.append((tail, head, weight))
+            self.edges.append(edge)
+        self.graph = _routelab.Graph(len(compiled), links)
+        # Built from the same list reversed rather than from `graph.reversed()`,
+        # so that a position means the same edge in both and one side-table
+        # tells a walk in the caller's edges whichever way it was found.
+        self.backward = _routelab.Graph(
+            len(compiled), [(head, tail, weight) for tail, head, weight in links]
+        )
+        return self
+
+    def compiled_edge(self, edge: int, backward: bool = False) -> int:
+        """The compiled environment's edge behind one of this graph's — which
+        is what makes a walk found here tellable as legs."""
+        graph = self.backward if backward else self.graph
+        return self.edges[graph.input_index(edge)]
+
+    def __len__(self) -> int:
+        return len(self.edges)
+
+    def __repr__(self) -> str:
+        return "Transfers()"
+
+
+class ULTRA(TimetablePlanner):
+    """Unlimited transfers, worked out once (Baum et al., 2019).
+
+        ULTRA(RAPTOR()).bind(env).route(origin, target, departing=time(8, 30))
+
+    Not a routing algorithm but a **preprocessing** one, so it wraps the
+    technique that does the routing — the paper's own *ULTRA-Query family*.
+    Every timetable technique here takes its walks as one-hop transfers between
+    stops, closed under composition, which is why
+    :class:`~routelab.Footpaths` has a radius: the closure is what does not
+    scale, not the walking. ULTRA computes instead the few walks that some
+    optimal journey actually needs — the *intermediate* transfers, between two
+    vehicles — and those go into the wrapped technique unchanged. It walks
+    without a radius and the technique underneath does not know.
+
+    The walks at either end of a journey are not shortcuts and are not meant to
+    be: the paper leaves them to the query, which is why this one searches the
+    transfer graph out of the origin and into the target every time it is
+    asked, and why those searches are what a journey's first and last legs come
+    from.
+
+    Only a technique that keeps a label per stop can be wrapped, since the
+    query has to read every stop's arrival to find the best place to get off.
+    :class:`RAPTOR` and :class:`CSA` are those, and are the two the paper
+    names; anything else is refused by name.
+    """
+
+    options = frozenset({"departing", "max_transfers"})
+
+    def __init__(self, technique: "Optional[TimetablePlanner]" = None):
+        self.technique = technique if technique is not None else _default()
+        readers = _tabled()
+        if type(self.technique) not in readers:
+            raise TypeError(
+                f"ULTRA works the transfers out for a technique that keeps a label "
+                f"per stop, and {type(self.technique).__name__}() keeps none — its "
+                f"query could not say where to get off. Wrap {names(readers)}."
+            )
+
+    def __repr__(self) -> str:
+        return self._describe(repr(self.technique))
+
+    def walks(self) -> Any:
+        """The shortcuts, which is what the wrapped technique reads instead of
+        a closure — see :meth:`TimetablePlanner.walks`."""
+        return _Shortcuts(self.shortcuts)
+
+    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
+        """Work the shortcuts out, then bind the technique onto them.
+
+        The wrapped technique binds to the same environment this did, so its
+        stops are numbered alike and its answers are already in the caller's
+        terms; the only thing changed underneath it is which walks it reads.
+        """
+        compiled = self._bound()
+        self.timetable = Departures().bind(compiled, progress)
+        self.transfers = Transfers().bind(compiled, progress)
+        self.shortcuts = _routelab.Ultra.compute(self.timetable, self.transfers.graph, progress)
+        # The technique underneath reads the shortcuts rather than a closure,
+        # which is the whole of the integration: `walks()` is the seam.
+        inner = copy.copy(self.technique)
+        inner.walks = self.walks  # type: ignore[method-assign]
+        self.inner = inner.bind(self.environment, progress)
+        self.footpaths = self.inner.footpaths
+
+    def _footprint(self) -> int:
+        return self.inner.footprint + self.shortcuts.footprint
+
+    @property
+    def num_shortcuts(self) -> int:
+        """Shortcuts kept: the transfer set a query walks, against the closure
+        it stands in for."""
+        self._bound()
+        return self.shortcuts.num_shortcuts
+
+    @property
+    def searches(self) -> "Tuple[str, int]":
+        return self.inner.searches
+
+    # --- the query ----------------------------------------------------------
+
+    def _reachable(self, starts: "Dict[int, int]") -> "Tuple[Dict[int, int], Any]":
+        """Every stop the origins can walk to, and the search that found it.
+
+        The paper's *initial transfer*, searched when the query is asked
+        because a walk at the start of a journey is common enough that
+        precomputing them all would be the closure again. Several origins,
+        each already some seconds along, is one multi-source search — the
+        same query every technique here takes, asked of the walking.
+        """
+        search = _routelab.dijkstra(self.transfers.graph, list(starts.items()))
+        reach = {stop: search.cost(stop) for stop in range(len(self._bound()))}
+        return {stop: cost for stop, cost in reach.items() if cost is not None}, search
+
+    def _walk_legs(self, search: Any, forward: bool, at: int, to: int) -> "List[Leg]":
+        """A walk through the transfer graph, told as the caller's own edges.
+
+        A shortcut, and an access or egress walk, is a *path* of hops rather
+        than one edge — so each hop becomes a leg, with the layer it came from
+        and the shape it follows, the way a hierarchy unpacks its shortcuts
+        before anyone sees them.
+        """
+        compiled = self._bound()
+        path = search.edge_path(to)
+        if not path:
+            return []
+        hops = [self.transfers.compiled_edge(edge, not forward) for edge in path]
+        if not forward:
+            hops.reverse()
+        legs: "List[Leg]" = []
+        clock = at
+        for edge in hops:
+            tail, head, weight = compiled.graph.edge(edge)
+            source, position = compiled.locate(edge)
+            legs.append(
+                Leg(
+                    tail=compiled.label(tail),
+                    head=compiled.label(head),
+                    weight=weight,
+                    source=source,
+                    edge=edge,
+                    position=position,
+                    departs=clock,
+                    arrives=clock + weight,
+                    trip=None,
+                )
+            )
+            clock += weight
+        return legs
+
+    def _itinerary_legs(self, itinerary: Any) -> "List[Leg]":
+        """The wrapped technique's answer, told in the caller's edges.
+
+        A ride is one edge and comes back as one leg. A walk is a *shortcut* —
+        a path through the transfer graph that no single edge stands for — so
+        it is searched again and told hop by hop, which is the same obligation
+        a contraction hierarchy meets by unpacking a shortcut before anyone
+        sees it. There are a handful per journey, over a graph of stops.
+        """
+        compiled = self._bound()
+        legs: "List[Leg]" = []
+        for trip, tail, head, departs, arrives in itinerary.legs():
+            if trip is not None:
+                legs.append(
+                    _leg(compiled, _edge_between(compiled, tail, head, "timetable"),
+                         departs, arrives, trip)
+                )
+                continue
+            walk = _routelab.dijkstra(self.transfers.graph, [(tail, 0)], targets=[head])
+            legs.extend(self._walk_legs(walk, True, departs, head))
+        return legs
+
+    def _search(self, starts: "Dict[int, int]", **options: Any) -> Result:
+        """Not this: ULTRA answers a query it has to bracket with two searches
+        of its own, so a raw one-to-all result would be the wrapped
+        technique's and not this one's."""
+        raise NotImplementedError(
+            f"{type(self).__name__} brackets its technique's search with a walk "
+            f"out of the origin and a walk into the target, so there is no one "
+            f"table to hand back. Use route(origin, destination, ...), or bind "
+            f"{type(self.technique).__name__}() directly to search its stops."
+        )
+
+    def route(
+        self, origin: Origins, destination: Hashable, **options: Any
+    ) -> Optional[Journey]:
+        """The earliest arrival at ``destination``, walking without a radius.
+
+        Three steps, which is what ULTRA's shortcuts covering only the middle
+        of a journey costs at query time: walk out of the origin, run the
+        wrapped technique from every stop that reached, and walk into the
+        target from wherever it is best to get off.
+        """
+        options = self._options(options)
+        # The technique underneath has the last word on the knobs: this one
+        # advertises what any of them takes, and only it knows which.
+        self.inner._options(options)  # noqa: SLF001 - the seam this technique is
+        compiled = self._bound()
+        at = service_seconds(options["departing"])
+        target = self.node_id(destination)
+        starts = self._origin_ids(origin)
+
+        out, outward = self._reachable(starts)
+        home = _routelab.dijkstra(self.transfers.backward, [(target, 0)])
+
+        # A journey that boards nothing: the walk, which needs no vehicle and
+        # so is the floor every ride has to beat.
+        walked = out.get(target)
+        arrives = None if walked is None else at + walked
+        aboard: "Optional[Any]" = None
+        alight: "Optional[int]" = None
+
+        if out:
+            result = self.inner._search(dict(out), **options)  # noqa: SLF001
+            # Where to get off: any stop that walks to the target. That is the
+            # final transfer, and it has nothing to do with where the journey
+            # started walking.
+            for stop in range(len(compiled)):
+                walk = home.cost(stop)
+                reached = None if walk is None else result.cost(stop)
+                if reached is None:
+                    continue
+                landed = reached + walk
+                if arrives is None or landed < arrives:
+                    arrives, aboard, alight = landed, result, stop
+
+        if arrives is None:
+            return None
+        if aboard is None:
+            legs = self._access(outward, at, target)
+            return Journey(
+                origin=compiled.label(outward.path(target)[0]),
+                destination=destination,
+                cost=arrives - at,
+                legs=tuple(legs),
+                settled=0,
+            )
+
+        itinerary = aboard.itinerary(alight)
+        ridden = self._itinerary_legs(itinerary)
+        # Where the riding began: the first leg's tail, or the alighting stop
+        # itself when the technique found nothing to ride.
+        boarded = compiled.node_id(ridden[0].tail) if ridden else alight
+        legs = self._access(outward, at, boarded)
+        legs += ridden
+        legs += self._walk_legs(home, False, itinerary.arrives, alight)
+        return Journey(
+            origin=compiled.label(outward.path(boarded)[0]),
+            destination=destination,
+            cost=arrives - at,
+            legs=tuple(legs),
+            settled=itinerary.settled,
+        )
+
+    def _access(self, outward: Any, at: int, to: int) -> "List[Leg]":
+        """The walk that starts a journey, told in the caller's edges.
+
+        A query may stand at several stops, each already some seconds along,
+        so the walk leaves when the origin it actually left from was reached —
+        which is that origin's own head start.
+        """
+        source = outward.path(to)[0]
+        return self._walk_legs(outward, True, at + (outward.cost(source) or 0), to)
+
+    # No `explored`: ULTRA keeps no table of its own, since the search whose
+    # space could be drawn is the wrapped technique's and is bracketed by two
+    # walks that are this one's. The family's refusal already says exactly
+    # that, and names the techniques that do keep one.
+
+
+class _Shortcuts:
+    """A derivation that hands back an already-computed transfer set.
+
+    What :meth:`ULTRA.walks` returns, so the wrapped technique's `preprocess`
+    reads the shortcuts through the same seam every other technique reads
+    :class:`~routelab.Walks` through, and nothing about it has to change.
+    """
+
+    name = "walks"
+
+    def __init__(self, shortcuts: Any):
+        self.shortcuts = shortcuts
+
+    @classmethod
+    def missing_from(cls, compiled: CompiledEnvironment) -> "frozenset[str]":
+        return frozenset()
+
+    def bind(self, compiled: CompiledEnvironment, progress: Any = None) -> Any:
+        return self.shortcuts.footpaths()
+
+    def __repr__(self) -> str:
+        return "Shortcuts()"
+
+
+def _tabled() -> "List[type]":
+    """The timetable techniques that keep a label per stop.
+
+    Read off the shelf rather than listed: a technique keeps a table if it
+    reports a search space, which is the same test
+    :meth:`TimetablePlanner.explored` uses to name who to ask.
+    """
+    return [
+        cls
+        for cls in techniques()
+        if issubclass(cls, TimetablePlanner)
+        and cls.explored is not TimetablePlanner.explored
+        and cls._search is not Planner._search
+    ]
+
+
+def _default() -> "TimetablePlanner":
+    """The technique ULTRA wraps when nobody says: the first on the shelf that
+    keeps a table, so `ULTRA()` is a sentence rather than an error."""
+    return _tabled()[0]()

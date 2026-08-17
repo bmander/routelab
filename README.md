@@ -20,8 +20,8 @@ correct.
 builds on (Dijkstra, BFS, A*), two heuristics, contraction hierarchies,
 time-dependent search over OpenStreetMap's scheduled restrictions, both of
 Pyrga et al.'s timetable models over GTFS, RAPTOR, CSA, trip-based routing,
-and public transit labeling. The path from here runs on through the
-multimodal and multicriteria layers above them.
+public transit labeling, and ULTRA's unlimited transfers. The path from here
+runs on through the multimodal and multicriteria layers above them.
 
 ## What is implemented
 
@@ -45,7 +45,7 @@ each one buys and what it costs.
 | Dibbelt, Pajor, Strasser & Wagner, *Intriguingly simple and fast transit routing* (2013) — CSA | `CSA()`, `CSA().bind(env).profile(...)` | [One array, scanned once](#one-array-scanned-once) |
 | Witt, *Trip-based public transit routing* (2015) | `TripBased()`, `TripBased().bind(env).profile(...)` | [Trips, and the transfers between them](#trips-and-the-transfers-between-them) |
 | Delling, Dibbelt, Pajor & Werneck, *Public transit labeling* (2015) — PTL | `PTL()`, `PTL().bind(env).profile(...)` | [Labels over the events](#labels-over-the-events) |
-| Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for multi-modal route planning: an efficient solution* (2019) — ULTRA | `Ultra` — **kernel only, no Python yet** | [Walking without a radius](#walking-without-a-radius) |
+| Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for multi-modal route planning: an efficient solution* (2019) — ULTRA | `ULTRA(RAPTOR())`, `ULTRA(CSA())` | [Walking without a radius](#walking-without-a-radius) |
 
 The rows marked *not yet implemented* are the shelf's gaps, in the order the
 literature filled them: after Pyrga et al. the timetable graphs were engineered
@@ -903,53 +903,64 @@ that do.
 
 Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for Multi-Modal
 Route Planning* (2019). Every technique above takes its walks as one-hop
-transfers between stops, closed under composition — which is exactly why
-`Footpaths(feed, within=200)` has a radius. Two hundred metres closes to
-74,636 walks on Seattle; the paper reports that a twenty-minute bound "already
-leads to a graph that is too large for practical applications". The radius is
-not a modelling preference so much as a wall.
+transfers between stops, **closed under composition** — which is exactly why
+`Footpaths(feed, within=200)` has a radius. The closure is what does not
+scale, not the walking; the paper reports that a twenty-minute bound "already
+leads to a graph that is too large for practical applications". On King County
+Metro the wall is easy to see: widen the radius and the transfer graph grows
+linearly while its closure does not.
 
-ULTRA removes it without touching a single query algorithm. Its observation is
-that where a walk sits in a journey decides how much it matters: the walk from
-your door to the first stop, and from the last stop to your door, are common
-and can be searched when the query is asked; the walk *between* two vehicles
-is rare, and the few that any optimal journey needs can be worked out in
-advance. Those become **shortcuts** — ordinary one-hop stop-to-stop transfers,
-which is what every kernel here already reads.
+| `Footpaths(feed, within=)` | transfer graph | its closure | ULTRA shortcuts |
+|---|---:|---:|---:|
+| 200 m | 13,982 | 76,402 | **9,133** |
+| 400 m | 41,540 | 5,498,488 | **18,380** |
 
-```rust
-let ultra = Ultra::compute(&timetable, &transfer_graph);
-let walks = ultra.footpaths(transfer_graph.num_nodes());
-let rounds = Raptor::build(&timetable, Transfer::instant(), &walks);
+ULTRA removes the radius without touching a single query algorithm. Its
+observation is that where a walk sits in a journey decides how much it
+matters: the walk from your door to the first stop, and from the last stop to
+your door, are common and can be searched when the query is asked; the walk
+*between* two vehicles is rare, and the few that any optimal journey needs can
+be worked out in advance. Those become **shortcuts** — ordinary one-hop
+stop-to-stop transfers, which is what every kernel here already reads.
+
+So it is not a routing algorithm but a preprocessing one, and it wraps the
+technique that does the routing — the paper's own *ULTRA-Query family*:
+
+```python
+feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
+env = rl.Environment(feed, rl.Footpaths(feed, within=400))
+
+planner = rl.ULTRA(rl.RAPTOR()).bind(env)     # 18,380 shortcuts where the closure wanted 5.5 million
+planner.route(downtown, juanita, departing=time(8, 30))
 ```
 
-The transfer graph is unrestricted: no radius, no transitive closure, and any
-non-schedule-based mode — walking, cycling, an e-scooter. What comes back is a
-handful of shortcuts, and RAPTOR and CSA read them **unchanged**, which is the
-paper's central claim and this module's main test: on instances small enough to
-close the whole transfer graph, a kernel walking only the shortcuts answers
-every query exactly as one walking the closure does. The fixture that test runs
-on is a corridor of neighbourhoods whose vehicles never leave them, so that
-crossing it *must* mean riding, walking, and riding again — a random timetable
-whose trips share stops freely needs no intermediate transfer at all, and would
-have let an empty shortcut set pass.
+The same layer, read differently. `Footpaths(feed, within=400)` is a *transfer
+graph* here rather than a set of walks: nothing closes it, and a long walk is a
+path of short hops instead of an edge somebody had to write down. RAPTOR does
+not know — it is handed a smaller transfer set through the same
+`TimetablePlanner.walks()` seam every technique reads its walks through, and is
+otherwise untouched, which is the paper's central claim and this module's main
+test. `ULTRA(CSA())` is the other one the paper names, and answers identically.
 
-**Kernel only, so far.** `Ultra` is callable from Rust and is not yet reachable
-from Python, because the query half is its own increment and a real one: the
-paper leaves initial and final transfers to be searched when the query is
-asked, so `ULTRA(RAPTOR())` has to run a one-to-many search from the origin,
-another into the target, and then stitch two street paths onto either end of
-the itinerary the kernel returns — the same "answer in the caller's terms"
-obligation that makes a contraction hierarchy unpack its shortcuts. Until that
-lands, this walks without a radius in Rust and the Python shelf still has one.
+What the query pays for that is the part worth stating. ULTRA's shortcuts cover
+only the middle of a journey, so the ends are searched when you ask: a walk out
+of the origin, the wrapped technique run from every stop that reached, and a
+walk into the target from wherever it is best to get off. Three searches rather
+than one, and on KCM that is 3 ms against plain RAPTOR's 0.5 — the paper gets
+its ends back to RAPTOR's speed with Bucket-CH one-to-many searches, which is
+not here. Every walk in the answer, at either end or in the middle, is a
+*path*, so it is told hop by hop in the environment's own edges — the same
+unpacking a contraction hierarchy does before anyone sees a shortcut.
 
-What is not here, each its own increment: the **canonical** tiebreaking that
-picks one journey among equals, without which this keeps a sufficient but
-larger set than the paper's; the **self-pruning** across descending departure
-times; **Core-CH**, which contracts every non-stop vertex so the transfer
-relaxation runs over stops rather than streets — this runs plain Dijkstra, so a
-city's street graph is out of reach and a stop-to-stop transfer graph is not;
-and the **event-to-event** variant, which is the one a trip-based query wants.
+Preprocessing is a minute at 200 m and several at 400, parallel over source
+stops. What is not here, each its own increment: the **canonical** tiebreaking
+that picks one journey among equals, without which this keeps a sufficient but
+larger set than the paper's minimum; the **self-pruning** across descending
+departure times; **Core-CH**, which contracts every non-stop vertex so the
+transfer relaxation runs over stops rather than streets — the reason this walks
+between stops and not yet along a city's pavements; and the **event-to-event**
+variant that ULTRA-TB wants. That last pair is what the multimodal query — click
+anywhere, walk to transit — is waiting on.
 
 ### Underneath
 
@@ -1031,7 +1042,8 @@ crates/routelab-py/       PyO3 bindings, one module per wrapped subsystem.
                           Conversion and GIL release, nothing else.
 python/routelab/          The veneer: constructors, argument sugar, docstrings.
   kernels/                One module per paper, holding both roads to it and the
-                          spec only it reads — an ordering, a calendar, a heuristic.
+                          spec only it reads — an ordering, a calendar, a
+                          heuristic, a transfer graph.
   model/                  Graph, Environment, Journey, results, search spaces.
   data/                   The OSM, GTFS and footpath layers.
   util/                   Clocks and argument coercion.

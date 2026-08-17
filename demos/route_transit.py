@@ -47,7 +47,15 @@ import routelab as rl
 from routelab import GTFS
 
 #: Every timetable technique, in the order the literature produced them.
-MODELS = [rl.TimeDependent(), rl.TimeExpanded(), rl.RAPTOR(), rl.CSA(), rl.TripBased(), rl.PTL()]
+MODELS = [
+    rl.TimeDependent(),
+    rl.TimeExpanded(),
+    rl.RAPTOR(),
+    rl.CSA(),
+    rl.TripBased(),
+    rl.PTL(),
+    rl.ULTRA(rl.RAPTOR()),
+]
 
 #: Downtown Seattle to the University District, which is a real trip somebody
 #: takes. Any two coordinates in the feed's area will do.

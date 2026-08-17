@@ -32,6 +32,7 @@ from .raptor import RAPTOR
 from .timedep import TimeDependentDijkstra
 from .timetable import TimeDependent, TimeExpanded
 from .tripbased import TripBased
+from .ultra import ULTRA, Transfers
 
 __all__ = [
     "AStar",
@@ -48,6 +49,8 @@ __all__ = [
     "TimeDependentDijkstra",
     "TimeExpanded",
     "TripBased",
+    "Transfers",
+    "ULTRA",
     "TimetablePlanner",
     "astar",
     "bfs",

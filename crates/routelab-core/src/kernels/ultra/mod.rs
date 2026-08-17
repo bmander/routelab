@@ -70,6 +70,8 @@ mod tests;
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use crate::model::graph::{Graph, NodeId, NO_NODE, UNREACHABLE};
 use crate::model::lines::Lines;
@@ -150,77 +152,47 @@ impl Ultra {
             .filter(|&v| serves[v as usize])
             .collect();
 
+        // Every source stop is judged on its own — its runs read the
+        // timetable and the transfer graph and write nothing either of them
+        // can see — so a thread per core takes blocks of stops until there
+        // are none, the way the trip-based preprocessing does.
+        progress.expect("finding shortcuts", stops.len() as u64);
+        let sweep = Sweep {
+            lines: &lines,
+            transfers,
+            serves: &serves,
+            vertices,
+        };
+        let blocks = stops.len().div_ceil(BLOCK);
+        let next = AtomicUsize::new(0);
+        let done: Mutex<Vec<Option<Block>>> = Mutex::new((0..blocks).map(|_| None).collect());
+        let threads = std::thread::available_parallelism()
+            .map_or(1, |cores| cores.get())
+            .min(blocks.max(1));
+        std::thread::scope(|scope| {
+            for _ in 0..threads {
+                let (next, done, sweep, stops) = (&next, &done, &sweep, &stops);
+                scope.spawn(move || {
+                    let mut worker = Worker::new(sweep);
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        if index >= blocks {
+                            break;
+                        }
+                        let block = &stops[index * BLOCK..((index + 1) * BLOCK).min(stops.len())];
+                        let made = worker.shortcuts_from(block, progress);
+                        done.lock().expect("preprocessing lock")[index] = Some(made);
+                    }
+                });
+            }
+        });
+
         let mut found: Vec<(NodeId, NodeId, Time)> = Vec::new();
         let mut candidates = 0usize;
-        let mut walk = Relaxation::new(vertices);
-        let mut rounds: [Vec<Label>; 3] = [
-            vec![Label::UNREACHED; vertices],
-            vec![Label::UNREACHED; vertices],
-            vec![Label::UNREACHED; vertices],
-        ];
-        let mut touched: Vec<NodeId> = Vec::new();
-
-        progress.expect("finding shortcuts", stops.len() as u64);
-        for &source in &stops {
-            // One Dijkstra per source, reused by every run from it: the
-            // initial transfer does not depend on when you leave.
-            walk.reach_of(transfers, source);
-            let reach = std::mem::take(&mut walk.reached);
-
-            for departure in departures_at(&lines, source) {
-                for round in &mut rounds {
-                    for &v in &touched {
-                        round[v as usize] = Label::UNREACHED;
-                    }
-                }
-                touched.clear();
-
-                // Round 0: the initial transfer. Only the source itself is
-                // reached without walking, so only it can begin a candidate.
-                for &(v, duration) in &reach {
-                    let label = Label {
-                        arrival: departure.saturating_add(duration),
-                        parent: NO_NODE,
-                        rode: false,
-                        direct: v == source,
-                    };
-                    rounds[0][v as usize] = label;
-                    touched.push(v);
-                }
-
-                for round in 1..=2 {
-                    // A round begins knowing whatever one trip fewer knew:
-                    // "at most `k` trips" is what makes a witness with fewer
-                    // trips prune a candidate with more.
-                    let (earlier, later) = rounds.split_at_mut(round);
-                    later[0].clone_from(&earlier[round - 1]);
-                    ride(&lines, &earlier[round - 1], &mut later[0], &mut touched);
-                    walk.relax(transfers, &mut later[0], &mut touched);
-                }
-
-                // A stop still aboard after the last walk is a candidate: its
-                // final transfer is empty, and nothing at most as long got
-                // there sooner.
-                for &v in &touched {
-                    let arrived = rounds[2][v as usize];
-                    if !arrived.rode || !arrived.direct || !serves[v as usize] {
-                        continue;
-                    }
-                    let boarded = arrived.parent;
-                    let before = rounds[1][boarded as usize];
-                    // Boarding where the first vehicle was left is no
-                    // transfer at all, and needs no shortcut.
-                    if before.rode || before.parent == NO_NODE {
-                        continue;
-                    }
-                    let left = before.parent;
-                    candidates += 1;
-                    let duration = before.arrival - rounds[1][left as usize].arrival;
-                    found.push((left, boarded, duration));
-                }
-            }
-            walk.reached = reach;
-            progress.step();
+        for block in done.into_inner().expect("preprocessing lock") {
+            let (made, counted) = block.expect("every block was claimed");
+            found.extend(made);
+            candidates += counted;
         }
 
         found.sort_unstable();
@@ -264,6 +236,123 @@ impl Ultra {
     /// Bytes held, as every other preprocessed structure here reports it.
     pub fn footprint(&self) -> usize {
         self.shortcuts.len() * std::mem::size_of::<(NodeId, NodeId, Time)>()
+    }
+}
+
+/// What one block of source stops yields: the shortcuts their candidates
+/// produced, and how many candidates that was.
+type Block = (Vec<(NodeId, NodeId, Time)>, usize);
+
+/// Source stops per block of preprocessing work. Small enough that a core
+/// which draws a run of busy stops does not gate the phase — a stop on twenty
+/// lines does far more work than one on a single loop — and large enough that
+/// claiming a block costs nothing beside doing it.
+const BLOCK: usize = 16;
+
+/// What every source stop's runs read, shared across the threads.
+struct Sweep<'a> {
+    lines: &'a Lines,
+    transfers: &'a Graph,
+    serves: &'a [bool],
+    vertices: usize,
+}
+
+/// One thread's scratch space: the three rounds of labels and a relaxation,
+/// kept between blocks rather than reallocated per source.
+struct Worker<'a> {
+    sweep: &'a Sweep<'a>,
+    walk: Relaxation,
+    rounds: [Vec<Label>; 3],
+    touched: Vec<NodeId>,
+}
+
+impl<'a> Worker<'a> {
+    fn new(sweep: &'a Sweep<'a>) -> Self {
+        let vertices = sweep.vertices;
+        Worker {
+            sweep,
+            walk: Relaxation::new(vertices),
+            rounds: [
+                vec![Label::UNREACHED; vertices],
+                vec![Label::UNREACHED; vertices],
+                vec![Label::UNREACHED; vertices],
+            ],
+            touched: Vec::new(),
+        }
+    }
+
+    /// Every shortcut the candidates from `sources` produce, and how many
+    /// candidates that was.
+    fn shortcuts_from(&mut self, sources: &[NodeId], progress: &Progress) -> Block {
+        let Sweep {
+            lines,
+            transfers,
+            serves,
+            ..
+        } = *self.sweep;
+        let mut found = Vec::new();
+        let mut candidates = 0usize;
+        for &source in sources {
+            // One Dijkstra per source, reused by every run from it: the
+            // initial transfer does not depend on when you leave.
+            self.walk.reach_of(transfers, source);
+            let reach = std::mem::take(&mut self.walk.reached);
+
+            for departure in departures_at(lines, source) {
+                for round in &mut self.rounds {
+                    for &v in &self.touched {
+                        round[v as usize] = Label::UNREACHED;
+                    }
+                }
+                self.touched.clear();
+
+                // Round 0: the initial transfer. Only the source itself is
+                // reached without walking, so only it can begin a candidate.
+                for &(v, duration) in &reach {
+                    self.rounds[0][v as usize] = Label {
+                        arrival: departure.saturating_add(duration),
+                        parent: NO_NODE,
+                        rode: false,
+                        direct: v == source,
+                    };
+                    self.touched.push(v);
+                }
+
+                for round in 1..=2 {
+                    // A round begins knowing whatever one trip fewer knew:
+                    // "at most `k` trips" is what makes a witness with fewer
+                    // trips prune a candidate with more.
+                    let (earlier, later) = self.rounds.split_at_mut(round);
+                    later[0].clone_from(&earlier[round - 1]);
+                    ride(lines, &earlier[round - 1], &mut later[0], &mut self.touched);
+                    self.walk.relax(transfers, &mut later[0], &mut self.touched);
+                }
+
+                // A stop still aboard after the last walk is a candidate: its
+                // final transfer is empty, and nothing at most as long got
+                // there sooner.
+                for &v in &self.touched {
+                    let arrived = self.rounds[2][v as usize];
+                    if !arrived.rode || !arrived.direct || !serves[v as usize] {
+                        continue;
+                    }
+                    let boarded = arrived.parent;
+                    let before = self.rounds[1][boarded as usize];
+                    // Boarding where the first vehicle was left is no
+                    // transfer at all, and needs no shortcut.
+                    if before.rode || before.parent == NO_NODE {
+                        continue;
+                    }
+                    let left = before.parent;
+                    candidates += 1;
+                    let duration = before.arrival - self.rounds[1][left as usize].arrival;
+                    found.push((left, boarded, duration));
+                }
+            }
+            self.walk.reached = reach;
+            progress.step();
+        }
+        (found, candidates)
     }
 }
 

@@ -28,6 +28,14 @@ pub struct PyFootpaths {
     inner: Arc<CoreFootpaths>,
 }
 
+impl From<CoreFootpaths> for PyFootpaths {
+    fn from(paths: CoreFootpaths) -> Self {
+        PyFootpaths {
+            inner: Arc::new(paths),
+        }
+    }
+}
+
 #[pymethods]
 impl PyFootpaths {
     /// Every edge at the given **positions in the graph's input edge list**

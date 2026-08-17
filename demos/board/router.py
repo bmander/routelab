@@ -201,7 +201,9 @@ class Router:
         }
         started = time.perf_counter()
         try:
-            value = self._make(node_id, kind, params, one, wired, progress)
+            value = self._make(
+                node_id, kind, params, one, wired, progress, self._unbound(board, node_id)
+            )
         finally:
             self._working.pop(node_id, None)
 
@@ -221,7 +223,7 @@ class Router:
             cache.popitem(last=False)
         return cache[key]
 
-    def _make(self, node_id, kind, params, one, wired, progress) -> object:
+    def _make(self, node_id, kind, params, one, wired, progress, unbound) -> object:
         """Build one node, having established what it depends on."""
         if kind == "OSM":
             # Read here rather than left to whoever first asks. Both layers
@@ -260,13 +262,41 @@ class Router:
             # A technique node. Configuring and binding are one step here
             # because the board has both halves in hand — but they are still the
             # two calls the library makes, and the signature says so.
-            technique = self._technique(kind, params, one)
+            technique = self._technique(kind, params, one, unbound)
             environment = one("environment")
             value = technique.bind(environment, progress=progress)
         return value
 
-    @staticmethod
-    def _technique(kind: str, params: dict, one) -> rl.Planner:
+    def _unbound(self, board: Board, node_id: str):
+        """Resolve a wired *technique* port to a technique nobody has bound.
+
+        A heuristic or an ordering arrives at its planner as a specification —
+        `Euclidean()`, not a heuristic bound to anything — because that is what
+        `AStar(...)` takes. A planner node's value, by contrast, is already
+        bound, since the board has the environment in hand and builds in one
+        step. A technique that wraps another wants the specification, so this
+        reaches past the built value to the node and configures it again.
+        """
+
+        def resolve(port: str) -> rl.Planner:
+            wires = board.sources(node_id, port)
+            if not wires:
+                raise Unwired(
+                    node_id,
+                    f"{board.nodes[node_id]['type']} has nothing plugged into "
+                    f"its {port} input",
+                )
+            inner = board.nodes[wires[0][0]]
+            return self._technique(
+                inner["type"],
+                inner.get("params", {}),
+                lambda _port: self.build(board, wires[0][0]),
+                self._unbound(board, wires[0][0]),
+            )
+
+        return resolve
+
+    def _technique(self, kind: str, params: dict, one, unbound) -> rl.Planner:
         """The unbound technique a node stands for.
 
         Only the ones that take something get a line: a wire, or a field. The
@@ -279,6 +309,8 @@ class Router:
             return rl.ContractionHierarchy(one("ordering"))
         if kind == "TimeDependentDijkstra":
             return rl.TimeDependentDijkstra(params.get("waiting", "unrestricted"))
+        if kind == "ULTRA":
+            return rl.ULTRA(unbound("technique"))
         try:
             return TECHNIQUES[kind]()
         except KeyError:
