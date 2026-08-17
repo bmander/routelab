@@ -93,9 +93,24 @@
 //!
 //! **Route collection.** Algorithm 1's line 9 is here: round 2 scans only the
 //! routes serving what round 1 marked, in route-index order. Line 6 — round 1's
-//! set, the routes boardable in this run's departure window, precomputed with
-//! `DT` — is not. Round 1 still scans every route, which a profile puts at 12%
-//! of the time, so that is the size of what is left on the table.
+//! set, the routes boardable in this run's departure window, bucketed from the
+//! network's departure triplets — was written, measured, and **reverted**.
+//!
+//! It worked, in the sense of being faster: 16.1s to 12.7s on King County Metro
+//! stop to stop, with 9,208 shortcuts against 9,197, a 0.12% superset, which is
+//! the direction the paper predicts for a run that sees fewer witnesses. But on
+//! a ten-stop instance with thirty trips — enough departures a stop that
+//! self-pruning bites hard — it *lost* two shortcuts that some query needed,
+//! and answered 3984 where the closure says 3302. Candidates, not witnesses.
+//!
+//! The reasoning for why that should be safe is the same as self-pruning's: a
+//! journey boarding outside this run's window was explored by a run that left
+//! later and arrives no sooner, so its label is still standing. That argument
+//! evidently has a hole, and the likely shape of it is that §3.3 introduces
+//! line 6 in the same breath as **keeping the Dijkstra queues across runs** —
+//! which is what carries a run's unfinished witnesses into the next one. Labels
+//! persisting is not the same as queues persisting. So line 6 waits on that,
+//! and the 16% of the time a profile attributes to `ride` waits with it.
 //!
 //! **Limited Dijkstra searches.** Both stopping criteria are here, each
 //! counting what its round can: see [`Until`]. The witness limit is here as
@@ -110,6 +125,11 @@
 //! 10%, which on a contended machine is inside the noise; the harness averages
 //! under one candidate a run, so it understates them — on King County Metro the
 //! witness limit alone is worth 1.39x.
+//!
+//! The queues are also the largest thing left. A profile of the real multimodal
+//! build puts `relax` and its heap at 59% of the time, the worker's own loops at
+//! 26%, and `ride` at 16%: re-running a transfer search per run is the cost, and
+//! carrying the queue is what stops it being re-run.
 //!
 //! **Pruning with found shortcuts.** Here, in [`Final`]: a candidate whose
 //! intermediate transfer is already a shortcut this thread found is demoted to
