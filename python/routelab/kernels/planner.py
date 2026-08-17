@@ -492,8 +492,8 @@ class TimetablePlanner(Planner):
     nodes; :class:`TimeDependent` spends search. :class:`RAPTOR` came five
     years later and builds no graph at all; :class:`CSA` a year after that and
     keeps only the departures, sorted; :class:`TripBased` two years on again
-    and labels trips, with the changes between them computed once. All five
-    must agree on every query, which is the paper's thesis and this library's
+    and labels trips, with the changes between them computed once. Every
+    technique here must agree on every query, which is the paper's thesis and this library's
     test.
 
     Each accepts a ``"scalar"`` layer alongside the timetable and reads its

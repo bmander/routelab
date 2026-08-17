@@ -4,109 +4,14 @@
 
 use super::{earliest_arrival, TimeExpanded};
 use crate::kernels::csa::ConnectionScan;
+use crate::kernels::oracles::{
+    best_by_brute_force, c, profile_by_brute_force, random_footpaths, random_timetable, town,
+};
 use crate::kernels::ptl::PublicTransitLabeling;
 use crate::kernels::raptor::Raptor;
 use crate::kernels::tripbased::TripBased;
 use crate::model::graph::{NodeId, UNREACHABLE};
-use crate::model::timetable::{
-    Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, TripId, Walk,
-};
-use crate::util::rng::Rng;
-
-/// Stops 0 -> 1 -> 2, with a fast trip and a slow one.
-///
-///   trip 1: leaves 0 at 08:00, reaches 1 at 08:10, leaves 08:12, reaches 2 at 08:30
-///   trip 2: leaves 0 at 08:05, reaches 1 at 08:20  (slower, and a dead end)
-///   trip 3: leaves 1 at 08:15, reaches 2 at 08:20  (the good connection)
-/// A connection, spelled shortly enough to read a timetable off the page.
-pub(crate) fn c(trip: u32, from: NodeId, to: NodeId, departs: Time, arrives: Time) -> Connection {
-    Connection {
-        trip: TripId(trip),
-        from,
-        to,
-        departs,
-        arrives,
-    }
-}
-
-pub(crate) fn town() -> Timetable {
-    Timetable::new(
-        3,
-        [
-            c(1, 0, 1, 28_800, 29_400),
-            c(1, 1, 2, 29_520, 30_600),
-            c(2, 0, 1, 29_100, 30_000),
-            c(3, 1, 2, 29_700, 30_000),
-        ],
-    )
-}
-
-/// Every itinerary, the obvious way — an oracle by exhaustion rather than a
-/// second copy of either model.
-pub(crate) fn best_by_brute_force(
-    timetable: &Timetable,
-    footpaths: &Footpaths,
-    here: NodeId,
-    now: Time,
-    to: NodeId,
-    left: usize,
-) -> Option<Time> {
-    if here == to {
-        return Some(now);
-    }
-    if left == 0 {
-        return None;
-    }
-    let by_vehicle = timetable
-        .connections()
-        .iter()
-        .filter(|c| c.from == here && c.departs >= now)
-        .filter_map(|c| best_by_brute_force(timetable, footpaths, c.to, c.arrives, to, left - 1))
-        .min();
-    let on_foot = footpaths
-        .from(here)
-        .filter_map(|(next, walk)| {
-            best_by_brute_force(timetable, footpaths, next, now + walk, to, left - 1)
-        })
-        .min();
-    [by_vehicle, on_foot].into_iter().flatten().min()
-}
-
-pub(crate) fn random_timetable(seed: u64, stops: u32, trips: u32) -> Timetable {
-    let mut rng = Rng::new(seed);
-    let mut connections = Vec::new();
-    for trip in 0..trips {
-        let mut stop = rng.below(u64::from(stops)) as NodeId;
-        let mut now = rng.below(3600) as Time;
-        // A trip is a short chain of hops, which is what a bus route is.
-        for _ in 0..(1 + rng.below(4)) {
-            let next = rng.below(u64::from(stops)) as NodeId;
-            if next == stop {
-                continue;
-            }
-            let departs = now + rng.below(600) as Time;
-            let arrives = departs + 60 + rng.below(600) as Time;
-            connections.push(c(trip, stop, next, departs, arrives));
-            stop = next;
-            now = arrives;
-        }
-    }
-    Timetable::new(stops as usize, connections)
-}
-
-/// A scatter of short walks between random pairs of stops, both ways.
-pub(crate) fn random_footpaths(seed: u64, stops: u32, count: u32) -> Footpaths {
-    let mut rng = Rng::new(seed ^ 0x5eed);
-    let mut links = Vec::new();
-    for _ in 0..count {
-        let a = rng.below(u64::from(stops)) as NodeId;
-        let b = rng.below(u64::from(stops)) as NodeId;
-        let walk = 30 + rng.below(300) as Time;
-        links.push((a, b, walk));
-        links.push((b, a, walk));
-    }
-    Footpaths::new(stops as usize, links)
-}
+use crate::model::timetable::{Footpaths, Itinerary, Leg, Time, Timetable, Transfer, TripId, Walk};
 
 fn expanded(timetable: &Timetable) -> TimeExpanded {
     TimeExpanded::build(timetable, Transfer::instant(), &Footpaths::none())
@@ -367,6 +272,7 @@ fn every_vehicle_named_is_one_the_timetable_runs() {
         let rounds = raptor_with(&table, &paths);
         let scan = csa_with(&table, &paths);
         let trips = tripbased_with(&table, &paths);
+        let labels = PublicTransitLabeling::build(&table, Transfer::instant(), &paths);
         for from in 0..8u32 {
             for to in 0..8u32 {
                 for at in [0, 900, 2400] {
@@ -376,6 +282,7 @@ fn every_vehicle_named_is_one_the_timetable_runs() {
                         rounds.earliest_arrival(from, at, to),
                         scan.earliest_arrival(from, at, to),
                         trips.earliest_arrival(from, at, to),
+                        labels.earliest_arrival(&[(from, at)], to),
                     ]
                     .into_iter()
                     .flatten()
@@ -414,10 +321,20 @@ fn a_profile_names_vehicles_the_timetable_runs_too() {
         let paths = random_footpaths(seed, 6, 3);
         let scan = csa_with(&table, &paths);
         let trips = tripbased_with(&table, &paths);
+        let labels = PublicTransitLabeling::build(&table, Transfer::instant(), &paths);
         for from in 0..6u32 {
             for to in 0..6u32 {
                 if from == to {
                     continue;
+                }
+                // PTL's profile rebuilds its journeys from the label pointers,
+                // a third set again.
+                for (_, itinerary) in labels.profile(from, to, 0, 12_000) {
+                    assert!(
+                        rides_are_real(&table, &itinerary),
+                        "seed {seed}: a PTL profile entry for {from} -> {to} rides a \
+                         vehicle the timetable does not run"
+                    );
                 }
                 let profile = scan.profile(to, 0, Some(from));
                 for (_, itinerary) in scan.journeys(&profile, from, 0, 12_000) {
@@ -1271,34 +1188,6 @@ fn a_walk_from_the_source_needs_no_connection_to_set_it_off() {
     let ridden = scan.earliest_arrival(3, 28_500, 1).unwrap();
     assert_eq!(ridden.arrives, 29_400);
     assert!(ridden.is_valid(&[(3, 28_500)], Transfer::instant(), &paths));
-}
-
-/// The profile the obvious way: ask the time-dependent model at every second
-/// of the window and keep, for each arrival, the latest moment that still
-/// makes it — leaving out what the direct walk would beat.
-pub(crate) fn profile_by_brute_force(
-    table: &Timetable,
-    paths: &Footpaths,
-    from: NodeId,
-    to: NodeId,
-    window: std::ops::RangeInclusive<Time>,
-) -> Vec<(Time, Time)> {
-    let walk = paths.duration(from, to);
-    let mut latest: Vec<(Time, Time)> = Vec::new();
-    for t in window {
-        let Some(itinerary) = earliest_arrival(table, &[(from, t)], to, Transfer::instant(), paths)
-        else {
-            continue;
-        };
-        if walk.is_some_and(|d| itinerary.arrives >= t + d) {
-            continue;
-        }
-        match latest.last_mut() {
-            Some(last) if last.1 == itinerary.arrives => last.0 = t,
-            _ => latest.push((t, itinerary.arrives)),
-        }
-    }
-    latest
 }
 
 #[test]

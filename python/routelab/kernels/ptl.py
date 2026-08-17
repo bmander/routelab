@@ -81,8 +81,15 @@ class PTL(TimetablePlanner):
 
     @property
     def searches(self) -> "Tuple[str, int]":
-        """A query reads label entries — hubs — and the labeling is what
-        that count is a share of."""
+        """What a query reads: label entries, against the size of the
+        labeling.
+
+        Unlike every other technique here, a journey's ``settled`` is not a
+        count of distinct things and so not a share of this one: an entry is
+        re-read on every probe of the binary search, at every stop the target
+        can be walked to from. It is the paper's own per-query hubs figure,
+        and the denominator is what a labeling of this network costs.
+        """
         return ("hubs", self.num_hubs)
 
     def _earliest_arrival(

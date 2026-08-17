@@ -225,8 +225,17 @@ EVERY_TECHNIQUE = [
     rl.TimeExpanded(),
     rl.RAPTOR(),
     rl.CSA(),
+    rl.TripBased(),
     rl.PTL(),
 ]
+
+
+def test_every_technique_is_one_of_these():
+    # The list above is written by hand, because these are configurations and
+    # some take arguments — so it is checked against the shelf rather than
+    # trusted. A technique that landed without a line here would otherwise be
+    # tested by nothing below.
+    assert {type(technique) for technique in EVERY_TECHNIQUE} == set(rl.kernels.techniques())
 
 
 @pytest.mark.parametrize("technique", EVERY_TECHNIQUE, ids=repr)

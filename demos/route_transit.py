@@ -158,9 +158,8 @@ def main(argv: "list[str] | None" = None) -> int:
         else f"\n  THE TECHNIQUES DISAGREE: {arrivals} — one of them is wrong"
     )
     # The extra readouts, each asked of the techniques that have the verb.
-    for name in ("RAPTOR", "TripBased"):
-        planner = planners.get(name)
-        if planner is None:
+    for name, planner in planners.items():
+        if not hasattr(planner, "frontier"):
             continue
         front = planner.frontier(origin, target, departing=args.departing)
         if len(front) > 1:
@@ -175,9 +174,8 @@ def main(argv: "list[str] | None" = None) -> int:
         leg = f"leave {clock(journey.departs)}, arrive {clock(journey.arrives)}"
         return f"{leg} ({journey.transfers} ch.)" if changes else leg
 
-    for name in ("CSA", "TripBased", "PTL"):
-        planner = planners.get(name)
-        if planner is None:
+    for name, planner in planners.items():
+        if not hasattr(planner, "profile"):
             continue
         # Two hours on the service-day clock, which runs past midnight rather
         # than wrapping at it — a 23:30 departure asks about 25:30.
@@ -188,7 +186,7 @@ def main(argv: "list[str] | None" = None) -> int:
         print(
             f"  {name}'s profile to {clock(until)} ({took:.1f}ms): "
             f"{len(profile)} departures worth taking — "
-            + " · ".join(step(j, name == "TripBased") for j in profile[:4])
+            + " · ".join(step(j, "max_transfers" in type(planner).options) for j in profile[:4])
             + (" · …" if len(profile) > 4 else "")
         )
 

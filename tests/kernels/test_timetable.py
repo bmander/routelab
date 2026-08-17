@@ -18,10 +18,15 @@ from routelab import GTFS
 
 from conftest import TINY_GTFS
 
-#: Every timetable technique. Every behavioural test runs against each, because "these two
-#: agree" is the paper's thesis and a test that only asked one would not notice
-#: the day they stopped.
-MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA, rl.TripBased, rl.PTL]
+#: Every timetable technique, read off the shelf rather than listed. Every
+#: behavioural test runs against each, because "these two agree" is the
+#: paper's thesis and a test that only asked one would not notice the day
+#: they stopped — nor would a list somebody forgot to extend.
+MODELS = [
+    technique
+    for technique in rl.kernels.techniques()
+    if issubclass(technique, rl.TimetablePlanner)
+]
 
 #: The ones that answer with an itinerary and nothing else, so a cost table
 #: and a search space are things they refuse: Pyrga's two, and PTL, whose

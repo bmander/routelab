@@ -37,7 +37,7 @@ mod dependent;
 mod expanded;
 
 #[cfg(test)]
-pub(crate) mod tests;
+mod tests;
 
 pub use dependent::earliest_arrival;
 pub use expanded::TimeExpanded;

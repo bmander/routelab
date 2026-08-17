@@ -7,10 +7,10 @@ use super::events::EventGraph;
 use super::labels::{meet, Labels};
 use super::PublicTransitLabeling;
 use crate::kernels::csa::ConnectionScan;
-use crate::kernels::raptor::Raptor;
-use crate::kernels::timetable::tests::{
+use crate::kernels::oracles::{
     best_by_brute_force, c, profile_by_brute_force, random_footpaths, random_timetable, town,
 };
+use crate::kernels::raptor::Raptor;
 use crate::kernels::timetable::{earliest_arrival, TimeExpanded};
 use crate::model::timetable::{Footpaths, Timetable, Transfer};
 use crate::util::progress::Progress;
