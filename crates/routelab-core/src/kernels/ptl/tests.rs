@@ -12,7 +12,6 @@ use crate::kernels::timetable::tests::{
     best_by_brute_force, c, profile_by_brute_force, random_footpaths, random_timetable, town,
 };
 use crate::kernels::timetable::{earliest_arrival, TimeExpanded};
-use crate::model::graph::NodeId;
 use crate::model::timetable::{Footpaths, Timetable, Transfer};
 use crate::util::progress::Progress;
 
@@ -125,6 +124,7 @@ fn ptl_answers_town() {
     let labels = ptl(&table);
     assert_eq!(labels.num_stops(), 3);
     assert_eq!(labels.num_events(), 8);
+    assert_eq!(labels.num_arcs(), 4 + 1 + 3 + 1);
     assert!(labels.footprint() > 0);
     assert!(labels.hubs_per_label() >= 1.0);
     // Leaving 0 at 08:00: trip 1 to stop 1, then trip 3 to stop 2 by 08:20.
@@ -379,5 +379,4 @@ fn a_connection_that_reads_as_one_hop_is_one_leg() {
     assert_eq!(found.arrives, 200);
     assert_eq!(found.legs.len(), 1);
     assert!(found.is_valid(&[(0, 0)], Transfer::instant(), &Footpaths::none()));
-    let _ = NodeId::default();
 }

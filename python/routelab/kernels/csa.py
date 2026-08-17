@@ -97,7 +97,7 @@ class CSA(TimetablePlanner):
         do and a profile of pairs cannot hold it.
         """
         opens, closes = self._window(departing, until)
-        compiled = self._bound()
+        self._bound()
         starts = self._origin_ids(origin)
         target = self.node_id(destination)
         # The paper's one-to-one pruning wants the one stop the question is
@@ -109,19 +109,7 @@ class CSA(TimetablePlanner):
         for stop, head_start in starts.items():
             for departs, itinerary in profile.journeys(stop, opens + head_start, closes + head_start):
                 found.append((departs - head_start, itinerary))
-        # Merge the origins' profiles: latest departure first, keeping each
-        # itinerary that arrives strictly earlier than every later-leaving one.
-        # The journey is built from the survivors only, since building one asks
-        # the environment for an edge per leg and most origins lose most pairs.
-        found.sort(key=lambda pair: (pair[0], -pair[1].arrives))
-        kept: "List[Journey]" = []
-        best: Optional[int] = None
-        for left, itinerary in reversed(found):
-            if best is None or itinerary.arrives < best:
-                kept.append(Journey.from_itinerary(compiled, itinerary, destination, left))
-                best = itinerary.arrives
-        kept.reverse()
-        return kept
+        return self._merge_departures(found, destination)
 
     def explored(self, result: Result, **options: Any) -> SearchSpace:
         """Every stop the scan labelled, by when it was reached."""

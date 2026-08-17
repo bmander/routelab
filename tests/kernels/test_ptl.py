@@ -1,11 +1,12 @@
 """PTL: hub labels over the events, and then no search at all.
 
-Delling, Dibbelt, Pajor & Werneck (2015). The five-way agreement with the
-other timetable techniques lives in test_timetable.py and test_footpaths.py,
-where PTL is one of ``MODELS``; what is here is the rest of its surface — the
-labeling it builds and reports, the profile checked against CSA's, and the
-refusals — on the tiny fixture, where every number can be checked by eye:
-A→C at 08:00 is 08:20 with one change, and NIGHT1 leaves A at 23:50.
+Delling, Dibbelt, Pajor & Werneck (2015). What every timetable technique
+must agree on lives in test_timetable.py and test_footpaths.py, where PTL is
+one of ``MODELS`` — and, since it keeps no table, one of ``ITINERARY_ONLY``.
+What is here is the rest of its surface: the labeling it builds and reports,
+the profile checked against CSA's, and its own refusals — on the tiny
+fixture, where every number can be checked by eye: A→C at 08:00 is 08:20
+with one change, and NIGHT1 leaves A at 23:50.
 """
 
 from __future__ import annotations
@@ -38,14 +39,6 @@ def test_the_labeling_is_the_thing_it_reports(planner):
     assert planner.num_hubs >= 2 * planner.num_events, "every event is at least its own hub"
     assert planner.hubs_per_label >= 1.0
     assert planner.searches == ("hubs", planner.num_hubs)
-
-
-def test_it_keeps_no_table(planner):
-    # Like the two Pyrga models: a journey, and nothing to draw.
-    with pytest.raises(NotImplementedError, match="answers with a journey rather than a cost"):
-        planner.search("A", departing=time(8, 0))
-    with pytest.raises(NotImplementedError, match=r"nothing to draw\..*CSA\(\), RAPTOR\(\) or TripBased\(\)"):
-        planner.explored(None)
 
 
 def test_several_origins_each_carry_a_head_start(feed):
@@ -106,8 +99,6 @@ def test_the_profile_refuses_a_missing_or_backwards_window(planner):
         planner.profile("A", "C", departing=time(8, 0))
     with pytest.raises(ValueError, match="cannot close before it opens"):
         planner.profile("A", "C", departing=time(9, 0), until=time(8, 0))
-    with pytest.raises(ValueError, match=r"takes no until; .*profile\(\) on CSA\(\), PTL\(\) or TripBased\(\)"):
-        planner.route("A", "C", departing=time(8, 0), until=time(9, 0))
 
 
 def test_footprint_counts_the_labels_on_top_of_the_timetable(env, planner):

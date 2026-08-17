@@ -81,6 +81,10 @@ impl Labels {
         // Two stamp arrays: which hubs the current hub's own label holds,
         // and which vertices this search has already seen. Stamps rather
         // than clearing, so a search costs what it visits and no more.
+        // (Bitsets, cleared by walking what set them, were measured here:
+        // 54 KB apiece against 1.7 MB, and worth 2% of the build on a city
+        // — not worth four clear-loops a reader has to check mirror the
+        // four that set them.)
         let mut marked = vec![0u32; events];
         let mut seen = vec![0u32; events];
         let mut stamp = 0u32;
@@ -136,7 +140,7 @@ impl Labels {
                     continue;
                 }
                 fwd[u as usize].push((hub, next));
-                for (w, _) in graph.into(u) {
+                for w in graph.into(u) {
                     if seen[w as usize] != stamp {
                         seen[w as usize] = stamp;
                         queue.push((w, u));
@@ -224,9 +228,10 @@ pub(super) fn meet(forward: &[u32], backward: &[u32]) -> (Option<u32>, usize) {
 
 /// Sort each vertex's entries by hub and lay them out CSR-style.
 fn pack(labels: Vec<Vec<(u32, u32)>>) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
+    let entries: usize = labels.iter().map(Vec::len).sum();
     let mut first = Vec::with_capacity(labels.len() + 1);
-    let mut hubs = Vec::new();
-    let mut via = Vec::new();
+    let mut hubs = Vec::with_capacity(entries);
+    let mut via = Vec::with_capacity(entries);
     first.push(0u32);
     for mut label in labels {
         label.sort_unstable();

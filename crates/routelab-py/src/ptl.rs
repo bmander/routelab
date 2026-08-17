@@ -6,7 +6,6 @@ use pyo3::prelude::*;
 
 use routelab_core::kernels::ptl::PublicTransitLabeling as CoreLabeling;
 use routelab_core::model::timetable::Transfer;
-use routelab_core::util::progress::Progress as CoreProgress;
 use routelab_core::NodeId;
 
 use crate::progress::*;
@@ -34,7 +33,7 @@ impl PyPublicTransitLabeling {
     ) -> Self {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
-        let counter = progress.map_or_else(CoreProgress::new, |p| p.inner.clone());
+        let counter = counter(progress);
         let labeling = py.detach(|| {
             CoreLabeling::build_reporting(&timetable, Transfer::instant(), &footpaths, &counter)
         });
@@ -54,23 +53,11 @@ impl PyPublicTransitLabeling {
         self.inner.num_events()
     }
 
-    /// Arcs of the event graph: waiting, connection and foot arcs together.
-    #[getter]
-    fn num_arcs(&self) -> usize {
-        self.inner.num_arcs()
-    }
-
     /// Entries in the event labels, both directions — the size of the
     /// labeling.
     #[getter]
     fn num_hubs(&self) -> usize {
         self.inner.num_hubs()
-    }
-
-    /// Entries in the stop labels, both directions.
-    #[getter]
-    fn num_stop_hubs(&self) -> usize {
-        self.inner.num_stop_hubs()
     }
 
     /// Average hubs per event label.

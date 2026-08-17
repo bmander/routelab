@@ -508,7 +508,7 @@ Twenty-five random stop pairs at 08:30 with 200 m footpaths
 | `RAPTOR` | 6,313 stops | 0.4 s | 16 MB | 4,126 | 1.5 ms |
 | `CSA` | 6,313 stops | 0.4 s | 23 MB | 3,411 | 0.6 ms |
 | `TripBased` | 12,482 trips | 10.5 s | 28 MB | 8,455 | 1.0 ms |
-| `PTL` | 73,961,455 hubs | 53.5 s | 1,204 MB | 13,161 | 0.4 ms |
+| `PTL` | 73,961,455 hubs | 55.0 s | 1,165 MB | 12,973 | 0.3 ms |
 
 King County Metro plus Sound Transit on a Monday: 6,313 stops, 421,604
 connections, 7,038 stop pairs, 0 trips the reader could not represent. The
@@ -826,7 +826,7 @@ one. The search happens once, at bind, for every query at once.
 feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
 env = rl.Environment(feed, rl.Footpaths(feed, within=200))
 
-planner = rl.PTL().bind(env)                             # 428,927 events labelled: 53 s, 1.2 GB
+planner = rl.PTL().bind(env)                             # 428,927 events labelled: 55 s, 1.2 GB
 planner.num_hubs, planner.hubs_per_label                 # 73,961,455 entries, 86 hubs per label
 planner.route(downtown, juanita, departing=time(8, 30))  # 09:39, as the other five say; 0.4 ms
 planner.profile(downtown, juanita, departing=time(8, 30), until=time(10, 30))   # CSA's list, from the labels: 4 ms
@@ -864,13 +864,13 @@ above, `benchmarks/bench_transit.py`):
 | | nodes | bind | memory | settled | query |
 |---|---|---|---|---|---|
 | `CSA` | 6,313 stops | 0.3 s | 23 MB | 3,411 | 0.500 ms |
-| `PTL` | 73,961,455 hubs | 53.5 s | 1,204 MB | 13,161 | 0.395 ms |
+| `PTL` | 73,961,455 hubs | 55.0 s | 1,165 MB | 12,973 | 0.348 ms |
 
 That is the paper's trade at this scale — London took its authors 54 minutes
 and 1.3 GB — and it is worth reading both columns of. The query is the
-fastest here, and most of its 0.4 ms is building the `Journey`; the kernel
+fastest here, and most of its 0.3 ms is building the `Journey`; the kernel
 itself reads its thirteen thousand entries in tens of microseconds. What it
-buys is a preprocessing bill 170× CSA's and fifty times its memory, which is
+buys is a preprocessing bill 150× CSA's and fifty times its memory, which is
 why the board's progress bar counts hubs while it labels, and the reason
 `footprint` is on every planner.
 

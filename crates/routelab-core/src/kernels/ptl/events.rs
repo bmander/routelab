@@ -34,7 +34,6 @@ pub(super) const WALK: u32 = u32::MAX - 1;
 /// from it, and a query unpacks a path in either direction.
 #[derive(Debug)]
 pub(super) struct EventGraph {
-    stops: usize,
     /// Event id to its stop and time. Ids are in `(time, stop)` order.
     event_stop: Vec<NodeId>,
     event_time: Vec<Time>,
@@ -48,7 +47,6 @@ pub(super) struct EventGraph {
     out_kind: Vec<u32>,
     in_first: Vec<u32>,
     in_tail: Vec<u32>,
-    in_kind: Vec<u32>,
 }
 
 impl EventGraph {
@@ -99,7 +97,10 @@ impl EventGraph {
         // the same two events collapse to the first: reachability does not
         // care which vehicle, and any connection whose times fit is a legal
         // leg.
-        let mut arcs: Vec<(u32, u32, u32)> = Vec::new();
+        let walks: usize = (0..stops as NodeId)
+            .map(|stop| at_stop(stop).len() * footpaths.from(stop).count())
+            .sum();
+        let mut arcs: Vec<(u32, u32, u32)> = Vec::with_capacity(connections.len() + events + walks);
         for (index, c) in connections.iter().enumerate() {
             arcs.push((
                 exactly(c.from, c.departs),
@@ -112,14 +113,24 @@ impl EventGraph {
             for pair in list.windows(2) {
                 arcs.push((pair[0], pair[1], WAIT));
             }
-            for &event in list {
-                let time = event_time[event as usize];
-                for (next, duration) in footpaths.from(stop) {
-                    let ready = time.saturating_add(duration);
-                    let there = at_stop(next);
-                    let index = there.partition_point(|&e| event_time[e as usize] < ready);
-                    if let Some(&landing) = there.get(index) {
-                        arcs.push((event, landing, WALK));
+            // A walk lands on the first event at the far stop the rider could
+            // be standing at. Both stops' events are in time order, so as the
+            // departure event advances the landing only moves forward: one
+            // walk-through of each pair of lists rather than a binary search
+            // per event.
+            for (next, duration) in footpaths.from(stop) {
+                let there = at_stop(next);
+                let mut landing = 0usize;
+                for &event in list {
+                    let ready = event_time[event as usize].saturating_add(duration);
+                    while landing < there.len() && event_time[there[landing] as usize] < ready {
+                        landing += 1;
+                    }
+                    match there.get(landing) {
+                        Some(&at) => arcs.push((event, at, WALK)),
+                        // Nothing left at the far stop, and nothing later
+                        // here can be readier than this event was.
+                        None => break,
                     }
                 }
             }
@@ -127,13 +138,10 @@ impl EventGraph {
         arcs.sort_unstable();
         arcs.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
 
-        let (out_first, out_head, out_kind) = csr(events, arcs.iter().copied());
-        let mut reversed: Vec<(u32, u32, u32)> = arcs.iter().map(|&(t, h, k)| (h, t, k)).collect();
-        reversed.sort_unstable();
-        let (in_first, in_tail, in_kind) = csr(events, reversed.into_iter());
+        let (out_first, out_head, out_kind) = csr(events, &arcs);
+        let (in_first, in_tail) = reverse_csr(events, &arcs);
 
         EventGraph {
-            stops,
             event_stop,
             event_time,
             stop_first,
@@ -143,12 +151,11 @@ impl EventGraph {
             out_kind,
             in_first,
             in_tail,
-            in_kind,
         }
     }
 
     pub(super) fn num_stops(&self) -> usize {
-        self.stops
+        self.stop_first.len() - 1
     }
 
     pub(super) fn num_events(&self) -> usize {
@@ -202,16 +209,15 @@ impl EventGraph {
             .zip(self.out_kind[a..b].iter().copied())
     }
 
-    /// In-arcs of `event`, as `(tail, kind)`.
-    pub(super) fn into(&self, event: u32) -> impl Iterator<Item = (u32, u32)> + '_ {
+    /// The tails of `event`'s in-arcs. No kind: the labeling walks backward
+    /// to find what reaches an event, and reads the kinds off the forward
+    /// arcs when it unpacks a path.
+    pub(super) fn into(&self, event: u32) -> impl Iterator<Item = u32> + '_ {
         let (a, b) = (
             self.in_first[event as usize] as usize,
             self.in_first[event as usize + 1] as usize,
         );
-        self.in_tail[a..b]
-            .iter()
-            .copied()
-            .zip(self.in_kind[a..b].iter().copied())
+        self.in_tail[a..b].iter().copied()
     }
 
     /// In-degree plus out-degree: the labeling's notion of importance.
@@ -222,10 +228,16 @@ impl EventGraph {
     }
 
     /// The kind of the arc from `tail` to `head`, if there is one.
+    ///
+    /// A binary search: arcs were sorted by `(tail, head)` and deduplicated,
+    /// so a vertex's heads are ascending and distinct.
     pub(super) fn arc_kind(&self, tail: u32, head: u32) -> Option<u32> {
-        self.out(tail)
-            .find(|&(h, _)| h == head)
-            .map(|(_, kind)| kind)
+        let (a, b) = (
+            self.out_first[tail as usize] as usize,
+            self.out_first[tail as usize + 1] as usize,
+        );
+        let at = self.out_head[a..b].binary_search(&head).ok()?;
+        Some(self.out_kind[a + at])
     }
 
     /// Bytes held.
@@ -239,20 +251,16 @@ impl EventGraph {
                 + self.out_head.len()
                 + self.out_kind.len()
                 + self.in_first.len()
-                + self.in_tail.len()
-                + self.in_kind.len())
+                + self.in_tail.len())
     }
 }
 
 /// Pack `(tail, head, kind)` triples, sorted by tail, into CSR arrays.
-fn csr(
-    nodes: usize,
-    arcs: impl Iterator<Item = (u32, u32, u32)>,
-) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
+fn csr(nodes: usize, arcs: &[(u32, u32, u32)]) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
     let mut first = vec![0u32; nodes + 1];
-    let mut heads = Vec::new();
-    let mut kinds = Vec::new();
-    for (tail, head, kind) in arcs {
+    let mut heads = Vec::with_capacity(arcs.len());
+    let mut kinds = Vec::with_capacity(arcs.len());
+    for &(tail, head, kind) in arcs {
         first[tail as usize + 1] += 1;
         heads.push(head);
         kinds.push(kind);
@@ -261,4 +269,27 @@ fn csr(
         first[node + 1] += first[node];
     }
     (first, heads, kinds)
+}
+
+/// The same arcs indexed by head, as `(first, tails)`.
+///
+/// Counted and scattered rather than sorted a second time: walking `arcs` in
+/// `(tail, head)` order fills each head's run in ascending order of tail,
+/// which is what a sort would have produced, without the copy.
+fn reverse_csr(nodes: usize, arcs: &[(u32, u32, u32)]) -> (Vec<u32>, Vec<u32>) {
+    let mut first = vec![0u32; nodes + 1];
+    for &(_, head, _) in arcs {
+        first[head as usize + 1] += 1;
+    }
+    for node in 0..nodes {
+        first[node + 1] += first[node];
+    }
+    let mut fill = first.clone();
+    let mut tails = vec![0u32; arcs.len()];
+    for &(tail, head, _) in arcs {
+        let at = &mut fill[head as usize];
+        tails[*at as usize] = tail;
+        *at += 1;
+    }
+    (first, tails)
 }

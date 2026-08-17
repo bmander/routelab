@@ -23,9 +23,10 @@ from conftest import TINY_GTFS
 #: the day they stopped.
 MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA, rl.TripBased, rl.PTL]
 
-#: The two Pyrga models — the ones that answer with an itinerary and nothing
-#: else, so a cost table and a search space are things they refuse.
-ITINERARY_ONLY = [rl.TimeDependent, rl.TimeExpanded]
+#: The ones that answer with an itinerary and nothing else, so a cost table
+#: and a search space are things they refuse: Pyrga's two, and PTL, whose
+#: labels answer a pair of stops rather than filling a table.
+ITINERARY_ONLY = [rl.TimeDependent, rl.TimeExpanded, rl.PTL]
 
 
 def test_the_feed_reads_its_service_day(feed: GTFS):
@@ -153,7 +154,7 @@ def test_several_origins_each_carry_a_head_start(model, feed):
 
 
 @pytest.mark.parametrize("model", ITINERARY_ONLY)
-def test_a_pyrga_model_answers_with_a_journey_and_nothing_else(model, env: rl.Environment):
+def test_a_model_without_a_table_answers_with_a_journey_and_nothing_else(model, env: rl.Environment):
     # No cost table and no search space: said in so many words, and naming
     # the technique that has both.
     planner = model().bind(env)

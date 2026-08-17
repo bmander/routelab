@@ -567,6 +567,35 @@ class TimetablePlanner(Planner):
             )
         return opens, closes
 
+    def _merge_departures(
+        self,
+        found: "List[Tuple[int, _routelab.Itinerary]]",
+        destination: Hashable,
+    ) -> "List[Journey]":
+        """Several origins' profiles, merged on the query's clock.
+
+        Shared because a profile from several origins is not the paper's
+        question but this library's: each origin is read out on its own clock
+        (its head start already subtracted) and what survives is every
+        itinerary that arrives strictly earlier than anything leaving later.
+        Latest departure first while merging, earliest first coming back.
+
+        The journey is built from the survivors only, since building one asks
+        the environment for an edge per leg and most origins lose most pairs.
+        """
+        compiled = self._bound()
+        found.sort(key=lambda pair: (pair[0], -pair[1].arrives))
+        kept: "List[Journey]" = []
+        best: Optional[int] = None
+        for departs, itinerary in reversed(found):
+            if best is None or itinerary.arrives < best:
+                kept.append(
+                    Journey.from_itinerary(compiled, itinerary, destination, departs)
+                )
+                best = itinerary.arrives
+        kept.reverse()
+        return kept
+
     @staticmethod
     def _changes(max_transfers: Optional[int]) -> Optional[int]:
         """``max_transfers`` as a checked count of changes.

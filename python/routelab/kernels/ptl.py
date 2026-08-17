@@ -6,7 +6,6 @@ from typing import Any, Dict, Hashable, List, Optional, Tuple
 
 from .. import _routelab
 from ..model.journey import Journey
-from ..util.clock import service_seconds
 from .planner import Origins, TimetablePlanner
 
 __all__ = ["PTL"]
@@ -110,33 +109,12 @@ class PTL(TimetablePlanner):
         destination would beat is left out, since a walk leaves whenever you
         do and a profile of pairs cannot hold it.
         """
-        if departing is None or until is None:
-            raise ValueError(
-                f"{type(self).__name__}.profile needs a departure window: pass "
-                f"departing=time(8, 30), until=time(10, 30) — times, datetimes, "
-                f"or seconds on the service-day clock."
-            )
-        opens, closes = service_seconds(departing), service_seconds(until)
-        if closes < opens:
-            raise ValueError(
-                f"a departure window cannot close before it opens: "
-                f"departing={opens} is after until={closes}"
-            )
-        compiled = self._bound()
+        opens, closes = self._window(departing, until)
+        self._bound()
         starts = self._origin_ids(origin)
         target = self.node_id(destination)
         found: "List[Tuple[int, _routelab.Itinerary]]" = []
         for stop, head_start in starts.items():
             for departs, itinerary in self._ptl.profile(stop, target, opens + head_start, closes + head_start):
                 found.append((departs - head_start, itinerary))
-        # Merge the origins' profiles: latest departure first, keeping each
-        # itinerary that arrives strictly earlier than every later-leaving one.
-        found.sort(key=lambda pair: (pair[0], -pair[1].arrives))
-        kept: "List[Journey]" = []
-        best: Optional[int] = None
-        for left, itinerary in reversed(found):
-            if best is None or itinerary.arrives < best:
-                kept.append(Journey.from_itinerary(compiled, itinerary, destination, left))
-                best = itinerary.arrives
-        kept.reverse()
-        return kept
+        return self._merge_departures(found, destination)
