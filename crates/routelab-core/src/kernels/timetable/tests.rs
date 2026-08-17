@@ -8,7 +8,7 @@ use crate::kernels::raptor::Raptor;
 use crate::kernels::tripbased::TripBased;
 use crate::model::graph::{NodeId, UNREACHABLE};
 use crate::model::timetable::{
-    Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk,
+    Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, TripId, Walk,
 };
 use crate::util::rng::Rng;
 
@@ -20,7 +20,7 @@ use crate::util::rng::Rng;
 /// A connection, spelled shortly enough to read a timetable off the page.
 fn c(trip: u32, from: NodeId, to: NodeId, departs: Time, arrives: Time) -> Connection {
     Connection {
-        trip,
+        trip: TripId(trip),
         from,
         to,
         departs,
@@ -337,6 +337,101 @@ fn both_models_agree_with_brute_force() {
                     truth,
                     "seed {seed}: RAPTOR, {from} -> {to}"
                 );
+            }
+        }
+    }
+}
+
+/// Every vehicle an itinerary names is one the timetable actually runs.
+///
+/// [`Itinerary::is_valid`] cannot ask this — it is handed the footpaths and
+/// the change rule, not the timetable — so a journey that rides the right bus
+/// under the wrong name passes it, and passes the agreement tests too, since
+/// those compare arrival times. Which bus you are on is most of the answer, so
+/// it gets a check of its own.
+fn rides_are_real(table: &Timetable, itinerary: &Itinerary) -> bool {
+    itinerary.rides().all(|ride| table.holds(ride))
+}
+
+#[test]
+fn every_vehicle_named_is_one_the_timetable_runs() {
+    // The kernels number trips densely for themselves — a feed's trip whose
+    // chain broke becomes several, and the layouts renumber what is left — so
+    // every one of them has an internal index and a feed id in flight at once,
+    // both of them plain integers. This is what says they never got swapped.
+    for seed in 0..8 {
+        let table = random_timetable(seed, 8, 16);
+        let paths = random_footpaths(seed, 8, 3);
+        let expanded = expanded_with(&table, &paths);
+        let rounds = raptor_with(&table, &paths);
+        let scan = csa_with(&table, &paths);
+        let trips = tripbased_with(&table, &paths);
+        for from in 0..8u32 {
+            for to in 0..8u32 {
+                for at in [0, 900, 2400] {
+                    for itinerary in [
+                        expanded.earliest_arrival(&[(from, at)], to),
+                        earliest_arrival(&table, &[(from, at)], to, Transfer::instant(), &paths),
+                        rounds.earliest_arrival(from, at, to),
+                        scan.earliest_arrival(from, at, to),
+                        trips.earliest_arrival(from, at, to),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
+                        assert!(
+                            rides_are_real(&table, &itinerary),
+                            "seed {seed}: {from} -> {to} at {at} rides a vehicle the \
+                             timetable does not run: {itinerary:?}"
+                        );
+                    }
+                    // And the fronts, which are read back off different
+                    // pointers than the single best journey is.
+                    for itinerary in rounds
+                        .pareto(from, at, to)
+                        .iter()
+                        .chain(trips.pareto(from, at, to).iter())
+                    {
+                        assert!(
+                            rides_are_real(&table, itinerary),
+                            "seed {seed}: a front entry for {from} -> {to} at {at} \
+                             rides a vehicle the timetable does not run"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_profile_names_vehicles_the_timetable_runs_too() {
+    // The profiles read their journeys back off yet another set of pointers —
+    // decisions for the scan, queue entries kept across runs for the sweep.
+    for seed in 0..6 {
+        let table = random_timetable(seed, 6, 12);
+        let paths = random_footpaths(seed, 6, 3);
+        let scan = csa_with(&table, &paths);
+        let trips = tripbased_with(&table, &paths);
+        for from in 0..6u32 {
+            for to in 0..6u32 {
+                if from == to {
+                    continue;
+                }
+                let profile = scan.profile(to, 0, Some(from));
+                for (_, itinerary) in scan.journeys(&profile, from, 0, 12_000) {
+                    assert!(
+                        rides_are_real(&table, &itinerary),
+                        "seed {seed}: CSA profile"
+                    );
+                }
+                let profile = trips.profile(from, to, 0, 12_000);
+                for (_, itinerary) in trips.journeys(&profile) {
+                    assert!(
+                        rides_are_real(&table, &itinerary),
+                        "seed {seed}: trip-based profile"
+                    );
+                }
             }
         }
     }
@@ -726,7 +821,7 @@ fn best_by_brute_force_with_trips(
     footpaths: &Footpaths,
     here: NodeId,
     now: Time,
-    aboard: Option<u32>,
+    aboard: Option<TripId>,
     to: NodeId,
     hops_left: usize,
     trips_left: usize,
@@ -778,7 +873,7 @@ fn best_by_brute_force_with_trips(
 
 /// How many times an itinerary got onto a vehicle it was not already on.
 fn boardings(itinerary: &Itinerary) -> usize {
-    let mut aboard: Option<u32> = None;
+    let mut aboard: Option<TripId> = None;
     let mut count = 0;
     for leg in &itinerary.legs {
         match leg {

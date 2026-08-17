@@ -17,7 +17,7 @@
 //! arrive later downstream — both papers rest on it.
 
 use crate::model::graph::NodeId;
-use crate::model::timetable::{Connection, Time, Timetable};
+use crate::model::timetable::{Connection, Time, Timetable, TripId};
 
 /// When a trip reaches a stop and when it leaves it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,9 +46,9 @@ pub struct Lines {
     /// Trip `t` at position `i` is `stop_times[trip_times_start[t] + i]`.
     trip_times_start: Vec<u32>,
     stop_times: Vec<StopTime>,
-    /// The `Connection::trip` each trip came from — a feed's trip whose chain
+    /// The feed trip each internal trip came from — a feed's trip whose chain
     /// of connections was broken becomes several.
-    trip_ids: Vec<u32>,
+    trip_ids: Vec<TripId>,
     /// Every `(line, position)` a stop occupies, CSR by stop.
     stop_lines_start: Vec<u32>,
     stop_lines: Vec<(u32, u32)>,
@@ -58,7 +58,7 @@ pub struct Lines {
 struct Chain {
     stops: Vec<NodeId>,
     times: Vec<StopTime>,
-    trip: u32,
+    trip: TripId,
 }
 
 impl Chain {
@@ -146,7 +146,7 @@ impl Lines {
         let mut trip_line: Vec<u32> = Vec::new();
         let mut trip_times_start = vec![0u32];
         let mut stop_times: Vec<StopTime> = Vec::new();
-        let mut trip_ids: Vec<u32> = Vec::new();
+        let mut trip_ids: Vec<TripId> = Vec::new();
 
         let mut group_start = 0;
         while group_start < chains.len() {
@@ -250,8 +250,8 @@ impl Lines {
                 + self.line_trips_start.len()
                 + self.trip_line.len()
                 + self.trip_times_start.len()
-                + self.trip_ids.len()
                 + self.stop_lines_start.len())
+            + self.trip_ids.len() * std::mem::size_of::<TripId>()
             + self.stop_times.len() * std::mem::size_of::<StopTime>()
             + self.stop_lines.len() * std::mem::size_of::<(u32, u32)>()
     }
@@ -290,8 +290,9 @@ impl Lines {
         self.trip_times_start[t + 1] - self.trip_times_start[t]
     }
 
-    /// The `Connection::trip` `trip` came from.
-    pub fn trip_id(&self, trip: u32) -> u32 {
+    /// The feed trip the internal trip `trip` came from — the id an answer
+    /// names, which is a different number from `trip` itself.
+    pub fn trip_id(&self, trip: u32) -> TripId {
         self.trip_ids[trip as usize]
     }
 

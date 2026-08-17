@@ -33,6 +33,24 @@ use crate::model::graph::{Graph, NodeId};
 /// May exceed a day. See the module docstring for why it does not wrap.
 pub type Time = u32;
 
+/// Which vehicle run a connection belongs to, as the *feed* numbers them.
+///
+/// A newtype and not a bare `u32`, alone among the ids here, because it is the
+/// one that has a double. Every kernel over a timetable renumbers trips for
+/// itself — a feed's trip whose chain of connections broke becomes several,
+/// and the layouts pack what is left densely — so an internal index and a feed
+/// id are in flight at the same time, meaning different things, and until this
+/// existed both were `u32` and the compiler had nothing to say about swapping
+/// them. It is what leaves a kernel and what a caller looks a route up by, so
+/// it is the one worth spelling.
+///
+/// The other ids here stay plain. `NodeId`, `EdgeId` and a position along a
+/// line are each the only integer of their kind in the code that handles them,
+/// and a newtype per index would cost more in `.0` at every array subscript
+/// than it could catch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TripId(pub u32);
+
 /// One vehicle, leaving one stop and reaching the next.
 ///
 /// The atom of a timetable. A trip serving five stops is four connections, not
@@ -42,7 +60,7 @@ pub type Time = u32;
 pub struct Connection {
     /// Which vehicle run this belongs to. Two connections sharing a trip can be
     /// ridden through without changing.
-    pub trip: u32,
+    pub trip: TripId,
     pub from: NodeId,
     pub to: NodeId,
     pub departs: Time,
@@ -103,7 +121,7 @@ impl Leg {
     }
 
     /// The vehicle run, for a leg that rides one.
-    pub fn trip(&self) -> Option<u32> {
+    pub fn trip(&self) -> Option<TripId> {
         match self {
             Leg::Ride(ride) => Some(ride.trip),
             Leg::Walk(_) => None,
@@ -426,7 +444,7 @@ impl Timetable {
                 times
                     .into_iter()
                     .map(move |(trip, departs, arrives)| Connection {
-                        trip,
+                        trip: TripId(trip),
                         from,
                         to,
                         departs,
@@ -453,6 +471,31 @@ impl Timetable {
 
     pub fn connections(&self) -> &[Connection] {
         &self.connections
+    }
+
+    /// Is `ride` one of the connections this timetable holds — the same
+    /// vehicle, between the same two stops, at the same two times?
+    ///
+    /// What [`Itinerary::is_valid`] cannot ask. That check is given the
+    /// footpaths and the change rule but not the timetable, so it can say a
+    /// journey's legs join up in time and that its walks are real, and cannot
+    /// say the *vehicles* are: an itinerary naming a bus that does not exist,
+    /// or the right bus by the wrong name, passes it. Which vehicle you are on
+    /// is most of the answer to a transit query, so it is worth being able to
+    /// falsify — see the test that holds every kernel to it.
+    ///
+    /// A binary search: connections are sorted by `(from, to, departs,
+    /// arrives)`, and the trips running that pair at that moment are the short
+    /// run this then scans.
+    pub fn holds(&self, ride: &Ride) -> bool {
+        let key = (ride.from, ride.to, ride.departs, ride.arrives);
+        let first = self
+            .connections
+            .partition_point(|c| (c.from, c.to, c.departs, c.arrives) < key);
+        self.connections[first..]
+            .iter()
+            .take_while(|c| (c.from, c.to, c.departs, c.arrives) == key)
+            .any(|c| c.trip == ride.trip)
     }
 
     /// The edges leaving `stop`, as `(to, connections, first_index)` — the index
@@ -536,7 +579,7 @@ impl Itinerary {
     /// off, and one less than the number of distinct trips ridden. A walk
     /// between two vehicles is how a change is made, not a second one.
     pub fn transfers(&self) -> usize {
-        let trips: Vec<u32> = self.rides().map(|ride| ride.trip).collect();
+        let trips: Vec<TripId> = self.rides().map(|ride| ride.trip).collect();
         trips.windows(2).filter(|pair| pair[0] != pair[1]).count()
     }
 
@@ -569,7 +612,7 @@ impl Itinerary {
         };
         let mut here = first.from();
         let mut now = at;
-        let mut aboard: Option<u32> = None;
+        let mut aboard: Option<TripId> = None;
         for leg in &self.legs {
             if leg.from() != here || leg.arrives() < leg.departs() || leg.departs() < now {
                 return false;

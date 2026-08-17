@@ -60,7 +60,7 @@
 use crate::model::graph::{NodeId, UNREACHABLE};
 use crate::model::lines::Lines;
 use crate::model::timetable::{
-    Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk,
+    Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, TripId, Walk,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -1089,9 +1089,10 @@ impl TripBasedSearch {
         self.segments.last().map_or(0, |s| s.round as usize + 1)
     }
 
-    /// Every segment scanned, as the number of changes it was reached with
-    /// and the stops it covers, boarded first — the search space, for drawing.
-    pub fn reached(&self, kernel: &TripBased) -> Vec<(usize, u32, Vec<NodeId>)> {
+    /// Every segment scanned, as the number of changes it was reached with,
+    /// the vehicle it rode and the stops it covers, boarded first — the search
+    /// space, for drawing.
+    pub fn reached(&self, kernel: &TripBased) -> Vec<(usize, TripId, Vec<NodeId>)> {
         self.segments
             .iter()
             .map(|seg| {

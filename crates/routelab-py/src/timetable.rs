@@ -246,7 +246,7 @@ impl PyItinerary {
     fn rides(&self) -> Vec<(u32, NodeId, NodeId, u32, u32)> {
         self.inner
             .rides()
-            .map(|r| (r.trip, r.from, r.to, r.departs, r.arrives))
+            .map(|r| (r.trip.0, r.from, r.to, r.departs, r.arrives))
             .collect()
     }
 
@@ -258,7 +258,7 @@ impl PyItinerary {
             .legs
             .iter()
             .map(|leg| match leg {
-                Leg::Ride(r) => (Some(r.trip), r.from, r.to, r.departs, r.arrives),
+                Leg::Ride(r) => (Some(r.trip.0), r.from, r.to, r.departs, r.arrives),
                 Leg::Walk(w) => (None, w.from, w.to, w.departs, w.arrives),
             })
             .collect()

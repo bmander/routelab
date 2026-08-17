@@ -183,7 +183,11 @@ impl PyTripBasedSearch {
 
     /// Every segment scanned, as `(changes, trip, [stops...])`.
     fn reached(&self) -> Vec<(usize, u32, Vec<NodeId>)> {
-        self.inner.reached(&self.kernel)
+        self.inner
+            .reached(&self.kernel)
+            .into_iter()
+            .map(|(round, trip, stops)| (round, trip.0, stops))
+            .collect()
     }
 
     /// The stops along the earliest itinerary to `stop`, sources first.

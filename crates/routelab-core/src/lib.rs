@@ -42,7 +42,7 @@ pub use model::heuristic::Heuristic;
 pub use model::lines::{Lines, StopTime};
 pub use model::search::{SearchError, SearchOptions, SearchResult};
 pub use model::timetable::{
-    Connection, Footpaths, Itinerary, Leg, Ride, Timetable, Transfer, Walk,
+    Connection, Footpaths, Itinerary, Leg, Ride, Timetable, Transfer, TripId, Walk,
 };
 pub use model::tree::{Magnitude, SearchTree};
 pub use util::progress::Progress;

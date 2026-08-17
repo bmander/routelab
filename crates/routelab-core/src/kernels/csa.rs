@@ -63,7 +63,7 @@
 use crate::model::graph::{NodeId, UNREACHABLE};
 
 use crate::model::timetable::{
-    Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk,
+    Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, TripId, Walk,
 };
 
 /// "No connection", in the arrays that index them.
@@ -77,14 +77,21 @@ const NONE: u32 = u32::MAX;
 #[derive(Debug)]
 pub struct ConnectionScan {
     stops: usize,
-    /// The array. Sorted by departure; `trip` is the internal trip, dense.
+    /// The array, sorted by departure. Each connection keeps the feed's own
+    /// [`TripId`], which is what an answer names.
     connections: Vec<Connection>,
-    /// The next connection of the same trip, or `NONE` at the trip's end —
+    /// The internal trip each connection belongs to, dense and parallel to
+    /// `connections`: what the trip flags are indexed by. Kept beside the
+    /// array rather than written over `Connection::trip`, so that the id a
+    /// rider is told and the index a scan flags cannot be confused for one
+    /// another — they are not even the same type.
+    aboard: Vec<u32>,
+    /// The next connection of the same internal trip, or `NONE` at its end —
     /// the paper's `c_next`.
     next_in_trip: Vec<u32>,
-    /// The `Connection::trip` each internal trip came from — a feed's trip
-    /// whose chain of connections was broken becomes several.
-    trip_ids: Vec<u32>,
+    /// The feed trip each internal trip came from — a feed's trip whose chain
+    /// of connections was broken becomes several.
+    trip_ids: Vec<TripId>,
     footpaths: Footpaths,
     /// The same footpaths reversed: the profile scan walks a candidate back to
     /// every stop that can walk to it, which is [`Footpaths::from`] on this.
@@ -108,8 +115,11 @@ impl ConnectionScan {
         // you from one hop to the next.
         let mut by_trip: Vec<Connection> = timetable.connections().to_vec();
         by_trip.sort_unstable_by_key(|c| (c.trip, c.departs, c.arrives, c.from, c.to));
-        let mut trip_ids: Vec<u32> = Vec::new();
-        let mut connections: Vec<Connection> = Vec::with_capacity(by_trip.len());
+        let mut trip_ids: Vec<TripId> = Vec::new();
+        // A connection and the internal trip it belongs to, travelling
+        // together: the sort below has to keep them paired, which is what
+        // storing the index in the connection used to buy and cost.
+        let mut riding: Vec<(Connection, u32)> = Vec::with_capacity(by_trip.len());
         let mut previous: Option<Connection> = None;
         for c in by_trip {
             let breaks = match previous {
@@ -120,22 +130,20 @@ impl ConnectionScan {
                 trip_ids.push(c.trip);
             }
             previous = Some(c);
-            connections.push(Connection {
-                trip: (trip_ids.len() - 1) as u32,
-                ..c
-            });
+            riding.push((c, (trip_ids.len() - 1) as u32));
         }
 
         // Then into departure order — a stable sort, which is what keeps a
         // trip's own hops in riding order under the key: the only way two of
         // them can tie on it is a chain of hops that arrive when they depart,
         // and those are already laid out in riding order above.
-        connections.sort_by_key(|c| (c.departs, c.arrives, c.trip));
+        riding.sort_by_key(|(c, trip)| (c.departs, c.arrives, *trip));
+        let (connections, aboard): (Vec<Connection>, Vec<u32>) = riding.into_iter().unzip();
 
         let mut next_in_trip = vec![NONE; connections.len()];
         let mut last_of_trip = vec![NONE; trip_ids.len()];
-        for (i, c) in connections.iter().enumerate() {
-            let last = &mut last_of_trip[c.trip as usize];
+        for (i, &trip) in aboard.iter().enumerate() {
+            let last = &mut last_of_trip[trip as usize];
             if *last != NONE {
                 next_in_trip[*last as usize] = i as u32;
             }
@@ -145,6 +153,7 @@ impl ConnectionScan {
         ConnectionScan {
             stops,
             connections,
+            aboard,
             next_in_trip,
             trip_ids,
             incoming: footpaths.reversed(),
@@ -169,7 +178,8 @@ impl ConnectionScan {
     /// Bytes held, as every other preprocessed structure here reports it.
     pub fn footprint(&self) -> usize {
         self.connections.len() * std::mem::size_of::<Connection>()
-            + (self.next_in_trip.len() + self.trip_ids.len()) * std::mem::size_of::<u32>()
+            + (self.next_in_trip.len() + self.aboard.len()) * std::mem::size_of::<u32>()
+            + self.trip_ids.len() * std::mem::size_of::<TripId>()
             + self.footpaths.footprint()
             + self.incoming.footprint()
     }
@@ -179,13 +189,10 @@ impl ConnectionScan {
         self.incoming.from(stop)
     }
 
-    /// The connection at `index`, wearing the trip id it came in with.
+    /// The connection at `index`. It already wears the feed's trip id, which
+    /// is what an answer names.
     fn ride(&self, index: u32) -> Connection {
-        let c = self.connections[index as usize];
-        Connection {
-            trip: self.trip_ids[c.trip as usize],
-            ..c
-        }
+        self.connections[index as usize]
     }
 
     // --- Earliest arrival (§3) ---------------------------------------------
@@ -251,7 +258,7 @@ impl ConnectionScan {
                 break;
             }
             scanned += 1;
-            let trip = c.trip as usize;
+            let trip = self.aboard[i] as usize;
             if entered[trip] == NONE {
                 if earliest[c.from as usize] > c.departs {
                     continue;
@@ -311,7 +318,7 @@ impl ConnectionScan {
                 Parent::Ride(alighted) => {
                     // Aboard from the connection the trip was entered with to
                     // the one that landed here, in riding order.
-                    let boarded = search.entered[self.connections[alighted as usize].trip as usize];
+                    let boarded = search.entered[self.aboard[alighted as usize] as usize];
                     let mut ride = Vec::new();
                     let mut i = boarded;
                     loop {
@@ -386,7 +393,7 @@ impl ConnectionScan {
             } else {
                 c.arrives.saturating_add(walk)
             };
-            let aboard = trip_arrival[c.trip as usize];
+            let aboard = trip_arrival[self.aboard[i] as usize];
             let (transfer, via) = profile.evaluate(c.to, c.arrives);
             let best = exit.min(aboard).min(transfer);
             // Nothing this connection can do reaches the target: it keeps the
@@ -402,7 +409,7 @@ impl ConnectionScan {
             } else {
                 Decision::Transfer(via)
             };
-            trip_arrival[c.trip as usize] = best;
+            trip_arrival[self.aboard[i] as usize] = best;
             // A candidate at the departure stop, and — walked back along each
             // incoming footpath — at every stop that can walk to it.
             profile.offer(prune, c.from, c.departs, best, i as u32, false);
