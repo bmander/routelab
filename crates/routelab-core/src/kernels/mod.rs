@@ -20,6 +20,7 @@ pub mod dijkstra;
 pub mod footpaths;
 pub mod heuristics;
 pub mod landmark;
+pub mod lcspp;
 #[cfg(test)]
 pub(crate) mod oracles;
 pub mod ptl;
