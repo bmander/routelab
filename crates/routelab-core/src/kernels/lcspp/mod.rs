@@ -67,6 +67,7 @@
 
 #[cfg(test)]
 mod tests;
+pub mod ucch;
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
