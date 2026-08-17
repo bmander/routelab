@@ -47,6 +47,7 @@ each one buys and what it costs.
 | Delling, Dibbelt, Pajor & Werneck, *Public transit labeling* (2015) — PTL | `PTL()`, `PTL().bind(env).profile(...)` | [Labels over the events](#labels-over-the-events) |
 | Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for multi-modal route planning: an efficient solution* (2019) — ULTRA | `ULTRA(RAPTOR())`, `ULTRA(CSA())` | [Walking without a radius](#walking-without-a-radius) |
 | Barrett, Jacob & Marathe, *Formal-language-constrained path problems* (2000) — LCSPP, in the multimodal form of Dibbelt, Pajor & Wagner, *User-constrained multi-modal route planning* (2012) §2.2 | `LabelConstrained()`, `Modes(...)` | [Saying which modes, and nothing precomputed](#saying-which-modes-and-nothing-precomputed) |
+| Dibbelt, Pajor & Wagner, *User-constrained multi-modal route planning* (2012) §3 — UCCH | `UCCH()` | [Contracting the walking, not the language](#contracting-the-walking-not-the-language) |
 
 The rows marked *not yet implemented* are the shelf's gaps, in the order the
 literature filled them: after Pyrga et al. the timetable graphs were engineered
@@ -1179,6 +1180,66 @@ modes the network has, and a language admits no journey that combines the modes
 differently, so this answers with one journey rather than a set of
 alternatives. What is not here is UCCH, the contribution of the paper the model
 comes from, which is the speedup that sits between these two corners.
+
+### Contracting the walking, not the language
+
+`LabelConstrained` searches the whole merged network, and most of that network
+is pavement. **UCCH** — §3 of the same paper — contracts the pavement so a query
+searches a core of about two per cent of it, and does so without baking the
+language into the preprocessing.
+
+```python
+UCCH().bind(env).route(doorstep, office, departing=time(8, 30))
+```
+
+An ordinary hierarchy cannot do this. Contract the merged network and a shortcut
+can span two modes; its label becomes the concatenation `lbl(e₁)···lbl(e_k)`, so
+where consecutive labels differ **the shortcut has a modal transfer inside it**.
+A query forbidding that transfer cannot use the shortcut — and the path avoiding
+it may already have been thrown away by the witness search. Repairing that with
+a witness search per automaton state works, and the paper calls it SDCH, but it
+fixes the automaton at preprocessing time, which is the one thing LCSPP exists
+not to do.
+
+UCCH's two rules avoid it. **Contract each mode's subnetwork on its own**, so no
+shortcut crosses a boundary. And **never contract a transfer node** — anything
+incident to a link arc — so those stay at the top of the hierarchy and are the
+core. Here that means only the pavements are contracted, every shortcut is a
+walk, and no label has to survive the contraction at all.
+
+The query is three parts, and §3.3's two observations make them cheap. A state
+can only change on a link arc and every link arc is in the core, so **the
+automaton is used on the core alone** and the two component climbs are ordinary
+one-mode searches. And the climb from the target stays in the component, which
+the paper found most effective and which also settles how to search a
+time-dependent core backwards: it never happens.
+
+On King County Metro and Seattle's pavements — 560,706 vertices, of which
+554,393 are street:
+
+| | preprocessing | query | search space |
+|---|---:|---:|---:|
+| `LabelConstrained()` | 0 | 105 ms | 1,121,412 states |
+| **`UCCH()`** | **~200 s** | **30 ms** | **25,002 states** |
+| `ULTRA(RAPTOR())` | ~470 s | ~3 ms | — |
+
+Thirty random street-to-street queries, all thirty agreeing with
+`LabelConstrained` exactly.
+
+**3.5×, and that is close to its ceiling here** — which the measurement says
+plainly. A query between two stops, skipping both climbs, takes 29.4 ms against
+32.5 ms street to street: the climbs are three milliseconds and everything else
+is the core. Contracting the walking took it from about 65 ms to 3, and the rest
+is the transit search, which the paper says in as many words UCCH does not
+accelerate — *"most of the time is spent inside the core (particularly, in the
+public transit network), which we do not accelerate."*
+
+So its argument is not speed. It is that **the language is still a query input**:
+`Modes(...)` can forbid buses, or allow walking only at the ends, without
+re-running a minute of preprocessing — which `ULTRA` cannot do at all, having
+baked its transfers in. Of §3.3's improvements, only node reordering applied and
+it was worth 1.4×; the others are already structural here, and are noted where
+they are not.
 
 ### Underneath
 

@@ -229,6 +229,7 @@ EVERY_TECHNIQUE = [
     rl.PTL(),
     rl.ULTRA(rl.RAPTOR()),
     rl.LabelConstrained(),
+    rl.UCCH(),
 ]
 
 
@@ -280,7 +281,7 @@ def test_who_owns_an_option_is_read_off_the_techniques(env):
     assert set(rl.kernels.techniques()) == {
         rl.Dijkstra, rl.BFS, rl.AStar, rl.ContractionHierarchy,
         rl.TimeDependentDijkstra, rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA,
-        rl.TripBased, rl.PTL, rl.ULTRA, rl.LabelConstrained,
+        rl.TripBased, rl.PTL, rl.ULTRA, rl.LabelConstrained, rl.UCCH,
     }
 
 

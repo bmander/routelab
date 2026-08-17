@@ -74,6 +74,13 @@ NODES: "dict[str, dict]" = {
         "inputs": {"environment": "environment"},
         "clock": "day",
     },
+    # The same search with the walking contracted first: minutes of
+    # preprocessing rather than none, and the language still a query input.
+    "UCCH": {
+        "kind": "planner",
+        "inputs": {"environment": "environment"},
+        "clock": "day",
+    },
     # A technique that wraps a technique: ULTRA works out the transfers and
     # the one wired into it does the routing, which is the paper's own shape.
     "ULTRA": {
@@ -130,6 +137,7 @@ TECHNIQUES: "dict[str, type]" = {
     "TripBased": rl.TripBased,
     "PTL": rl.PTL,
     "LabelConstrained": rl.LabelConstrained,
+    "UCCH": rl.UCCH,
     "ULTRA": rl.ULTRA,
 }
 for _kind, _cls in TECHNIQUES.items():

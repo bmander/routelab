@@ -101,6 +101,11 @@ const LOOKS = {
     sub: () => 'modes, no preprocessing',
     available: () => Boolean(SETUP.feed),
   },
+  UCCH: {
+    title: 'UCCH', group: 'techniques',
+    sub: () => 'modes, streets contracted',
+    available: () => Boolean(SETUP.feed),
+  },
   Access: {
     title: 'Access', group: 'layers',
     sub: () => 'stops onto the pavement',

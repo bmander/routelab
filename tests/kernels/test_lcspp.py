@@ -163,3 +163,67 @@ def test_it_says_what_it_searches(multimodal):
     kind, size = planner.searches
     assert kind == "states"
     assert size == len(multimodal.compile()) * 2
+
+
+# --- UCCH, which is the same answers with the walking contracted first --------
+
+
+def test_ucch_answers_as_the_search_it_accelerates(multimodal):
+    # The load-bearing test, and the only claim UCCH makes: it is a speedup for
+    # LabelConstrained, so where they differ the hierarchy has lost something.
+    plain = rl.LabelConstrained().bind(multimodal)
+    quick = rl.UCCH().bind(multimodal)
+    ridden = 0
+    for origin in ("doorstep", "corner-A", "corner-B", "A"):
+        for destination in ("corner-B", "corner-C", "doorstep", "C"):
+            for at in (time(7, 30), time(7, 55), time(12, 0)):
+                mine = quick.route(origin, destination, departing=at)
+                theirs = plain.route(origin, destination, departing=at)
+                assert (mine is None) == (theirs is None), f"{origin}->{destination} at {at}"
+                if mine is not None:
+                    assert mine.arrives == theirs.arrives, f"{origin}->{destination} at {at}"
+                    ridden += any(leg.trip is not None for leg in mine.legs)
+    assert ridden >= 5, f"only {ridden} of these journeys rode anything"
+
+
+def test_ucch_contracts_the_walking_and_keeps_the_rest(multimodal):
+    # Every stop and every corner a stop is linked to survives, whatever its
+    # importance — that rule is what makes it UCCH rather than a hierarchy that
+    # bakes the language in. What is left over is the doorstep.
+    planner = rl.UCCH().bind(multimodal)
+    compiled = multimodal.compile()
+    assert planner.num_core < len(compiled), "nothing was contracted"
+    for label in ("A", "B", "C", "corner-A", "corner-B", "corner-C"):
+        assert planner.hierarchy.is_core(planner.node_id(label)), f"{label} was contracted"
+    kind, size = planner.searches
+    assert kind == "states"
+    assert size == planner.num_core * 2
+
+
+def test_ucch_tells_a_shortcut_as_the_arcs_it_stands_for(multimodal):
+    # A contracted walk is a path, not an arc, so the journey has to be told hop
+    # by hop or a caller cannot draw it. Every leg joins the one before it.
+    journey = rl.UCCH().bind(multimodal).route("doorstep", "corner-C", departing=time(7, 55))
+    assert journey is not None
+    for before, after in zip(journey.legs, journey.legs[1:]):
+        assert before.head == after.tail
+    assert journey.legs[0].tail == "doorstep"
+    assert journey.legs[-1].head == "corner-C"
+    assert journey.legs[-1].arrives == journey.arrives
+    assert any(leg.trip is not None for leg in journey.legs), "it rode something"
+
+
+def test_ucch_on_a_network_with_nothing_to_contract_is_the_plain_model(env):
+    # No streets and nothing joining them, so there are no transfer nodes and no
+    # core distinct from the network. That is the plain model rather than a
+    # refusal, for the reason ULTRA's Transfers gives, and the answers are the
+    # ones LabelConstrained gives.
+    assert rl.UCCH().missing_from(env.compile()) == frozenset()
+    quick = rl.UCCH().bind(env)
+    plain = rl.LabelConstrained().bind(env)
+    for at in (time(8, 0), time(12, 0)):
+        mine = quick.route("A", "C", departing=at)
+        theirs = plain.route("A", "C", departing=at)
+        assert (mine is None) == (theirs is None)
+        if mine is not None:
+            assert mine.arrives == theirs.arrives

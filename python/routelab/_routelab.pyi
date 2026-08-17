@@ -94,9 +94,9 @@ class Multimodal:
 class Ucch:
     @staticmethod
     def build(
-        walkable: Graph,
+        graph: Graph,
+        labels: bytes,
         walking: int,
-        links: Sequence[Tuple[int, int, int]],
         link_label: int,
         served: Sequence[int],
         max_degree: float = ...,

@@ -192,6 +192,17 @@ const PRESETS = [
     technique: ['LabelConstrained', {}],
   },
   {
+    // The middle corner: the walking contracted around the stops, so a query
+    // searches a core of about two per cent of the streets. Minutes to bind
+    // rather than seconds, and about three times quicker to ask.
+    id: 'multimodal-ucch',
+    label: 'Multimodal · contracted streets',
+    layer: ['OSM', {profile: 'walking'}],
+    feed: ['GTFS', {}],
+    access: ['Access', {within: 400}],
+    technique: ['UCCH', {}],
+  },
+  {
     // The multimodal one: streets and a timetable in the same environment,
     // joined at the stops, so a query starts wherever you clicked rather than
     // at whichever pole happened to be nearest.

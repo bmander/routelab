@@ -312,7 +312,7 @@ impl Ucch {
         }
 
         let found = answer?;
-        let legs = self.tell(network, sources, departure, &crossing, allowed, found, to);
+        let legs = self.tell(network, sources, &crossing, allowed, found, to);
         Some(Itinerary {
             arrives: best,
             legs,
@@ -480,7 +480,6 @@ impl Ucch {
         &self,
         network: &Multimodal<'_>,
         sources: &[(NodeId, Time)],
-        departure: Time,
         crossing: &Crossing,
         allowed: &Modes,
         found: Found,
@@ -488,10 +487,17 @@ impl Ucch {
     ) -> Vec<Leg> {
         let states = allowed.num_states();
         let mut moves: Vec<Move> = Vec::new();
+        // When the clock starts: not the earliest of the sources but the one
+        // this journey actually left from, since each carries its own head start
+        // and a leg departing before its source did is one nobody could take.
+        // Both arms set it, so there is nothing sensible to initialise it to.
+        let start;
         match found {
             Found::Walked(meeting) => {
+                let (origin, at) = self.nearest_source(sources, meeting, network);
+                start = at;
                 moves.push(Move::Walk {
-                    from: self.nearest_source(sources, meeting, network),
+                    from: origin,
                     to: meeting,
                 });
                 moves.push(Move::Walk { from: meeting, to });
@@ -519,8 +525,10 @@ impl Ucch {
                 }
                 crossed.reverse();
                 let entry = self.core_nodes[product / states];
+                let (origin, at) = self.nearest_source(sources, entry, network);
+                start = at;
                 moves.push(Move::Walk {
-                    from: self.nearest_source(sources, entry, network),
+                    from: origin,
                     to: entry,
                 });
                 moves.extend(crossed);
@@ -534,7 +542,7 @@ impl Ucch {
         // Now spend the clock on them, expanding every walk into the hops it was
         // made of — a shortcut stands for a path and a caller wants the path.
         let mut legs: Vec<Leg> = Vec::new();
-        let mut clock = departure;
+        let mut clock = start;
         for step in moves {
             match step {
                 Move::Ride(ride) => {
@@ -571,15 +579,15 @@ impl Ucch {
         legs
     }
 
-    /// Which source a journey through `entry` actually left from.
+    /// Which source a journey through `entry` actually left from, and when.
     fn nearest_source(
         &self,
         sources: &[(NodeId, Time)],
         entry: NodeId,
         network: &Multimodal<'_>,
-    ) -> NodeId {
+    ) -> (NodeId, Time) {
         if sources.len() == 1 {
-            return sources[0].0;
+            return sources[0];
         }
         sources
             .iter()
@@ -592,8 +600,8 @@ impl Ucch {
                     u64::from(at) + walked
                 }
             })
-            .map(|&(node, _)| node)
-            .unwrap_or(entry)
+            .copied()
+            .unwrap_or((entry, departure_of(sources)))
     }
 
     /// One walk, as the arcs of the uncontracted subnetwork it is made of.
@@ -648,6 +656,11 @@ impl Ucch {
         hops.reverse();
         hops
     }
+}
+
+/// The earliest any of these sources leaves.
+fn departure_of(sources: &[(NodeId, Time)]) -> Time {
+    sources.iter().map(|&(_, at)| at).min().unwrap_or(0)
 }
 
 /// One stretch of the answer before the clock has been spent on it.

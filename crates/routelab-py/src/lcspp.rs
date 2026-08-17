@@ -182,30 +182,49 @@ pub struct PyUcch {
 impl PyUcch {
     /// Contract `walkable` around the endpoints of `links`.
     ///
-    /// `walkable` holds one mode's arcs only, over the whole numbering, so a
-    /// stop is the vertex it always was. `links` are `(tail, head, seconds)`.
-    /// `served` are the vertices a vehicle calls at, which are never contracted
-    /// — most are link endpoints already, but a stop the pavements never reach
-    /// is joined to nothing and would otherwise be contracted out from under a
-    /// trip that rides through it.
+    /// `graph` and `labels` are the merged network and the mode of each of its
+    /// arcs, the same pair [`PyMultimodal`] takes; the arcs labelled `walking`
+    /// are the subnetwork contracted and those labelled `link_label` are what
+    /// joins the networks. `served` are the vertices a vehicle calls at, which
+    /// are never contracted — most are link endpoints already, but a stop the
+    /// pavements never reach is joined to nothing and would otherwise be
+    /// contracted out from under a trip that rides through it.
     #[staticmethod]
-    #[pyo3(signature = (walkable, walking, links, link_label, served, max_degree=20.0, progress=None))]
+    #[pyo3(signature = (graph, labels, walking, link_label, served, max_degree=20.0, progress=None))]
     #[allow(clippy::too_many_arguments)]
     fn build(
         py: Python<'_>,
-        walkable: &PyGraph,
+        graph: &PyGraph,
+        labels: Vec<u8>,
         walking: u8,
-        links: Vec<(NodeId, NodeId, u32)>,
         link_label: u8,
         served: Vec<NodeId>,
         max_degree: f64,
         progress: Option<&crate::progress::PyProgress>,
     ) -> PyResult<Self> {
-        let graph = Arc::clone(&walkable.inner);
+        let merged = Arc::clone(&graph.inner);
         let counter = crate::progress::counter(progress);
         let built = py.detach(|| {
+            // Split the merged network into the subnetwork to contract and the
+            // arcs that join networks. Done here rather than by the caller
+            // because it is a walk over every arc, and a million and a half of
+            // them is not a thing to hand across this boundary twice.
+            let mut pavement = Vec::new();
+            let mut links = Vec::new();
+            for tail in 0..merged.num_nodes() as NodeId {
+                for edge in merged.out_edges(tail) {
+                    let given = merged.input_index(edge) as usize;
+                    let arc = (tail, merged.head(edge), merged.weight(edge));
+                    match labels.get(given).copied() {
+                        Some(mode) if mode == walking => pavement.push(arc),
+                        Some(mode) if mode == link_label => links.push(arc),
+                        _ => {}
+                    }
+                }
+            }
+            let walkable = CoreGraph::from_edges(merged.num_nodes(), &pavement)?;
             CoreUcch::build_reporting(
-                &graph,
+                &walkable,
                 walking,
                 &links,
                 link_label,

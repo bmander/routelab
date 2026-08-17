@@ -33,7 +33,7 @@ MODELS = [
 #: answer a pair of stops rather than filling a table; and LabelConstrained,
 #: whose table is over the product of stops and automaton states, which is not
 #: a cost per stop and would be a lie told in the right shape.
-ITINERARY_ONLY = [rl.TimeDependent, rl.TimeExpanded, rl.PTL, rl.LabelConstrained]
+ITINERARY_ONLY = [rl.TimeDependent, rl.TimeExpanded, rl.PTL, rl.LabelConstrained, rl.UCCH]
 
 
 def test_the_feed_reads_its_service_day(feed: GTFS):
