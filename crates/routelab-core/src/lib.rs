@@ -38,6 +38,7 @@ pub use kernels::timedep::{
 };
 pub use kernels::timetable::TimeExpanded;
 pub use kernels::tripbased::{TripBased, TripBasedProfile, TripBasedSearch};
+pub use kernels::ultra::Ultra;
 pub use model::graph::{EdgeId, Graph, GraphError, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
 pub use model::heuristic::Heuristic;
 pub use model::lines::{Lines, StopTime};

@@ -45,7 +45,7 @@ each one buys and what it costs.
 | Dibbelt, Pajor, Strasser & Wagner, *Intriguingly simple and fast transit routing* (2013) — CSA | `CSA()`, `CSA().bind(env).profile(...)` | [One array, scanned once](#one-array-scanned-once) |
 | Witt, *Trip-based public transit routing* (2015) | `TripBased()`, `TripBased().bind(env).profile(...)` | [Trips, and the transfers between them](#trips-and-the-transfers-between-them) |
 | Delling, Dibbelt, Pajor & Werneck, *Public transit labeling* (2015) — PTL | `PTL()`, `PTL().bind(env).profile(...)` | [Labels over the events](#labels-over-the-events) |
-| Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for multi-modal route planning: an efficient solution* (2019) — ULTRA | *not yet implemented* | |
+| Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for multi-modal route planning: an efficient solution* (2019) — ULTRA | `Ultra` — **kernel only, no Python yet** | [Walking without a radius](#walking-without-a-radius) |
 
 The rows marked *not yet implemented* are the shelf's gaps, in the order the
 literature filled them: after Pyrga et al. the timetable graphs were engineered
@@ -899,6 +899,58 @@ event labels here are kept whole. Like the two Pyrga models, PTL keeps no
 table, so `search()` and `explored()` say so and point at the techniques
 that do.
 
+### Walking without a radius
+
+Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for Multi-Modal
+Route Planning* (2019). Every technique above takes its walks as one-hop
+transfers between stops, closed under composition — which is exactly why
+`Footpaths(feed, within=200)` has a radius. Two hundred metres closes to
+74,636 walks on Seattle; the paper reports that a twenty-minute bound "already
+leads to a graph that is too large for practical applications". The radius is
+not a modelling preference so much as a wall.
+
+ULTRA removes it without touching a single query algorithm. Its observation is
+that where a walk sits in a journey decides how much it matters: the walk from
+your door to the first stop, and from the last stop to your door, are common
+and can be searched when the query is asked; the walk *between* two vehicles
+is rare, and the few that any optimal journey needs can be worked out in
+advance. Those become **shortcuts** — ordinary one-hop stop-to-stop transfers,
+which is what every kernel here already reads.
+
+```rust
+let ultra = Ultra::compute(&timetable, &transfer_graph);
+let walks = ultra.footpaths(transfer_graph.num_nodes());
+let rounds = Raptor::build(&timetable, Transfer::instant(), &walks);
+```
+
+The transfer graph is unrestricted: no radius, no transitive closure, and any
+non-schedule-based mode — walking, cycling, an e-scooter. What comes back is a
+handful of shortcuts, and RAPTOR and CSA read them **unchanged**, which is the
+paper's central claim and this module's main test: on instances small enough to
+close the whole transfer graph, a kernel walking only the shortcuts answers
+every query exactly as one walking the closure does. The fixture that test runs
+on is a corridor of neighbourhoods whose vehicles never leave them, so that
+crossing it *must* mean riding, walking, and riding again — a random timetable
+whose trips share stops freely needs no intermediate transfer at all, and would
+have let an empty shortcut set pass.
+
+**Kernel only, so far.** `Ultra` is callable from Rust and is not yet reachable
+from Python, because the query half is its own increment and a real one: the
+paper leaves initial and final transfers to be searched when the query is
+asked, so `ULTRA(RAPTOR())` has to run a one-to-many search from the origin,
+another into the target, and then stitch two street paths onto either end of
+the itinerary the kernel returns — the same "answer in the caller's terms"
+obligation that makes a contraction hierarchy unpack its shortcuts. Until that
+lands, this walks without a radius in Rust and the Python shelf still has one.
+
+What is not here, each its own increment: the **canonical** tiebreaking that
+picks one journey among equals, without which this keeps a sufficient but
+larger set than the paper's; the **self-pruning** across descending departure
+times; **Core-CH**, which contracts every non-stop vertex so the transfer
+relaxation runs over stops rather than streets — this runs plain Dijkstra, so a
+city's street graph is out of reach and a stop-to-stop transfer graph is not;
+and the **event-to-event** variant, which is the one a trip-based query wants.
+
 ### Underneath
 
 The kernels are also callable directly, on dense integer ids, as the papers
@@ -967,7 +1019,7 @@ plumbing with no routing content.
 crates/routelab-core/     Rust. No Python.
   kernels/                Dijkstra, BFS, A*, ALT landmarks, contraction,
                           time-dependent, Pyrga's two timetable models, RAPTOR,
-                          CSA, trip-based, PTL.
+                          CSA, trip-based, PTL, ULTRA.
   model/                  CSR graph, search options and results, search trees,
                           the heuristic trait, the timetable structures, and the
                           lines-and-trips layout RAPTOR and trip-based both read.

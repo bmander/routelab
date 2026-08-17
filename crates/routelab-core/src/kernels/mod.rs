@@ -27,3 +27,4 @@ pub mod raptor;
 pub mod timedep;
 pub mod timetable;
 pub mod tripbased;
+pub mod ultra;
