@@ -44,7 +44,7 @@ def test_it_keeps_no_table(planner):
     # Like the two Pyrga models: a journey, and nothing to draw.
     with pytest.raises(NotImplementedError, match="answers with a journey rather than a cost"):
         planner.search("A", departing=time(8, 0))
-    with pytest.raises(NotImplementedError, match=r"nothing to draw\..*CSA\(\) or RAPTOR\(\)"):
+    with pytest.raises(NotImplementedError, match=r"nothing to draw\..*CSA\(\), RAPTOR\(\) or TripBased\(\)"):
         planner.explored(None)
 
 

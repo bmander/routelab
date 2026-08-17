@@ -178,7 +178,7 @@ def test_an_option_a_model_cannot_honour_names_the_one_that_can(model, env: rl.E
             planner.route("A", "C", departing=time(8, 0), max_transfers=1)
     if model not in (rl.CSA, rl.TripBased):
         with pytest.raises(
-            ValueError, match=r"takes no until; .*profile\(\) on CSA\(\) or TripBased\(\)"
+            ValueError, match=r"takes no until; .*profile\(\) on CSA\(\), PTL\(\) or TripBased\(\)"
         ):
             planner.route("A", "C", departing=time(8, 0), until=time(9, 0))
 

@@ -146,7 +146,7 @@ def test_the_profile_refuses_a_missing_or_backwards_window(planner):
         planner.profile("A", "C", departing=time(8, 0))
     with pytest.raises(ValueError, match="cannot close before it opens"):
         planner.profile("A", "C", departing=time(9, 0), until=time(8, 0))
-    with pytest.raises(ValueError, match=r"takes no until; .*profile\(\) on CSA\(\) or TripBased\(\)"):
+    with pytest.raises(ValueError, match=r"takes no until; .*profile\(\) on CSA\(\), PTL\(\) or TripBased\(\)"):
         planner.route("A", "C", departing=time(8, 0), until=time(9, 0))
 
 
