@@ -184,14 +184,20 @@ impl PyUcch {
     ///
     /// `walkable` holds one mode's arcs only, over the whole numbering, so a
     /// stop is the vertex it always was. `links` are `(tail, head, seconds)`.
+    /// `served` are the vertices a vehicle calls at, which are never contracted
+    /// — most are link endpoints already, but a stop the pavements never reach
+    /// is joined to nothing and would otherwise be contracted out from under a
+    /// trip that rides through it.
     #[staticmethod]
-    #[pyo3(signature = (walkable, walking, links, link_label, max_degree=20.0, progress=None))]
+    #[pyo3(signature = (walkable, walking, links, link_label, served, max_degree=20.0, progress=None))]
+    #[allow(clippy::too_many_arguments)]
     fn build(
         py: Python<'_>,
         walkable: &PyGraph,
         walking: u8,
         links: Vec<(NodeId, NodeId, u32)>,
         link_label: u8,
+        served: Vec<NodeId>,
         max_degree: f64,
         progress: Option<&crate::progress::PyProgress>,
     ) -> PyResult<Self> {
@@ -203,6 +209,7 @@ impl PyUcch {
                 walking,
                 &links,
                 link_label,
+                &served,
                 CoreOrdering::default(),
                 max_degree,
                 &counter,

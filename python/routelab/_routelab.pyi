@@ -98,6 +98,7 @@ class Ucch:
         walking: int,
         links: Sequence[Tuple[int, int, int]],
         link_label: int,
+        served: Sequence[int],
         max_degree: float = ...,
         progress: Optional[Progress] = ...,
     ) -> Ucch: ...

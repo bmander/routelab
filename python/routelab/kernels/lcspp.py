@@ -72,7 +72,12 @@ class Modes:
         walking = [mode for mode in present if mode not in ("transit", self.link)]
         if self.link in present and "transit" in present:
             states = {"foot": walking, "aboard": ["transit"]}
-            return states, ["foot"], ["foot"]
+            # Every state begins and ends a journey. Marking only "foot" reads
+            # as "a person starts and finishes on the pavement", which is true
+            # of a doorway and false of a stop: a stop has no walking arc, only
+            # link arcs, so a journey to one could never be in the walking state
+            # when it got there and was refused outright.
+            return states, ["foot", "aboard"], ["foot", "aboard"]
         # One network, so one state: nothing has to be crossed to board.
         both = {"anything": [mode for mode in present if mode != self.link]}
         return both, ["anything"], ["anything"]

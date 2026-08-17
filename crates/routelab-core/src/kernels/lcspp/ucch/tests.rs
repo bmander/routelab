@@ -99,6 +99,7 @@ fn both(
         FOOT as u8,
         &links,
         LINK as u8,
+        &[10, 11],
         Ordering::default(),
         degree,
     )
@@ -150,6 +151,7 @@ fn the_core_is_smaller_than_the_network() {
         FOOT as u8,
         &links,
         LINK as u8,
+        &[10, 11],
         Ordering::default(),
         1e9,
     )
@@ -184,6 +186,7 @@ fn a_walk_is_told_as_the_arcs_it_was_made_of() {
         FOOT as u8,
         &links,
         LINK as u8,
+        &[10, 11],
         Ordering::default(),
         2.0,
     )

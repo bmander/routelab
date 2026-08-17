@@ -77,6 +77,9 @@ use crate::model::search::SearchOptions;
 use crate::model::timetable::{Itinerary, Leg, Time, Walk};
 use crate::util::progress::Progress;
 
+/// A vertex the contraction retired, so the core has no number for it.
+const NOT_CORE: u32 = u32::MAX;
+
 /// A hierarchy over one mode's subnetwork, contracted around the vertices where
 /// the networks join.
 pub struct Ucch {
@@ -84,10 +87,16 @@ pub struct Ucch {
     /// The mode of the subnetwork that was contracted, and so of every shortcut.
     walking: u8,
     /// The core's scalar arcs: what the contraction left standing, plus every
-    /// link arc, since those are never contracted.
+    /// link arc, since those are never contracted. Numbered `0..num_core`, not
+    /// by the network's own ids — §3.3's node reordering, and the reason a
+    /// query's tables are the size of the core rather than of the city.
     core: Graph,
     /// The mode of each core arc, by position in the list it was built from.
     core_labels: Vec<u8>,
+    /// Which vertex each core number is.
+    core_nodes: Vec<NodeId>,
+    /// Which core number each vertex has, [`NOT_CORE`] for one it retired.
+    core_of: Vec<u32>,
 }
 
 impl Ucch {
@@ -97,11 +106,13 @@ impl Ucch {
     /// numbering, so a stop is the vertex it always was even where no pavement
     /// reaches it. `links` are the arcs that join networks; they are never
     /// contracted, and their endpoints are therefore the core.
+    #[allow(clippy::too_many_arguments)]
     pub fn build(
         walkable: &Graph,
         walking: u8,
         links: &[(NodeId, NodeId, Weight)],
         link_label: u8,
+        served: &[NodeId],
         ordering: Ordering,
         max_degree: f64,
     ) -> Result<Self, GraphError> {
@@ -110,6 +121,7 @@ impl Ucch {
             walking,
             links,
             link_label,
+            served,
             ordering,
             max_degree,
             &Progress::new(),
@@ -123,22 +135,44 @@ impl Ucch {
         walking: u8,
         links: &[(NodeId, NodeId, Weight)],
         link_label: u8,
+        served: &[NodeId],
         ordering: Ordering,
         max_degree: f64,
         progress: &Progress,
     ) -> Result<Self, GraphError> {
         // The transfer nodes: every end of every link arc. These are what the
         // contraction may not touch, and what is left when it stops.
-        let mut transfer: Vec<NodeId> = Vec::with_capacity(links.len() * 2);
+        //
+        // And every vertex a vehicle calls at, which the practical variant does
+        // not contract either. Most of them are transfer nodes already, but a
+        // stop the pavements never reach is joined to nothing at all — so
+        // nothing would protect it, and a trip riding *through* it would find
+        // the core had no number for it.
+        let mut transfer: Vec<NodeId> = Vec::with_capacity(links.len() * 2 + served.len());
         for &(tail, head, _) in links {
             transfer.push(tail);
             transfer.push(head);
         }
+        transfer.extend_from_slice(served);
         transfer.sort_unstable();
         transfer.dedup();
 
         let hierarchy =
             CoreHierarchy::build_reporting(walkable, &transfer, ordering, max_degree, progress)?;
+
+        // Number the core densely. §3.3 reorders vertices so that the core sits
+        // at the front, because "most of the time is spent on the core" — here
+        // it is given a numbering of its own instead, which is the same idea
+        // taken to its end: a query's tables are then the size of the core, not
+        // of the city, and 2% of a city fits in cache where all of it does not.
+        let mut core_of = vec![NOT_CORE; walkable.num_nodes()];
+        let mut core_nodes: Vec<NodeId> = Vec::new();
+        for node in 0..walkable.num_nodes() as NodeId {
+            if hierarchy.is_core(node) {
+                core_of[node as usize] = core_nodes.len() as u32;
+                core_nodes.push(node);
+            }
+        }
 
         // The core: what the contraction left of the pavements, and every link
         // arc. A shortcut among the former is a walk, because only one
@@ -147,19 +181,33 @@ impl Ucch {
         let mut core_labels: Vec<u8> = Vec::new();
         let standing = hierarchy.core();
         for tail in 0..standing.num_nodes() as NodeId {
+            let from = core_of[tail as usize];
+            if from == NOT_CORE {
+                continue;
+            }
             for edge in standing.out_edges(tail) {
-                arcs.push((tail, standing.head(edge), standing.weight(edge)));
+                let to = core_of[standing.head(edge) as usize];
+                if to == NOT_CORE {
+                    continue;
+                }
+                arcs.push((from, to, standing.weight(edge)));
                 core_labels.push(walking);
             }
         }
         for &(tail, head, weight) in links {
-            arcs.push((tail, head, weight));
+            let (from, to) = (core_of[tail as usize], core_of[head as usize]);
+            if from == NOT_CORE || to == NOT_CORE {
+                continue;
+            }
+            arcs.push((from, to, weight));
             core_labels.push(link_label);
         }
 
         Ok(Ucch {
-            core: Graph::from_edges(walkable.num_nodes(), &arcs)?,
+            core: Graph::from_edges(core_nodes.len(), &arcs)?,
             core_labels,
+            core_nodes,
+            core_of,
             hierarchy,
             walking,
         })
@@ -167,13 +215,13 @@ impl Ucch {
 
     /// Is this vertex in the core?
     pub fn is_core(&self, node: NodeId) -> bool {
-        self.hierarchy.is_core(node)
+        self.core_of.get(node as usize).copied().unwrap_or(NOT_CORE) != NOT_CORE
     }
 
     /// How many vertices the core holds — what a query searches instead of the
     /// whole network.
     pub fn num_core(&self) -> usize {
-        self.hierarchy.num_core()
+        self.core_nodes.len()
     }
 
     /// Arcs in the core, links included.
@@ -197,7 +245,9 @@ impl Ucch {
         sources: &[(NodeId, Time)],
         to: NodeId,
     ) -> Option<Itinerary> {
-        let vertices = self.core.num_nodes();
+        // The network's vertices, not the core's: the target and the two climbs
+        // are in the numbering the caller uses.
+        let vertices = self.core_of.len();
         if to as usize >= vertices || allowed.is_empty() || sources.is_empty() {
             return None;
         }
@@ -236,15 +286,16 @@ impl Ucch {
         // Or through it. This is where the automaton is paid for.
         let crossing = self.cross(network, allowed, &access, departure);
         let states = allowed.num_states();
-        for (node, &back) in egress.iter().enumerate().take(vertices) {
-            if back == UNREACHABLE || !self.is_core(node as NodeId) {
+        for (index, &node) in self.core_nodes.iter().enumerate() {
+            let back = egress[node as usize];
+            if back == UNREACHABLE {
                 continue;
             }
             for state in 0..states {
                 if !allowed.accepts(state) {
                     continue;
                 }
-                let at = crossing.arrivals[node * states + state];
+                let at = crossing.arrivals[index * states + state];
                 if at == UNREACHABLE {
                     continue;
                 }
@@ -255,10 +306,7 @@ impl Ucch {
                 let arrives = at.saturating_add(back);
                 if arrives < best {
                     best = arrives;
-                    answer = Some(Found::Rode {
-                        exit: node as NodeId,
-                        state,
-                    });
+                    answer = Some(Found::Rode { exit: index, state });
                 }
             }
         }
@@ -316,17 +364,22 @@ impl Ucch {
         departure: Time,
     ) -> Crossing {
         let states = allowed.num_states();
-        let vertices = self.core.num_nodes();
+        let core = self.core_nodes.len();
         let mut crossing = Crossing {
-            arrivals: vec![UNREACHABLE; vertices * states],
-            parents: vec![None; vertices * states],
+            arrivals: vec![UNREACHABLE; core * states],
+            parents: vec![None; core * states],
             settled: 0,
         };
         let mut queue: BinaryHeap<Reverse<(Time, usize)>> = BinaryHeap::new();
 
         // Climb in wherever the source's own search reached the core.
-        for (node, &there) in access.iter().enumerate().take(vertices) {
-            if there == UNREACHABLE || !self.is_core(node as NodeId) {
+        for (node, &there) in self
+            .core_nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (index, &access[*node as usize]))
+        {
+            if there == UNREACHABLE {
                 continue;
             }
             let at = departure.saturating_add(there);
@@ -352,21 +405,25 @@ impl Ucch {
                 continue;
             }
             crossing.settled += 1;
-            let vertex = (product / states) as NodeId;
+            let index = product / states;
+            let vertex = self.core_nodes[index];
             let state = product % states;
 
-            for edge in self.core.out_edges(vertex) {
+            for edge in self.core.out_edges(index as NodeId) {
                 let given = self.core.input_index(edge) as usize;
                 let symbol = self.core_labels.get(given).copied().unwrap_or(u8::MAX);
                 let mut next = allowed.step(state, symbol);
                 if next == 0 {
                     continue;
                 }
-                let head = self.core.head(edge);
+                let head = self.core.head(edge) as usize;
                 let arrives = now.saturating_add(self.core.weight(edge));
+                // The leg is told in the network's own vertices, not the core's,
+                // because that is what a caller draws and what a walk is
+                // expanded against.
                 let leg = Leg::Walk(Walk {
                     from: vertex,
-                    to: head,
+                    to: self.core_nodes[head],
                     departs: now,
                     arrives,
                 });
@@ -374,7 +431,7 @@ impl Ucch {
                     let onto = next.trailing_zeros() as usize;
                     next &= next - 1;
                     crossing.improve(
-                        head as usize * states + onto,
+                        head * states + onto,
                         arrives,
                         product,
                         leg,
@@ -390,6 +447,10 @@ impl Ucch {
                 continue;
             }
             for (head, connections, first) in network.timetable.edges_from(vertex) {
+                let onto_core = self.core_of[head as usize];
+                if onto_core == NOT_CORE {
+                    continue;
+                }
                 let boarding = connections.partition_point(|c| c.departs < now);
                 if boarding == connections.len() {
                     continue;
@@ -400,7 +461,7 @@ impl Ucch {
                     let onto = onto_states.trailing_zeros() as usize;
                     onto_states &= onto_states - 1;
                     crossing.improve(
-                        head as usize * states + onto,
+                        onto_core as usize * states + onto,
                         connection.arrives,
                         product,
                         Leg::Ride(connection),
@@ -437,7 +498,7 @@ impl Ucch {
             }
             Found::Rode { exit, state } => {
                 // Back through the core, then the climbs either side of it.
-                let mut product = exit as usize * states + state;
+                let mut product = exit * states + state;
                 let mut crossed: Vec<Move> = Vec::new();
                 while let Some((previous, leg, mode)) = crossing.parents[product] {
                     crossed.push(match leg {
@@ -457,13 +518,16 @@ impl Ucch {
                     product = previous;
                 }
                 crossed.reverse();
-                let entry = (product / states) as NodeId;
+                let entry = self.core_nodes[product / states];
                 moves.push(Move::Walk {
                     from: self.nearest_source(sources, entry, network),
                     to: entry,
                 });
                 moves.extend(crossed);
-                moves.push(Move::Walk { from: exit, to });
+                moves.push(Move::Walk {
+                    from: self.core_nodes[exit],
+                    to,
+                });
             }
         }
 
@@ -609,8 +673,9 @@ enum Move {
 enum Found {
     /// The climbs met below the core: a journey entirely on foot.
     Walked(NodeId),
-    /// It crossed the core, leaving it at `exit` in `state`.
-    Rode { exit: NodeId, state: usize },
+    /// It crossed the core, leaving it at core vertex `exit` — a number of the
+    /// core's own — in `state`.
+    Rode { exit: usize, state: usize },
 }
 
 /// What the product search over the core found.
