@@ -32,6 +32,7 @@ from .raptor import RAPTOR
 from .timedep import TimeDependentDijkstra
 from .timetable import TimeDependent, TimeExpanded
 from .tripbased import TripBased
+from .lcspp import LabelConstrained, Modes
 from .ultra import ULTRA, Transfers
 
 __all__ = [
@@ -50,6 +51,8 @@ __all__ = [
     "TimeExpanded",
     "TripBased",
     "Transfers",
+    "LabelConstrained",
+    "Modes",
     "ULTRA",
     "TimetablePlanner",
     "astar",

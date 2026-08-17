@@ -63,6 +63,34 @@ EARTH_RADIUS: float
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float: ...
 
+class Modes:
+    def __init__(
+        self,
+        states: int,
+        symbols: int,
+        transitions: Sequence[Tuple[int, int, int]],
+        starting: Sequence[int],
+        accepting: Sequence[int],
+    ) -> None: ...
+    @property
+    def num_states(self) -> int: ...
+    @property
+    def num_symbols(self) -> int: ...
+    @property
+    def is_empty(self) -> bool: ...
+
+class Multimodal:
+    def __init__(
+        self, graph: Graph, labels: bytes, timetable: Timetable, riding: int
+    ) -> None: ...
+    def earliest_arrival(
+        self, modes: Modes, sources: Sequence[Tuple[int, int]], target: int
+    ) -> Optional[Itinerary]: ...
+    @property
+    def num_arcs(self) -> int: ...
+    @property
+    def footprint(self) -> int: ...
+
 class Footpaths:
     @staticmethod
     def from_edges(graph: Graph, positions: Sequence[int]) -> Footpaths: ...

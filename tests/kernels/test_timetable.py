@@ -29,9 +29,11 @@ MODELS = [
 ]
 
 #: The ones that answer with an itinerary and nothing else, so a cost table
-#: and a search space are things they refuse: Pyrga's two, and PTL, whose
-#: labels answer a pair of stops rather than filling a table.
-ITINERARY_ONLY = [rl.TimeDependent, rl.TimeExpanded, rl.PTL]
+#: and a search space are things they refuse: Pyrga's two; PTL, whose labels
+#: answer a pair of stops rather than filling a table; and LabelConstrained,
+#: whose table is over the product of stops and automaton states, which is not
+#: a cost per stop and would be a lie told in the right shape.
+ITINERARY_ONLY = [rl.TimeDependent, rl.TimeExpanded, rl.PTL, rl.LabelConstrained]
 
 
 def test_the_feed_reads_its_service_day(feed: GTFS):

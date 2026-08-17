@@ -48,6 +48,12 @@ class Access(EdgeSource):
 
     cost_model = "scalar"
 
+    #: What this layer's arcs are, for a technique that constrains the sequence
+    #: of transport modes — Dibbelt, Pajor & Wagner's `link`, the arcs that join
+    #: two networks and the only place a journey may change mode. See
+    #: :class:`~routelab.LabelConstrained`.
+    mode = "link"
+
     def __init__(
         self,
         stops: EdgeSource,
