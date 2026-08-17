@@ -369,6 +369,94 @@ struct Worker<'a> {
     routes: Vec<u32>,
     /// Which routes are already in `routes`, so collecting them is linear.
     listed: Vec<bool>,
+    /// The candidates the last round's riding found, for its transfer search
+    /// to count down — §3.3's stopping criterion.
+    awaited: Awaited,
+}
+
+/// How long the final transfer relaxation keeps going after the last candidate
+/// has been settled — §3.3's witness limit, τ_wit.
+///
+/// Stopping the moment the candidates are all settled is correct but loses
+/// witnesses that would have dominated non-canonical candidates in *later*
+/// runs, and each one lost is a superfluous shortcut. The paper leaves the
+/// limit as a tunable and does not fix a value; this one is a choice, measured
+/// on the harness rather than taken from the paper.
+const WITNESS_LIMIT: Time = 300;
+
+/// The stops a round's riding improved with a candidate label — what §3.3's
+/// stopping criterion counts down as the transfer search settles them.
+///
+/// Only the final round's search can use this so simply. There, a candidate is
+/// written by the route scan and never by a walk, so the set is fixed before
+/// the search starts and only shrinks. In round 1 a walk out of a candidate
+/// prefix is itself a candidate prefix, so the set grows as the search runs and
+/// the criterion needs the queue counted rather than a fixed list — which is
+/// why only this half is here.
+struct Awaited {
+    flag: Vec<bool>,
+    list: Vec<NodeId>,
+    left: usize,
+}
+
+impl Awaited {
+    fn new(vertices: usize) -> Self {
+        Awaited {
+            flag: vec![false; vertices],
+            list: Vec::new(),
+            left: 0,
+        }
+    }
+
+    fn mark(&mut self, v: NodeId) {
+        if !self.flag[v as usize] {
+            self.flag[v as usize] = true;
+            self.list.push(v);
+            self.left += 1;
+        }
+    }
+
+    fn settle(&mut self, v: NodeId) {
+        if self.flag[v as usize] {
+            self.flag[v as usize] = false;
+            self.left -= 1;
+        }
+    }
+
+    fn done(&self) -> bool {
+        self.left == 0
+    }
+
+    fn reset(&mut self) {
+        for &v in &self.list {
+            self.flag[v as usize] = false;
+        }
+        self.list.clear();
+        self.left = 0;
+    }
+}
+
+/// What a round writes down as it goes: the vertices it touched, the ones it
+/// marked for the phase after it, and which run is doing the writing.
+struct Writing<'a> {
+    touched: &'a mut Dirty,
+    marked: &'a mut Vec<NodeId>,
+    run: u32,
+}
+
+/// What a round's transfer search waits for before it is allowed to stop.
+///
+/// Two criteria because the two rounds count different things, which is how
+/// §3.3 states it. In the last round a candidate is written by the route scan
+/// and never by a walk, so the set is fixed before the search and only shrinks
+/// — a flag per stop. In round 1 a walk out of a candidate prefix is itself a
+/// candidate prefix, so the set grows as the search runs and what has to be
+/// counted is how many prefix labels are still in the queue.
+enum Until<'a> {
+    /// Every candidate the route scan found has been settled.
+    Candidates(&'a mut Awaited),
+    /// No candidate prefix is left in the queue.
+    Prefixes,
 }
 
 /// The vertices written since the source changed, each listed once.
@@ -442,6 +530,7 @@ impl<'a> Worker<'a> {
             marked: Vec::new(),
             routes: Vec::new(),
             listed: vec![false; sweep.lines.num_lines()],
+            awaited: Awaited::new(vertices),
         }
     }
 
@@ -516,23 +605,34 @@ impl<'a> Worker<'a> {
                         }
                     }
                     self.marked.clear();
+                    let last = round == 2;
+                    let mut writing = Writing {
+                        touched: &mut self.touched,
+                        marked: &mut self.marked,
+                        run,
+                    };
                     ride(
                         lines,
                         &self.routes,
                         &earlier[round - 1],
                         &mut later[0],
-                        &mut self.touched,
-                        &mut self.marked,
-                        run,
+                        &mut writing,
+                        last.then_some(&mut self.awaited),
                     );
                     self.walk.relax(
                         transfers,
                         &earlier[round - 1],
                         &mut later[0],
-                        &mut self.touched,
-                        &mut self.marked,
-                        run,
+                        &mut writing,
+                        if last {
+                            Until::Candidates(&mut self.awaited)
+                        } else {
+                            Until::Prefixes
+                        },
                     );
+                    if last {
+                        self.awaited.reset();
+                    }
                     if round == 1 {
                         routes_serving(lines, &self.marked, &mut self.listed, &mut self.routes);
                     }
@@ -600,10 +700,11 @@ fn ride(
     routes: &[u32],
     before: &[Label],
     now: &mut [Label],
-    touched: &mut Dirty,
-    marked: &mut Vec<NodeId>,
-    run: u32,
+    writing: &mut Writing<'_>,
+    awaited: Option<&mut Awaited>,
 ) {
+    let run = writing.run;
+    let mut awaited = awaited;
     for &line in routes {
         let stops = lines.stops_of(line);
         let mut aboard: Option<u32> = None;
@@ -621,8 +722,16 @@ fn ride(
                 };
                 if accepts(now[stop as usize], before[stop as usize], fresh, run) {
                     now[stop as usize] = fresh;
-                    touched.mark(stop);
-                    marked.push(stop);
+                    writing.touched.mark(stop);
+                    writing.marked.push(stop);
+                    // A candidate: still aboard, and boarded its first vehicle
+                    // at the source. The transfer search after this has to
+                    // settle it before it can stop.
+                    if fresh.direct {
+                        if let Some(awaited) = awaited.as_deref_mut() {
+                            awaited.mark(stop);
+                        }
+                    }
                 }
             }
             // Board, or step onto an earlier trip, on the strength of what
@@ -651,7 +760,7 @@ fn ride(
 /// hop along a closed set — which is the whole difference between MR and
 /// RAPTOR, and the reason the walking need not be restricted.
 struct Relaxation {
-    queue: BinaryHeap<Reverse<(Time, NodeId)>>,
+    queue: BinaryHeap<Reverse<(Time, NodeId, bool)>>,
     /// Reused between sources: `(vertex, duration)` for everything one source
     /// can walk to.
     reached: Vec<(NodeId, Time)>,
@@ -677,9 +786,9 @@ impl Relaxation {
         self.queue.clear();
         if (source as usize) < self.distance.len() {
             self.distance[source as usize] = 0;
-            self.queue.push(Reverse((0, source)));
+            self.queue.push(Reverse((0, source, false)));
         }
-        while let Some(Reverse((duration, v))) = self.queue.pop() {
+        while let Some(Reverse((duration, v, _))) = self.queue.pop() {
             if duration > self.distance[v as usize] {
                 continue;
             }
@@ -689,7 +798,7 @@ impl Relaxation {
                 let head = transfers.head(edge);
                 if next < self.distance[head as usize] {
                     self.distance[head as usize] = next;
-                    self.queue.push(Reverse((next, head)));
+                    self.queue.push(Reverse((next, head, false)));
                 }
             }
         }
@@ -707,20 +816,62 @@ impl Relaxation {
         transfers: &Graph,
         before: &[Label],
         round: &mut [Label],
-        touched: &mut Dirty,
-        marked: &mut Vec<NodeId>,
-        run: u32,
+        writing: &mut Writing<'_>,
+        until: Until<'_>,
     ) {
+        let run = writing.run;
+        // §3.3's stopping criterion. Once nothing left in the queue can prune a
+        // candidate, the rest of the walk only builds witnesses for later runs
+        // — worth `WITNESS_LIMIT` more and no further. Stopping cannot lose a
+        // candidate, only a witness that would have pruned a non-canonical
+        // one, so what it costs is superfluous shortcuts rather than answers.
+        let mut deadline: Option<Time> = None;
+        let mut until = until;
+        // Queue entries carry whether their label was a candidate prefix when
+        // pushed, which is what round 1's criterion counts. Third in the tuple
+        // so the ordering stays ⟨arrival, vertex⟩ as canonical MR needs.
+        let mut prefixes = 0usize;
         self.queue.clear();
-        for &v in marked.iter() {
+        for &v in writing.marked.iter() {
             let label = round[v as usize];
             if label.arrival != UNREACHABLE {
-                self.queue.push(Reverse((label.arrival, v)));
+                if label.direct {
+                    prefixes += 1;
+                }
+                self.queue.push(Reverse((label.arrival, v, label.direct)));
             }
         }
-        while let Some(Reverse((arrival, v))) = self.queue.pop() {
+        while let Some(Reverse((arrival, v, was_prefix))) = self.queue.pop() {
+            if was_prefix {
+                prefixes -= 1;
+            }
             if arrival > round[v as usize].arrival {
                 continue;
+            }
+            if let Some(limit) = deadline {
+                if arrival > limit {
+                    break;
+                }
+            }
+            let spent = match &mut until {
+                Until::Candidates(awaited) => {
+                    awaited.settle(v);
+                    awaited.done()
+                }
+                Until::Prefixes => prefixes == 0,
+            };
+            // Not latched. Round 1's criterion is not monotone — a walk out of
+            // a candidate prefix is another candidate prefix, so the count can
+            // fall to zero and rise again as the search runs. Committing to a
+            // deadline the first time it empties stops the search before
+            // prefixes it had not yet found, and that loses candidates rather
+            // than witnesses.
+            if spent {
+                if deadline.is_none() {
+                    deadline = Some(arrival.saturating_add(WITNESS_LIMIT));
+                }
+            } else {
+                deadline = None;
             }
             let here = round[v as usize];
             // The walk's origin, not the step before it: a transfer is the
@@ -738,9 +889,12 @@ impl Relaxation {
                 };
                 if accepts(round[head as usize], before[head as usize], fresh, run) {
                     round[head as usize] = fresh;
-                    touched.mark(head);
-                    marked.push(head);
-                    self.queue.push(Reverse((next, head)));
+                    writing.touched.mark(head);
+                    writing.marked.push(head);
+                    if fresh.direct {
+                        prefixes += 1;
+                    }
+                    self.queue.push(Reverse((next, head, fresh.direct)));
                 }
             }
         }
