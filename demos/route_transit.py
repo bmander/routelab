@@ -16,14 +16,16 @@ one into something a shortest-path algorithm can read.
 They must return the same arrival time. That claim is the paper's thesis and
 this demo's point — and RAPTOR (Delling, Pajor & Werneck, 2012), which builds
 no graph at all, CSA (Dibbelt, Pajor, Strasser & Wagner, 2013), which sorts
-the connections into one array and scans it, and TripBased (Witt, 2015), which
-precomputes the transfers between trips and sweeps those, must agree with
-both. The five run side by side and the table prints each; RAPTOR and
-TripBased also print their whole front, one journey per number of changes,
-and CSA and TripBased their profile for the next two hours, one journey per
-departure worth taking.
+the connections into one array and scans it, TripBased (Witt, 2015), which
+precomputes the transfers between trips and sweeps those, and PTL (Delling,
+Dibbelt, Pajor & Werneck, 2015), which labels every event once and never
+searches again, must agree with all of them. The six run side by side and the
+table prints each; RAPTOR and TripBased also print their whole front, one
+journey per number of changes, and CSA, TripBased and PTL their profiles for
+the next two hours, one journey per departure worth taking — CSA's and PTL's
+the same list, arrived at from opposite ends.
 
-All five are given the paper's *foot-edges* — walks between stops within
+All six are given the paper's *foot-edges* — walks between stops within
 ``--walk`` metres of each other — because a real feed says nothing about the
 northbound stop and the southbound one across the street being the same place,
 and a model that cannot cross the street cannot make most real trips. Pass
@@ -45,7 +47,7 @@ import routelab as rl
 from routelab import GTFS
 
 #: Every timetable technique, in the order the literature produced them.
-MODELS = [rl.TimeDependent(), rl.TimeExpanded(), rl.RAPTOR(), rl.CSA(), rl.TripBased()]
+MODELS = [rl.TimeDependent(), rl.TimeExpanded(), rl.RAPTOR(), rl.CSA(), rl.TripBased(), rl.PTL()]
 
 #: Downtown Seattle to the University District, which is a real trip somebody
 #: takes. Any two coordinates in the feed's area will do.
@@ -173,18 +175,20 @@ def main(argv: "list[str] | None" = None) -> int:
         leg = f"leave {clock(journey.departs)}, arrive {clock(journey.arrives)}"
         return f"{leg} ({journey.transfers} ch.)" if changes else leg
 
-    for name in ("CSA", "TripBased"):
+    for name in ("CSA", "TripBased", "PTL"):
         planner = planners.get(name)
         if planner is None:
             continue
         # Two hours on the service-day clock, which runs past midnight rather
         # than wrapping at it — a 23:30 departure asks about 25:30.
         until = rl.service_seconds(args.departing) + 2 * 3600
+        started = time.perf_counter()
         profile = planner.profile(origin, target, departing=args.departing, until=until)
+        took = (time.perf_counter() - started) * 1000
         print(
-            f"  {name}'s profile to {clock(until)}: "
+            f"  {name}'s profile to {clock(until)} ({took:.1f}ms): "
             f"{len(profile)} departures worth taking — "
-            + " · ".join(step(j, name != "CSA") for j in profile[:4])
+            + " · ".join(step(j, name == "TripBased") for j in profile[:4])
             + (" · …" if len(profile) > 4 else "")
         )
 

@@ -185,6 +185,13 @@ const PRESETS = [
     walks: ['Footpaths', {within: 200}],
     technique: ['TripBased', {}],
   },
+  {
+    id: 'transit-ptl',
+    label: 'Transit · PTL',
+    layer: ['GTFS', {}],
+    walks: ['Footpaths', {within: 200}],
+    technique: ['PTL', {}],
+  },
 ];
 
 /** Lay a preset out on the board, replacing whatever was there.

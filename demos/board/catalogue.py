@@ -65,6 +65,7 @@ NODES: "dict[str, dict]" = {
     "RAPTOR": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
     "CSA": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
     "TripBased": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
+    "PTL": {"kind": "planner", "inputs": {"environment": "environment"}, "clock": "day"},
     # Walks between nearby stops, made from another layer's coordinates. A
     # layer that takes a layer: its output is edges like any other layer's,
     # and how far a rider will walk is the knob — which is why it is a node
@@ -108,6 +109,7 @@ TECHNIQUES: "dict[str, type]" = {
     "RAPTOR": rl.RAPTOR,
     "CSA": rl.CSA,
     "TripBased": rl.TripBased,
+    "PTL": rl.PTL,
 }
 for _kind, _cls in TECHNIQUES.items():
     # `departing` is covered by `clock`; the rest are the knobs a Query node

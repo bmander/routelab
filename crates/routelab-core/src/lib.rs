@@ -31,6 +31,7 @@ pub use kernels::csa::{ConnectionScan, ScanProfile, ScanSearch};
 pub use kernels::dijkstra::dijkstra;
 pub use kernels::heuristics::{HeuristicError, StandardHeuristic};
 pub use kernels::landmark::{Landmarks, Selection};
+pub use kernels::ptl::PublicTransitLabeling;
 pub use kernels::raptor::{Raptor, RaptorSearch};
 pub use kernels::timedep::{
     time_dependent_dijkstra, Calendar, Clock, Departure, Waiting, Window, WEEK,

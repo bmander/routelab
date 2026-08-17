@@ -21,7 +21,7 @@ from conftest import TINY_GTFS
 #: Every timetable technique. Every behavioural test runs against each, because "these two
 #: agree" is the paper's thesis and a test that only asked one would not notice
 #: the day they stopped.
-MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA, rl.TripBased]
+MODELS = [rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA, rl.TripBased, rl.PTL]
 
 #: The two Pyrga models — the ones that answer with an itinerary and nothing
 #: else, so a cost table and a search space are things they refuse.

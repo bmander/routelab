@@ -46,6 +46,7 @@ from .kernels.schedule import Schedule
 from .kernels import (
     BFS,
     CSA,
+    PTL,
     RAPTOR,
     AStar,
     ContractionHierarchy,
@@ -104,6 +105,7 @@ __all__ = [
     "Nodes",
     "GTFS",
     "OSM",
+    "PTL",
     "Ordering",
     "Pace",
     "Planner",

@@ -4,6 +4,7 @@
 
 use super::{earliest_arrival, TimeExpanded};
 use crate::kernels::csa::ConnectionScan;
+use crate::kernels::ptl::PublicTransitLabeling;
 use crate::kernels::raptor::Raptor;
 use crate::kernels::tripbased::TripBased;
 use crate::model::graph::{NodeId, UNREACHABLE};
@@ -18,7 +19,7 @@ use crate::util::rng::Rng;
 ///   trip 2: leaves 0 at 08:05, reaches 1 at 08:20  (slower, and a dead end)
 ///   trip 3: leaves 1 at 08:15, reaches 2 at 08:20  (the good connection)
 /// A connection, spelled shortly enough to read a timetable off the page.
-fn c(trip: u32, from: NodeId, to: NodeId, departs: Time, arrives: Time) -> Connection {
+pub(crate) fn c(trip: u32, from: NodeId, to: NodeId, departs: Time, arrives: Time) -> Connection {
     Connection {
         trip: TripId(trip),
         from,
@@ -28,7 +29,7 @@ fn c(trip: u32, from: NodeId, to: NodeId, departs: Time, arrives: Time) -> Conne
     }
 }
 
-fn town() -> Timetable {
+pub(crate) fn town() -> Timetable {
     Timetable::new(
         3,
         [
@@ -42,7 +43,7 @@ fn town() -> Timetable {
 
 /// Every itinerary, the obvious way — an oracle by exhaustion rather than a
 /// second copy of either model.
-fn best_by_brute_force(
+pub(crate) fn best_by_brute_force(
     timetable: &Timetable,
     footpaths: &Footpaths,
     here: NodeId,
@@ -71,7 +72,7 @@ fn best_by_brute_force(
     [by_vehicle, on_foot].into_iter().flatten().min()
 }
 
-fn random_timetable(seed: u64, stops: u32, trips: u32) -> Timetable {
+pub(crate) fn random_timetable(seed: u64, stops: u32, trips: u32) -> Timetable {
     let mut rng = Rng::new(seed);
     let mut connections = Vec::new();
     for trip in 0..trips {
@@ -94,7 +95,7 @@ fn random_timetable(seed: u64, stops: u32, trips: u32) -> Timetable {
 }
 
 /// A scatter of short walks between random pairs of stops, both ways.
-fn random_footpaths(seed: u64, stops: u32, count: u32) -> Footpaths {
+pub(crate) fn random_footpaths(seed: u64, stops: u32, count: u32) -> Footpaths {
     let mut rng = Rng::new(seed ^ 0x5eed);
     let mut links = Vec::new();
     for _ in 0..count {
@@ -1138,7 +1139,7 @@ fn a_search_without_a_target_labels_every_stop_the_time_dependent_model_reaches(
 }
 
 #[test]
-fn the_five_models_agree_from_several_sources() {
+fn the_six_models_agree_from_several_sources() {
     // A multimodal query starts at several stops, each already reached at its
     // own time. All five must take whichever wins, and say so the same way.
     for seed in 0..8 {
@@ -1148,6 +1149,7 @@ fn the_five_models_agree_from_several_sources() {
         let rounds = raptor_with(&table, &paths);
         let scan = csa_with(&table, &paths);
         let trips = tripbased_with(&table, &paths);
+        let labels = PublicTransitLabeling::build(&table, Transfer::instant(), &paths);
         for a in 0..10u32 {
             let b = (a + 3) % 10;
             let sources = [(a, 0), (b, 400)];
@@ -1164,6 +1166,12 @@ fn the_five_models_agree_from_several_sources() {
                     want,
                     "seed {seed}: trip-based {sources:?} -> {to}"
                 );
+                let by_labels = labels.earliest_arrival(&sources, to);
+                assert_eq!(
+                    by_labels.as_ref().map(|i| i.arrives),
+                    want,
+                    "seed {seed}: PTL {sources:?} -> {to}"
+                );
                 assert_eq!(
                     by_events.as_ref().map(|i| i.arrives),
                     want,
@@ -1179,7 +1187,7 @@ fn the_five_models_agree_from_several_sources() {
                     want,
                     "seed {seed}: CSA {sources:?} -> {to}"
                 );
-                for itinerary in [by_stops, by_events, by_rounds, by_scan, by_trips]
+                for itinerary in [by_stops, by_events, by_rounds, by_scan, by_trips, by_labels]
                     .into_iter()
                     .flatten()
                 {
@@ -1268,7 +1276,7 @@ fn a_walk_from_the_source_needs_no_connection_to_set_it_off() {
 /// The profile the obvious way: ask the time-dependent model at every second
 /// of the window and keep, for each arrival, the latest moment that still
 /// makes it — leaving out what the direct walk would beat.
-fn profile_by_brute_force(
+pub(crate) fn profile_by_brute_force(
     table: &Timetable,
     paths: &Footpaths,
     from: NodeId,

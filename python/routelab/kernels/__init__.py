@@ -27,6 +27,7 @@ from .bfs import BFS, bfs
 from .contraction import ContractionHierarchy
 from .csa import CSA
 from .dijkstra import Dijkstra, dijkstra
+from .ptl import PTL
 from .raptor import RAPTOR
 from .timedep import TimeDependentDijkstra
 from .timetable import TimeDependent, TimeExpanded
@@ -40,6 +41,7 @@ __all__ = [
     "Dijkstra",
     "OPTIONS",
     "Origins",
+    "PTL",
     "Planner",
     "RAPTOR",
     "TimeDependent",

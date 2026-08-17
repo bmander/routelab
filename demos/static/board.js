@@ -91,6 +91,11 @@ const LOOKS = {
     sub: () => 'trips and transfers',
     available: () => Boolean(SETUP.feed),
   },
+  PTL: {
+    title: 'PTL', group: 'techniques',
+    sub: () => 'labels over the events',
+    available: () => Boolean(SETUP.feed),
+  },
   // The query's fields are the options its wired technique takes, and only
   // those: a `shown` predicate reads the technique's declaration (`clock` and
   // `options`, both from the library) so the board never shows a knob the

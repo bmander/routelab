@@ -19,9 +19,9 @@ correct.
 **Status: early.** Today it has a static graph, the searches everything else
 builds on (Dijkstra, BFS, A*), two heuristics, contraction hierarchies,
 time-dependent search over OpenStreetMap's scheduled restrictions, both of
-Pyrga et al.'s timetable models over GTFS, RAPTOR, CSA, and trip-based
-routing. The path from here runs on through the multimodal and multicriteria
-layers above them.
+Pyrga et al.'s timetable models over GTFS, RAPTOR, CSA, trip-based routing,
+and public transit labeling. The path from here runs on through the
+multimodal and multicriteria layers above them.
 
 ## What is implemented
 
@@ -44,14 +44,15 @@ each one buys and what it costs.
 | Delling, Pajor & Werneck, *Round-based public transit routing* (2012) — RAPTOR | `RAPTOR()` | [Not building a graph at all](#not-building-a-graph-at-all) |
 | Dibbelt, Pajor, Strasser & Wagner, *Intriguingly simple and fast transit routing* (2013) — CSA | `CSA()`, `CSA().bind(env).profile(...)` | [One array, scanned once](#one-array-scanned-once) |
 | Witt, *Trip-based public transit routing* (2015) | `TripBased()`, `TripBased().bind(env).profile(...)` | [Trips, and the transfers between them](#trips-and-the-transfers-between-them) |
-| Delling, Dibbelt, Pajor & Werneck, *Public transit labeling* (2015) | *not yet implemented* | |
+| Delling, Dibbelt, Pajor & Werneck, *Public transit labeling* (2015) — PTL | `PTL()`, `PTL().bind(env).profile(...)` | [Labels over the events](#labels-over-the-events) |
 | Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for multi-modal route planning: an efficient solution* (2019) — ULTRA | *not yet implemented* | |
 
 The rows marked *not yet implemented* are the shelf's gaps, in the order the
 literature filled them: after Pyrga et al. the timetable graphs were engineered
 harder, then RAPTOR and CSA — both here — stopped building a graph at all,
-Witt's trip-based search — here too — stopped labelling stops, and the rest
-are what came after. Every kernel that is here is checked against something that
+Witt's trip-based search — here too — stopped labelling stops, PTL — also
+here — built the biggest graph of all and labelled it once, and the rest are
+what came after. Every kernel that is here is checked against something that
 cannot be wrong in the same direction — a pure-Python reference, a brute-force
 oracle, or the paper's own second model — see [The contract](#the-contract).
 
@@ -495,9 +496,10 @@ journey.arrives, journey.transfers, journey.waiting   # 33600, 4, 1200
 ```
 
 Both models answer with the same verb, `route(..., departing=)`, because
-comparing them is the point — and so do RAPTOR, CSA and TripBased, below.
+comparing them is the point — and so do RAPTOR, CSA, TripBased and PTL,
+below.
 Twenty-five random stop pairs at 08:30 with 200 m footpaths
-(`benchmarks/bench_transit.py`), all five agreeing on every one:
+(`benchmarks/bench_transit.py`), all six agreeing on every one:
 
 | technique | nodes | bind | memory | settled | query |
 |---|---|---|---|---|---|
@@ -506,6 +508,7 @@ Twenty-five random stop pairs at 08:30 with 200 m footpaths
 | `RAPTOR` | 6,313 stops | 0.4 s | 16 MB | 4,126 | 1.5 ms |
 | `CSA` | 6,313 stops | 0.4 s | 23 MB | 3,411 | 0.6 ms |
 | `TripBased` | 12,482 trips | 10.5 s | 28 MB | 8,455 | 1.0 ms |
+| `PTL` | 73,961,455 hubs | 53.5 s | 1,204 MB | 13,161 | 0.4 ms |
 
 King County Metro plus Sound Transit on a Monday: 6,313 stops, 421,604
 connections, 7,038 stop pairs, 0 trips the reader could not represent. The
@@ -799,13 +802,102 @@ The refusals are the library's. `search()` without a target is refused the
 way A\* and a hierarchy refuse it — the paper's query is point-to-point, its
 target is what the lines are checked against and what prunes the rest, and
 there is no one-to-all form to fall back on. `max_transfers` names RAPTOR and
-TripBased; `until` names `profile()` on CSA and TripBased. What is not here:
+TripBased; `until` names `profile()` on CSA, PTL and TripBased. What is not here:
 the paper's SIMD and three-loop query layout (§3.4) and its transfer
 preferences — each its own increment. Preprocessing is parallel over trips,
 which is the one place the paper's "trivially parallelized" is taken up: both
 algorithms judge each trip on its own, so a thread per core does. Changing vehicles is instantaneous, and this is the
 second kernel — a transfer knows both trips — that a minimum change time could
 land in.
+
+### Labels over the events
+
+Delling, Dibbelt, Pajor & Werneck, *Public Transit Labeling* (2015). RAPTOR
+and CSA stopped building a graph; PTL builds the biggest one of all — the
+time-expanded graph, a vertex per event — and then never searches it. Every
+arc points forward in time (a wait, a ride, a walk), so the graph is a DAG,
+"there is a journey from this event to that one" is *reachability*, and
+reachability in a DAG is what **2-hop labeling** answers in a list
+intersection: give every event a forward label of hubs it reaches and a
+backward label of hubs that reach it, such that any reachable pair shares
+one. The search happens once, at bind, for every query at once.
+
+```python
+feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
+env = rl.Environment(feed, rl.Footpaths(feed, within=200))
+
+planner = rl.PTL().bind(env)                             # 428,927 events labelled: 53 s, 1.2 GB
+planner.num_hubs, planner.hubs_per_label                 # 73,961,455 entries, 86 hubs per label
+planner.route(downtown, juanita, departing=time(8, 30))  # 09:39, as the other five say; 0.4 ms
+planner.profile(downtown, juanita, departing=time(8, 30), until=time(10, 30))   # CSA's list, from the labels: 4 ms
+```
+
+**Earliest arrival** is the paper's event-label query: enter at the first
+event at the origin at or after departing, and find the earliest event at
+the target it reaches. Reachability along a stop's events is monotone — a
+later event is always reachable from an earlier one by waiting — so that is a
+**binary search** over the target's events, each probe one intersection of
+two sorted labels, pruned to events no earlier than the departure. A journey
+that ends on foot arrives at a stop plus a walk rather than at an event, so
+the stops that walk to the target are probed too; walks from the origin seed
+the search the way they do for the time-expanded model. `settled` on the
+answer counts label entries read — the paper's own "hubs" column.
+
+**Profile** is the paper's §4. Event labels cover every pair of events, most
+of them dominated (whatever the 08:12 departure reaches, the 08:00 one
+reaches by waiting), so the paper folds each stop's labels into a **stop
+label** per direction — per hub, only the latest departure at the stop that
+reaches it and the earliest arrival at the stop from it — and sweeps the
+origin's forward and the target's backward stop label together, every
+matching hub offering a (leave at, arrive by) pair, kept if nothing
+dominates it. Hubs are numbered by time of day (the paper reassigns ids to
+get this; numbering events chronologically gets it free), so the sweep starts
+where the window opens. Walks at either end are the paper's §5
+*superlabels* — the neighbouring stops' labels merged in with the walk
+subtracted or added, during the query — and the result is exactly CSA's
+profile, arrived at from the opposite end: the tests hold the two to the same
+list on every pair of the fixture, and both to asking at every second.
+
+Twenty-five random pairs at 08:30 with 200 m footpaths (the same table as
+above, `benchmarks/bench_transit.py`):
+
+| | nodes | bind | memory | settled | query |
+|---|---|---|---|---|---|
+| `CSA` | 6,313 stops | 0.3 s | 23 MB | 3,411 | 0.500 ms |
+| `PTL` | 73,961,455 hubs | 53.5 s | 1,204 MB | 13,161 | 0.395 ms |
+
+That is the paper's trade at this scale — London took its authors 54 minutes
+and 1.3 GB — and it is worth reading both columns of. The query is the
+fastest here, and most of its 0.4 ms is building the `Journey`; the kernel
+itself reads its thirteen thousand entries in tens of microseconds. What it
+buys is a preprocessing bill 170× CSA's and fifty times its memory, which is
+why the board's progress bar counts hubs while it labels, and the reason
+`footprint` is on every planner.
+
+Two things are the library's rather than the paper's, and both are stated
+in the code. The labels are computed by **pruned labeling** (Akiba, Iwata &
+Yoshida, 2013 — the paper's own reference for the technique) rather than
+RXL, which the paper uses as a black box: hubs are taken in descending
+degree order and from each a forward and a backward search adds it to
+everything it reaches that the labels so far do not already cover. Ties are
+broken **at random**, and that is not cosmetic: almost every event has the
+same small degree, and taking a stop's events in a block — in time order —
+had each one label its entire future before anything stood between; on a
+two-hour window of the feed that is 200 hubs per label, and shuffling the
+ties is 20. And each label entry carries the next vertex toward its hub, so
+a hub match unpacks to the full event path and from there to rides and
+walks — the "known path unpacking techniques" the paper's §5 points at,
+checked by the same `is_valid` as the other five.
+
+What is not here: the paper's multicriteria labels (a second, weighted graph
+whose distances count trips, and distance labels over it — 26–88× the
+preprocessing in the paper, its own increment), so `max_transfers` is refused
+with a pointer at RAPTOR; minimum transfer times, which no timetable kernel
+here honours yet; and the paper's *trimmed* event labels, which it notes
+break the plain earliest-arrival query and answers with stop labels — the
+event labels here are kept whole. Like the two Pyrga models, PTL keeps no
+table, so `search()` and `explored()` say so and point at the techniques
+that do.
 
 ### Underneath
 
@@ -874,8 +966,8 @@ plumbing with no routing content.
 ```
 crates/routelab-core/     Rust. No Python.
   kernels/                Dijkstra, BFS, A*, ALT landmarks, contraction,
-                          time-dependent, Pyrga's two timetable models, RAPTOR, CSA,
-                          trip-based.
+                          time-dependent, Pyrga's two timetable models, RAPTOR,
+                          CSA, trip-based, PTL.
   model/                  CSR graph, search options and results, search trees,
                           the heuristic trait, the timetable structures, and the
                           lines-and-trips layout RAPTOR and trip-based both read.
