@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use pyo3::prelude::*;
 
+use routelab_core::kernels::contraction::Ordering as CoreOrdering;
+use routelab_core::kernels::lcspp::ucch::Ucch as CoreUcch;
 use routelab_core::kernels::lcspp::{label_constrained, Modes as CoreModes, Multimodal};
 use routelab_core::model::graph::Graph as CoreGraph;
 use routelab_core::model::timetable::Timetable as CoreTimetable;
@@ -163,5 +165,108 @@ impl PyMultimodal {
 
     fn __repr__(&self) -> String {
         format!("Multimodal({} arcs)", self.labels.len())
+    }
+}
+
+/// A hierarchy over the walking network, contracted around the vertices where
+/// the networks join — UCCH's preprocessing.
+///
+/// Seconds on a city, against the minutes [`crate::ultra::PyUltra`] wants, and
+/// it leaves the language a query input rather than baking it in.
+#[pyclass(name = "Ucch", module = "routelab._routelab", frozen)]
+pub struct PyUcch {
+    inner: Arc<CoreUcch>,
+}
+
+#[pymethods]
+impl PyUcch {
+    /// Contract `walkable` around the endpoints of `links`.
+    ///
+    /// `walkable` holds one mode's arcs only, over the whole numbering, so a
+    /// stop is the vertex it always was. `links` are `(tail, head, seconds)`.
+    #[staticmethod]
+    #[pyo3(signature = (walkable, walking, links, link_label, max_degree=20.0, progress=None))]
+    fn build(
+        py: Python<'_>,
+        walkable: &PyGraph,
+        walking: u8,
+        links: Vec<(NodeId, NodeId, u32)>,
+        link_label: u8,
+        max_degree: f64,
+        progress: Option<&crate::progress::PyProgress>,
+    ) -> PyResult<Self> {
+        let graph = Arc::clone(&walkable.inner);
+        let counter = crate::progress::counter(progress);
+        let built = py.detach(|| {
+            CoreUcch::build_reporting(
+                &graph,
+                walking,
+                &links,
+                link_label,
+                CoreOrdering::default(),
+                max_degree,
+                &counter,
+            )
+        });
+        Ok(PyUcch {
+            inner: Arc::new(built.map_err(crate::value_err)?),
+        })
+    }
+
+    /// The earliest arrival at `target` by a journey `modes` admits.
+    ///
+    /// `network` is the *uncontracted* one, the same
+    /// [`PyMultimodal`] plain LCSPP takes: its schedule is what the core rides
+    /// and its arcs are what a shortcut is told in.
+    #[pyo3(signature = (network, modes, sources, target))]
+    fn earliest_arrival(
+        &self,
+        py: Python<'_>,
+        network: &PyMultimodal,
+        modes: &PyModes,
+        sources: Vec<(NodeId, u32)>,
+        target: NodeId,
+    ) -> Option<PyItinerary> {
+        let borrowed = Multimodal {
+            scalar: &network.graph,
+            labels: &network.labels,
+            timetable: &network.timetable,
+            riding: network.riding,
+        };
+        py.detach(|| {
+            self.inner
+                .earliest_arrival(&borrowed, &modes.inner, &sources, target)
+        })
+        .map(PyItinerary::from)
+    }
+
+    /// Vertices in the core: what a query searches instead of the network.
+    #[getter]
+    fn num_core(&self) -> usize {
+        self.inner.num_core()
+    }
+
+    /// Arcs in the core, links included.
+    #[getter]
+    fn num_arcs(&self) -> usize {
+        self.inner.num_arcs()
+    }
+
+    #[getter]
+    fn footprint(&self) -> usize {
+        self.inner.footprint()
+    }
+
+    /// Did this vertex survive the contraction?
+    fn is_core(&self, node: NodeId) -> bool {
+        self.inner.is_core(node)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Ucch({} core vertices, {} arcs)",
+            self.inner.num_core(),
+            self.inner.num_arcs()
+        )
     }
 }

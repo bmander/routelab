@@ -91,6 +91,31 @@ class Multimodal:
     @property
     def footprint(self) -> int: ...
 
+class Ucch:
+    @staticmethod
+    def build(
+        walkable: Graph,
+        walking: int,
+        links: Sequence[Tuple[int, int, int]],
+        link_label: int,
+        max_degree: float = ...,
+        progress: Optional[Progress] = ...,
+    ) -> Ucch: ...
+    def earliest_arrival(
+        self,
+        network: Multimodal,
+        modes: Modes,
+        sources: Sequence[Tuple[int, int]],
+        target: int,
+    ) -> Optional[Itinerary]: ...
+    @property
+    def num_core(self) -> int: ...
+    @property
+    def num_arcs(self) -> int: ...
+    @property
+    def footprint(self) -> int: ...
+    def is_core(self, node: int) -> bool: ...
+
 class Footpaths:
     @staticmethod
     def from_edges(graph: Graph, positions: Sequence[int]) -> Footpaths: ...

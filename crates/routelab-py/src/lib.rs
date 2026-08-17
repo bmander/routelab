@@ -73,6 +73,7 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMeetingSearch>()?;
     m.add_class::<PyModes>()?;
     m.add_class::<PyMultimodal>()?;
+    m.add_class::<PyUcch>()?;
     m.add_class::<PyOsmNetwork>()?;
     m.add_class::<PyProgress>()?;
     m.add_class::<PyPublicTransitLabeling>()?;
