@@ -192,3 +192,99 @@ fn the_order_is_a_policy_and_never_an_answer() {
         }
     }
 }
+
+/// A three-part search over a partial hierarchy: climb out of the source, cross
+/// the core, climb back down into the target.
+///
+/// This is the skeleton UCCH's query is built on — Dibbelt, Pajor & Wagner
+/// §3.2 — written here rather than in the kernel because what it holds is the
+/// *preprocessing*: that the ranks, the two component graphs and the core
+/// between them still describe the graph that went in. If this is wrong, every
+/// query over it is wrong for the same reason.
+fn through_the_core(built: &CoreHierarchy, from: NodeId, to: NodeId) -> Weight {
+    let up = reach(built.upward(), from);
+    // The downward graph is stored reversed, so climbing it from the target is
+    // the same walk read backwards.
+    let down = reach(built.downward(), to);
+    let nodes = up.len();
+
+    // Meeting in the component: a journey that never needed the core at all.
+    let mut best = UNREACHABLE;
+    for node in 0..nodes {
+        if up[node] != UNREACHABLE && down[node] != UNREACHABLE {
+            best = best.min(up[node].saturating_add(down[node]));
+        }
+    }
+
+    // Or through it: climb in at every core vertex the source reached, cross,
+    // and climb out at every one the target did.
+    for entry in 0..nodes as NodeId {
+        if !built.is_core(entry) || up[entry as usize] == UNREACHABLE {
+            continue;
+        }
+        let across = reach(built.core(), entry);
+        for exit in 0..nodes {
+            if !built.is_core(exit as NodeId) || down[exit] == UNREACHABLE {
+                continue;
+            }
+            if across[exit] == UNREACHABLE {
+                continue;
+            }
+            best = best.min(
+                up[entry as usize]
+                    .saturating_add(across[exit])
+                    .saturating_add(down[exit]),
+            );
+        }
+    }
+    best
+}
+
+#[test]
+fn a_partial_hierarchy_still_describes_the_graph_it_contracted() {
+    // The load-bearing test for the preprocessing UCCH needs. Contract most of
+    // a network around a handful of kept vertices, then ask every pair through
+    // the hierarchy and compare with plain Dijkstra on what went in.
+    for seed in 0..5 {
+        let graph = sprawl(seed, 60, 40);
+        let keep = every_kth(60, 7);
+        let built = CoreHierarchy::build(&graph, &keep, Ordering::default(), 4.0)
+            .expect("the graph contracts");
+        for from in 0..60u32 {
+            let truth = reach(&graph, from);
+            for to in 0..60u32 {
+                assert_eq!(
+                    through_the_core(&built, from, to),
+                    truth[to as usize],
+                    "seed {seed}: {from} -> {to}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_kept_vertex_is_unranked_and_a_contracted_one_is_not() {
+    // What the two halves of the hierarchy are told apart by: the core is
+    // exactly the vertices the contraction never gave a rank to.
+    let graph = sprawl(7, 50, 35);
+    let keep = every_kth(50, 6);
+    let built = CoreHierarchy::build(&graph, &keep, Ordering::default(), 1e9).unwrap();
+    let mut ranks: Vec<u32> = Vec::new();
+    for node in 0..50u32 {
+        assert_eq!(
+            built.is_core(node),
+            built.rank(node) == crate::kernels::contraction::UNRANKED,
+            "{node} disagrees about whether it is in the core"
+        );
+        if !built.is_core(node) {
+            ranks.push(built.rank(node));
+        }
+    }
+    // Ranks are the order it contracted in: dense, from zero, no repeats.
+    ranks.sort_unstable();
+    assert_eq!(ranks, (0..ranks.len() as u32).collect::<Vec<_>>());
+    for &node in &keep {
+        assert_eq!(built.rank(node), crate::kernels::contraction::UNRANKED);
+    }
+}

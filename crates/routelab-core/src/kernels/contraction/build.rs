@@ -9,7 +9,7 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use super::{Expansion, Ordering, Policy};
+use super::{Expansion, Ordering, Policy, UNRANKED};
 use crate::model::graph::{Graph, NodeId, Weight, UNREACHABLE};
 use crate::util::progress::Progress;
 use crate::util::rng::Rng;
@@ -206,14 +206,17 @@ impl Builder {
     /// Stopping leaves extra vertices in the core and keeps it sparse, which
     /// is the trade the papers make.
     ///
-    /// Returns how many vertices were retired.
+    /// Returns each vertex's rank, [`UNRANKED`] for the ones left standing —
+    /// which is what tells the core from the component afterwards, and what a
+    /// hierarchy search climbs by.
     pub(super) fn contract_core(
         &mut self,
         keep: &[bool],
         max_degree: f64,
         progress: &Progress,
-    ) -> usize {
+    ) -> Vec<u32> {
         let num_nodes = self.out.len();
+        let mut ranks = vec![UNRANKED; num_nodes];
         let candidates = keep.iter().filter(|kept| !**kept).count();
         progress.expect("contracting", candidates as u64);
         let mut queue: BinaryHeap<Reverse<(i64, NodeId)>> = BinaryHeap::new();
@@ -258,12 +261,13 @@ impl Builder {
             for shortcut in shortcuts {
                 self.add_shortcut(shortcut);
             }
+            ranks[node as usize] = retired as u32;
             self.retire(node);
             standing -= 1;
             retired += 1;
             progress.step();
         }
-        retired
+        ranks
     }
 
     /// Every arc still running between two vertices that were not retired —

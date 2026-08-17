@@ -40,7 +40,7 @@
 //! means a stop; routing from an arbitrary doorway needs those searches and is
 //! its own increment.
 
-use super::{Builder, Ordering};
+use super::{Builder, Ordering, UNRANKED};
 use crate::model::graph::{Graph, GraphError, NodeId};
 use crate::util::progress::Progress;
 
@@ -48,7 +48,13 @@ use crate::util::progress::Progress;
 #[derive(Debug, Clone)]
 pub struct CoreHierarchy {
     core: Graph,
+    /// Component arcs that climb, for a search from below into the core.
+    upward: Graph,
+    /// The same, reversed, for a search that ends below the core.
+    downward: Graph,
     standing: Vec<bool>,
+    /// Rank per vertex, [`UNRANKED`] for one the contraction left standing.
+    ranks: Vec<u32>,
     retired: usize,
 }
 
@@ -82,11 +88,39 @@ impl CoreHierarchy {
             }
         }
         let mut builder = Builder::new(graph, ordering);
-        let retired = builder.contract_core(&kept, max_degree, progress);
-        let edges = builder.core_edges();
+        let ranks = builder.contract_core(&kept, max_degree, progress);
+        let retired = ranks.iter().filter(|rank| **rank != UNRANKED).count();
+        let core = builder.core_edges();
+        let standing = builder.standing();
+
+        // The component's hierarchy, for a search that starts below the core and
+        // has to climb into it. Arcs are split the way an ordinary contraction
+        // hierarchy splits them — by which end ranks higher — except that an
+        // arc between two core vertices goes into neither, because the core is
+        // not searched by climbing. It is searched as a graph, and `core` is it.
+        let mut upward = Vec::new();
+        let mut downward = Vec::new();
+        for edge in &builder.edges {
+            let (tail, head) = (ranks[edge.tail as usize], ranks[edge.head as usize]);
+            if tail == UNRANKED && head == UNRANKED {
+                continue;
+            }
+            if tail < head {
+                upward.push((edge.tail, edge.head, edge.weight));
+            } else {
+                // Stored back to front, as in [`ContractionHierarchy`]: the
+                // search from the target reads it as if the arc pointed uphill,
+                // which is the only direction it walks.
+                downward.push((edge.head, edge.tail, edge.weight));
+            }
+        }
+
         Ok(CoreHierarchy {
-            core: Graph::from_edges(graph.num_nodes(), &edges)?,
-            standing: builder.standing(),
+            core: Graph::from_edges(graph.num_nodes(), &core)?,
+            upward: Graph::from_edges(graph.num_nodes(), &upward)?,
+            downward: Graph::from_edges(graph.num_nodes(), &downward)?,
+            standing,
+            ranks,
             retired,
         })
     }
@@ -95,6 +129,23 @@ impl CoreHierarchy {
     /// original numbering, so a stop is the node it always was.
     pub fn core(&self) -> &Graph {
         &self.core
+    }
+
+    /// Where a vertex sits in the order it was contracted in, or
+    /// [`UNRANKED`] if it never was — which is the same as being in the core.
+    pub fn rank(&self, node: NodeId) -> u32 {
+        self.ranks.get(node as usize).copied().unwrap_or(UNRANKED)
+    }
+
+    /// Component arcs from lower rank to higher: what a search from the source
+    /// climbs to reach the core.
+    pub fn upward(&self) -> &Graph {
+        &self.upward
+    }
+
+    /// The same reversed, so a search from the target also only ever climbs.
+    pub fn downward(&self) -> &Graph {
+        &self.downward
     }
 
     /// Did this vertex survive the contraction?

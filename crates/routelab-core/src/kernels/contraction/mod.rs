@@ -95,6 +95,11 @@ impl Ordering {
 }
 
 /// A contracted graph and the ranks that make it searchable.
+/// The rank of a vertex a partial contraction left standing: above every rank
+/// it could have been given, so a search that only ever climbs treats the core
+/// as the top of the hierarchy without needing a special case for it.
+pub const UNRANKED: u32 = u32::MAX;
+
 #[derive(Debug, Clone)]
 pub struct ContractionHierarchy {
     ranks: Vec<u32>,
