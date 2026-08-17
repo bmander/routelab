@@ -195,8 +195,7 @@ impl Ultra {
             candidates += counted;
         }
 
-        found.sort_unstable();
-        found.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+        keep_shortest(&mut found);
         Ultra {
             shortcuts: found,
             candidates,
@@ -240,8 +239,26 @@ impl Ultra {
 }
 
 /// What one block of source stops yields: the shortcuts their candidates
-/// produced, and how many candidates that was.
+/// produced, already reduced to one per stop pair, and how many candidates
+/// that was before the reduction.
 type Block = (Vec<(NodeId, NodeId, Time)>, usize);
+
+/// One entry per stop pair, the shortest walk between them.
+///
+/// Applied to each block as it finishes and once more to the blocks merged,
+/// which it may be because it is idempotent: the shortest of the per-block
+/// shortest is the shortest. Doing it per block is not a tidiness — it is what
+/// keeps the memory this phase holds proportional to the *shortcuts* rather
+/// than to the *candidates*, and candidates outnumber shortcuts by a wide
+/// margin. Every block's findings stay live until the sweep ends, so raw
+/// candidates accumulating there is gigabytes on a city where the answer is
+/// megabytes.
+fn keep_shortest(found: &mut Vec<(NodeId, NodeId, Time)>) {
+    // Lexicographic, so for a given pair the shortest duration sorts first and
+    // is the one `dedup_by` keeps.
+    found.sort_unstable();
+    found.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+}
 
 /// Source stops per block of preprocessing work. Small enough that a core
 /// which draws a run of busy stops does not gate the phase — a stop on twenty
@@ -281,7 +298,8 @@ impl<'a> Worker<'a> {
         }
     }
 
-    /// Every shortcut the candidates from `sources` produce, and how many
+    /// Every shortcut the candidates from `sources` produce — one per stop
+    /// pair, since this is held until the whole sweep ends — and how many
     /// candidates that was.
     fn shortcuts_from(&mut self, sources: &[NodeId], progress: &Progress) -> Block {
         let Sweep {
@@ -352,6 +370,10 @@ impl<'a> Worker<'a> {
             self.walk.reached = reach;
             progress.step();
         }
+        // Reduced here rather than only at the end: this vector outlives the
+        // block, waiting on every other block to finish, and what it holds
+        // raw is candidates.
+        keep_shortest(&mut found);
         (found, candidates)
     }
 }

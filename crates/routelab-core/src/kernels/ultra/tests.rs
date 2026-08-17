@@ -88,6 +88,35 @@ fn corridor(seed: u64, neighbourhoods: u32, per: u32) -> (Timetable, Graph) {
     )
 }
 
+/// A corridor whose neighbourhoods are joined by *two* walks rather than one,
+/// so that a stop has more than one shortcut leaving it.
+///
+/// [`corridor`] gives every bridging stop exactly one destination, which makes
+/// it blind to a merge that collapses by origin alone — the stop pair and the
+/// origin are the same thing there. Here the last stop of a neighbourhood can
+/// walk to either of the next one's first two stops, and which is better
+/// depends on when you arrive.
+fn braided(seed: u64, neighbourhoods: u32, per: u32) -> (Timetable, Graph) {
+    let (table, transfers) = corridor(seed, neighbourhoods, per);
+    let mut links = Vec::new();
+    for tail in 0..transfers.num_nodes() as NodeId {
+        for edge in transfers.out_edges(tail) {
+            links.push((tail, transfers.head(edge), transfers.weight(edge)));
+        }
+    }
+    let mut rng = Rng::new(seed ^ 0xb2a1d);
+    for hood in 0..neighbourhoods - 1 {
+        let (a, b) = (hood * per + per - 1, (hood + 1) * per + 1);
+        let walk = 90 + rng.below(150) as Time;
+        links.push((a, b, walk));
+        links.push((b, a, walk));
+    }
+    (
+        table,
+        Graph::from_edges(transfers.num_nodes(), &links).expect("bridges join real stops"),
+    )
+}
+
 /// How long it takes to walk from `from` to everywhere.
 fn walks_from(transfers: &Graph, from: NodeId) -> Vec<Time> {
     dijkstra(transfers, &[(from, 0)], &SearchOptions::default())
@@ -340,4 +369,68 @@ fn the_agreement_test_has_teeth() {
          cannot tell a sufficient set from an empty one"
     );
     assert!(!Ultra::compute(&table, &transfers).is_empty());
+}
+
+#[test]
+fn blocks_of_sources_merge_to_the_shortest_walk() {
+    // The sweep hands blocks of source stops to threads and reduces each
+    // block to one entry per stop pair as it finishes, so only a corridor
+    // long enough to span several blocks exercises the merge at all. Every
+    // other instance here is nine stops and fits in one.
+    let (table, transfers) = braided(3, 12, 3);
+    let stops = stops_of(&table, &transfers);
+    assert!(
+        stops.len() > super::BLOCK,
+        "{} sources is one block, which merges nothing",
+        stops.len()
+    );
+
+    let ultra = Ultra::compute(&table, &transfers);
+    assert!(!ultra.is_empty(), "a corridor is crossed by walking");
+
+    // What reducing per block could get wrong: keeping whichever duration the
+    // first block to finish happened to find, rather than the shortest. Every
+    // kept shortcut must be the shortest walk between its two stops.
+    for &(from, to, duration) in ultra.shortcuts() {
+        assert_eq!(
+            duration,
+            walks_from(&transfers, from)[to as usize],
+            "{from} -> {to} kept a walk that is not the shortest"
+        );
+    }
+
+    // And a pair kept once, not once per block that found it.
+    let mut pairs: Vec<(NodeId, NodeId)> =
+        ultra.shortcuts().iter().map(|&(a, b, _)| (a, b)).collect();
+    let found = pairs.len();
+    pairs.sort_unstable();
+    pairs.dedup();
+    assert_eq!(pairs.len(), found, "a stop pair survived the merge twice");
+
+    // The instance has to be able to tell a merge by pair from a merge by
+    // origin, or the assertions above hold for a fixture's reasons rather
+    // than the code's. A plain corridor cannot: each of its bridging stops
+    // walks to exactly one other, so the two rules agree there.
+    let mut origins: Vec<NodeId> = pairs.iter().map(|&(a, _)| a).collect();
+    origins.dedup();
+    assert!(
+        origins.len() < pairs.len(),
+        "no stop has two shortcuts leaving it, so this cannot see the difference"
+    );
+
+    // And the whole point still holds across the blocks: same answers as the
+    // closure, on an instance big enough to have been split.
+    let shortcuts = Footpaths::new(transfers.num_nodes(), ultra.shortcuts().to_vec());
+    let whole = closed(&table, &transfers);
+    for &from in &stops {
+        for &to in &stops {
+            for at in [0, 900, 2400] {
+                assert_eq!(
+                    by_ultra(&table, &transfers, &shortcuts, &stops, from, at, to),
+                    by_closure(&table, &whole, from, at, to),
+                    "{from} -> {to} at {at}"
+                );
+            }
+        }
+    }
 }
