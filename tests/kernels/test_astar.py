@@ -24,7 +24,7 @@ def corridor() -> rl.Environment:
 
 
 def test_hello_world(corridor):
-    journey = rl.AStar(rl.Euclidean()).bind(corridor).route("a", "d")
+    journey = rl.AStar(rl.Euclidean()).bind(corridor).route("a", "d").routes[0]
     assert journey.cost == 30
     assert journey.nodes == ["a", "b", "c", "d"]
 
@@ -87,7 +87,7 @@ def test_the_heuristic_is_required(corridor):
 def test_zero_is_available_but_must_be_asked_for(corridor):
     # A* that quietly became Dijkstra is the one failure a benchmark can't see,
     # so the degenerate heuristic is spelled out rather than defaulted to.
-    assert rl.AStar(rl.Zero()).bind(corridor).route("a", "d").cost == 30
+    assert rl.AStar(rl.Zero()).bind(corridor).route("a", "d").routes[0].cost == 30
 
 
 def test_euclidean_needs_positions():
@@ -127,7 +127,7 @@ def test_the_fastest_layer_sets_the_bound():
 
 def test_an_explicit_rate_overrides_the_layers(corridor):
     weaker = rl.AStar(rl.Euclidean(cost_per_distance=0.0)).bind(corridor)
-    assert weaker.route("a", "d").cost == 30
+    assert weaker.route("a", "d").routes[0].cost == 30
     # Priced at zero it estimates nothing, so it degenerates to Dijkstra.
     target = [weaker.node_id("d")]
     assert weaker.search("a", targets=target).order == rl.Dijkstra().bind(corridor).search(
@@ -145,17 +145,17 @@ def test_a_star_searches_toward_exactly_one_target(corridor):
 
 def test_max_cost_bounds_the_real_cost_not_the_estimate(corridor):
     planner = rl.AStar(rl.Euclidean()).bind(corridor)
-    assert planner.route("a", "c", max_cost=20).cost == 20
-    assert planner.route("a", "d", max_cost=20) is None
+    assert planner.route("a", "c", max_cost=20).routes[0].cost == 20
+    assert planner.route("a", "d", max_cost=20).routes == []
 
 
 def test_unreachable_destination_returns_none(corridor):
-    assert rl.AStar(rl.Euclidean()).bind(corridor).route("d", "a") is None
+    assert rl.AStar(rl.Euclidean()).bind(corridor).route("d", "a").routes == []
 
 
 def test_several_origins_with_access_costs(corridor):
     planner = rl.AStar(rl.Euclidean()).bind(corridor)
-    assert planner.route({"a": 0, "c": 5}, "d").cost == 15
+    assert planner.route({"a": 0, "c": 5}, "d").routes[0].cost == 15
 
 
 def test_the_heuristic_is_bound_once_in_preprocess(corridor):
@@ -166,7 +166,7 @@ def test_the_heuristic_is_bound_once_in_preprocess(corridor):
 
 
 def test_journeys_are_walkable(corridor):
-    journey = rl.AStar(rl.Euclidean()).bind(corridor).route("a", "d")
+    journey = rl.AStar(rl.Euclidean()).bind(corridor).route("a", "d").routes[0]
     compiled = corridor.compile()
     edge_ids = [
         edge_id

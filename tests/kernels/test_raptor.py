@@ -23,29 +23,33 @@ def planner(env) -> rl.RAPTOR:
 
 
 def test_hello_world(planner):
-    journey = planner.route("A", "C", departing=time(8, 0))
+    journey = planner.route("A", "C", departing=time(8, 0)).routes[0]
     assert journey.arrives == 8 * 3600 + 20 * 60
     assert journey.transfers == 1
     assert [leg.head for leg in journey.legs] == ["B", "C"]
     assert repr(rl.RAPTOR()) == "RAPTOR()"
 
 
-def test_the_frontier_is_one_journey_per_number_of_changes(planner):
-    front = planner.frontier("A", "C", departing=time(8, 0))
+def test_the_routes_are_one_journey_per_number_of_changes(planner):
+    # An answer leads with the journey every technique here would have given —
+    # the earliest arrival — and each entry after it buys one fewer change at
+    # the price of arriving later. Nothing in it is dominated.
+    front = planner.route("A", "C", departing=time(8, 0)).routes
     assert [(j.transfers, j.arrives) for j in front] == [
-        (0, 8 * 3600 + 30 * 60),
         (1, 8 * 3600 + 20 * 60),
+        (0, 8 * 3600 + 30 * 60),
     ]
-    # Fewest changes first, arrivals strictly decreasing: nothing dominated.
-    assert front[-1].arrives == planner.route("A", "C", departing=time(8, 0)).arrives
-    assert planner.frontier("A", "C", departing=time(12, 0)) == []
+    # The kernel's own order is the other way about, and `journeys` reads it.
+    result = planner.search("A", targets=[planner.node_id("C")], departing=time(8, 0))
+    assert planner.journeys(result, "C") == list(reversed(front))
+    assert planner.route("A", "C", departing=time(12, 0)).routes == []
 
 
 def test_max_transfers_caps_the_changes(planner):
-    assert planner.route("A", "C", departing=time(8, 0), max_transfers=0).arrives == 8 * 3600 + 30 * 60
-    assert planner.route("A", "C", departing=time(8, 0), max_transfers=1).arrives == 8 * 3600 + 20 * 60
+    assert planner.route("A", "C", departing=time(8, 0), max_transfers=0).routes[0].arrives == 8 * 3600 + 30 * 60
+    assert planner.route("A", "C", departing=time(8, 0), max_transfers=1).routes[0].arrives == 8 * 3600 + 20 * 60
     with pytest.raises(ValueError, match="cannot be -1"):
-        planner.route("A", "C", departing=time(8, 0), max_transfers=-1)
+        planner.route("A", "C", departing=time(8, 0), max_transfers=-1).routes[0]
 
 
 def test_a_search_is_one_to_all(planner):
@@ -58,7 +62,7 @@ def test_a_search_is_one_to_all(planner):
     assert planner.searches == ("stops", 3)
     # A kept search answers for any destination without searching again — and
     # answers exactly as route() would.
-    assert planner.journey(result, "C") == planner.route("A", "C", departing=time(8, 0))
+    assert planner.journey(result, "C") == planner.route("A", "C", departing=time(8, 0)).routes[0]
     assert planner.journey(result, "B").arrives == 8 * 3600 + 10 * 60
 
 
@@ -91,7 +95,7 @@ def test_the_rounds_are_a_search_space(planner):
 def test_several_origins_each_carry_a_head_start(feed):
     env = rl.Environment(feed, rl.ScalarEdges(("C", "B", 60)))
     planner = rl.RAPTOR().bind(env)
-    journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0))
+    journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0)).routes[0]
     assert (journey.origin, journey.arrives, journey.cost) == ("C", 8 * 3600 + 360, 360)
     result = planner.search({"A": 0, "C": 300}, departing=time(8, 0))
     assert planner.journey(result, "B").cost == 360, "cost elapsed from the query's departure"
@@ -107,4 +111,4 @@ def test_it_needs_a_timetable_and_a_departure(planner):
     plain = rl.Environment(rl.ScalarEdges(("a", "b", 1)))
     assert rl.RAPTOR().missing_from(plain.compile()) == frozenset({"timetable"})
     with pytest.raises(ValueError, match="needs a departure time"):
-        planner.route("A", "C")
+        planner.route("A", "C").routes[0]

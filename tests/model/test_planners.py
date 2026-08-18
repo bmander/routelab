@@ -16,14 +16,14 @@ def env() -> rl.Environment:
 
 
 def test_hello_world(env):
-    journey = rl.Dijkstra().bind(env).route("a", "c")
+    journey = rl.Dijkstra().bind(env).route("a", "c").routes[0]
     assert journey.cost == 16
     assert journey.nodes == ["a", "b", "c"]
     assert repr(journey) == "Journey('a' → 'b' → 'c', cost=16)"
 
 
 def test_legs_carry_weights_and_provenance(env):
-    journey = rl.Dijkstra().bind(env).route("a", "c")
+    journey = rl.Dijkstra().bind(env).route("a", "c").routes[0]
     assert [(leg.tail, leg.head, leg.weight) for leg in journey.legs] == [
         ("a", "b", 1),
         ("b", "c", 15),
@@ -33,34 +33,34 @@ def test_legs_carry_weights_and_provenance(env):
 
 
 def test_routing_to_yourself_costs_nothing(env):
-    journey = rl.Dijkstra().bind(env).route("a", "a")
+    journey = rl.Dijkstra().bind(env).route("a", "a").routes[0]
     assert journey.cost == 0
     assert journey.legs == ()
     assert journey.nodes == ["a"]
 
 
 def test_unreachable_destination_returns_none(env):
-    assert rl.Dijkstra().bind(env).route("c", "d") is None
+    assert rl.Dijkstra().bind(env).route("c", "d").routes == []
 
 
 def test_options_reach_the_search(env):
     planner = rl.Dijkstra().bind(env)
-    assert planner.route("a", "c", max_cost=16).cost == 16
-    assert planner.route("a", "c", max_cost=15) is None
+    assert planner.route("a", "c", max_cost=16).routes[0].cost == 16
+    assert planner.route("a", "c", max_cost=15).routes == []
 
 
 def test_several_origins_with_access_costs(env):
     # The shape a multimodal query starts in: each entry point already costs a walk.
     planner = rl.Dijkstra().bind(env)
-    assert planner.route({"a": 0, "b": 10}, "c").cost == 16
-    assert planner.route({"a": 0, "b": 0}, "c").cost == 15
+    assert planner.route({"a": 0, "b": 10}, "c").routes[0].cost == 16
+    assert planner.route({"a": 0, "b": 0}, "c").routes[0].cost == 15
     # The journey reports the origin that actually won, not the first one named.
-    assert planner.route({"a": 100, "b": 0}, "c").origin == "b"
+    assert planner.route({"a": 100, "b": 0}, "c").routes[0].origin == "b"
 
 
 def test_bare_labels_are_a_single_origin(env):
     planner = rl.Dijkstra().bind(env)
-    assert planner.route("a", "c").cost == planner.route(["a"], "c").cost
+    assert planner.route("a", "c").routes[0].cost == planner.route(["a"], "c").routes[0].cost
 
 
 def test_a_tuple_is_one_label_and_a_list_is_several():
@@ -68,18 +68,18 @@ def test_a_tuple_is_one_label_and_a_list_is_several():
     # are. A list means several; a tuple is a single label.
     env = rl.Environment(rl.ScalarEdges((("stop", 1), ("stop", 2), 60)))
     planner = rl.Dijkstra().bind(env)
-    assert planner.route(("stop", 1), ("stop", 2)).cost == 60
-    assert planner.route([("stop", 1)], ("stop", 2)).cost == 60
+    assert planner.route(("stop", 1), ("stop", 2)).routes[0].cost == 60
+    assert planner.route([("stop", 1)], ("stop", 2)).routes[0].cost == 60
 
 
 def test_bfs_counts_hops_not_costs(env):
-    assert rl.BFS().bind(env).route("a", "c").cost == 1  # the direct 30-cost edge
-    assert rl.Dijkstra().bind(env).route("a", "c").cost == 16
+    assert rl.BFS().bind(env).route("a", "c").routes[0].cost == 1  # the direct 30-cost edge
+    assert rl.Dijkstra().bind(env).route("a", "c").routes[0].cost == 16
 
 
 def test_bfs_rejects_priced_origins(env):
     with pytest.raises(ValueError, match="cannot carry an initial cost"):
-        rl.BFS().bind(env).route({"a": 60}, "c")
+        rl.BFS().bind(env).route({"a": 60}, "c").routes[0]
 
 
 def test_a_planner_refuses_cost_models_it_cannot_route_over():
@@ -95,8 +95,8 @@ def test_a_planner_refuses_cost_models_it_cannot_route_over():
 
 
 def test_route_helper_binds_a_technique_and_asks_it_once(env):
-    assert rl.route(rl.Dijkstra(), env, "a", "c").cost == 16
-    assert rl.route(rl.BFS(), env, "a", "c").cost == 1
+    assert rl.route(rl.Dijkstra(), env, "a", "c").routes[0].cost == 16
+    assert rl.route(rl.BFS(), env, "a", "c").routes[0].cost == 1
 
 
 def test_a_technique_is_a_value_you_can_keep(env):
@@ -106,8 +106,8 @@ def test_a_technique_is_a_value_you_can_keep(env):
     assert repr(technique) == "AStar(Landmarks(2, selection='farthest'))"
 
     other = rl.Environment(rl.ScalarEdges(("a", "b", 5), ("b", "c", 5)))
-    assert technique.bind(env).route("a", "c").cost == 16
-    assert technique.bind(other).route("a", "c").cost == 10
+    assert technique.bind(env).route("a", "c").routes[0].cost == 16
+    assert technique.bind(other).route("a", "c").routes[0].cost == 10
     assert technique.environment is None, "binding leaves the technique alone"
 
 
@@ -121,7 +121,7 @@ def test_binding_gives_each_environment_its_own_planner(env):
 def test_an_unbound_technique_says_what_to_do_about_it(env):
     technique = rl.Dijkstra()
     for call in (
-        lambda: technique.route("a", "c"),
+        lambda: technique.route("a", "c").routes[0],
         lambda: technique.search("a"),
         lambda: technique.node_id("a"),
     ):
@@ -184,17 +184,17 @@ def test_a_study_is_a_list_of_techniques(env):
     }
     assert set(feasible) == {"dijkstra", "alt-2"}, "no coordinates here"
 
-    costs = {name: t.bind(env).route("a", "c").cost for name, t in feasible.items()}
+    costs = {name: t.bind(env).route("a", "c").routes[0].cost for name, t in feasible.items()}
     assert set(costs.values()) == {16}, "same answer, whatever the technique"
 
 
 def test_a_planner_holds_the_world_it_was_built_with(env):
     planner = rl.Dijkstra().bind(env)
     env.register(rl.ScalarEdges(("c", "e", 1)))
-    assert planner.route("a", "c").cost == 16
+    assert planner.route("a", "c").routes[0].cost == 16
     with pytest.raises(KeyError):
-        planner.route("a", "e")
-    assert rl.Dijkstra().bind(env).route("a", "e").cost == 17
+        planner.route("a", "e").routes[0]
+    assert rl.Dijkstra().bind(env).route("a", "e").routes[0].cost == 17
 
 
 def test_search_is_the_escape_hatch_to_the_kernel(env):
@@ -209,7 +209,7 @@ def test_planners_agree_with_the_kernel_they_wrap(env):
     planner = rl.Dijkstra().bind(env)
     graph = env.compile().graph
     direct = rl.dijkstra(graph, planner.node_id("a"))
-    assert direct.cost(planner.node_id("c")) == planner.route("a", "c").cost
+    assert direct.cost(planner.node_id("c")) == planner.route("a", "c").routes[0].cost
 
 
 # --- one protocol, every technique ---------------------------------------------
@@ -253,20 +253,20 @@ def test_every_technique_declares_what_it_takes(technique):
 def test_an_option_a_technique_does_not_take_is_refused_by_name(env):
     planner = rl.Dijkstra().bind(env)
     with pytest.raises(ValueError, match="Dijkstra takes no max_depth; a hop bound belongs to BFS"):
-        planner.route("a", "c", max_depth=1)
+        planner.route("a", "c", max_depth=1).routes[0]
     with pytest.raises(ValueError, match="takes no max_transfers; a cap on changes belongs to RAPTOR"):
-        planner.route("a", "c", max_transfers=1)
+        planner.route("a", "c", max_transfers=1).routes[0]
     with pytest.raises(ValueError, match="takes no nonsense; no technique here takes nonsense"):
-        planner.route("a", "c", nonsense=True)
+        planner.route("a", "c", nonsense=True).routes[0]
     with pytest.raises(ValueError, match=r"BFS takes no max_cost; a cost bound belongs to .*Dijkstra"):
-        rl.BFS().bind(env).route("a", "c", max_cost=5)
+        rl.BFS().bind(env).route("a", "c", max_cost=5).routes[0]
 
 
 def test_a_departure_time_on_an_unscheduled_network_says_so(env):
     # Nothing here reads a clock, and the refusal says that rather than
     # naming a technique that could not help either.
     with pytest.raises(ValueError, match="Nothing in this environment is scheduled"):
-        rl.Dijkstra().bind(env).route("a", "c", departing=0)
+        rl.Dijkstra().bind(env).route("a", "c", departing=0).routes[0]
     assert rl.clock_readers(env.compile()) is None
 
 
@@ -300,5 +300,5 @@ def test_route_is_the_journey_a_search_holds(env, technique):
     # journey is asking for the search and reading it back.
     planner = technique.bind(env)
     result = planner.search("a", targets=[planner.node_id("c")])
-    assert planner.journey(result, "c") == planner.route("a", "c")
+    assert planner.journey(result, "c") == planner.route("a", "c").routes[0]
     assert planner.journey(result, "d") is None

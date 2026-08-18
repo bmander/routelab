@@ -114,7 +114,7 @@ def main() -> int:
         settled, times = [], []
         for origin, destination in pairs:
             began = time.perf_counter()
-            journey = planner.route(origin, destination, departing=departing)
+            journey = planner.route(origin, destination, departing=departing).routes[0]
             times.append((time.perf_counter() - began) * 1000)
             arrives = None if journey is None else journey.arrives
             if journey is not None:

@@ -65,9 +65,9 @@ Which route a search takes says plainly whether it read the schedule.
 >>> env = rl.Environment(rl.OSM(CONDITIONAL_OSM, rl.Walking()))
 >>> planner = rl.TimeDependentDijkstra().bind(env)
 
->>> planner.route(1, 3, departing=time(12, 0))
+>>> planner.route(1, 3, departing=time(12, 0)).routes[0]
 Journey(1 → 2 → 3, cost=160)
->>> planner.route(1, 3, departing=time(3, 0))
+>>> planner.route(1, 3, departing=time(3, 0)).routes[0]
 Journey(1 → 3, cost=654)
 
 ```
@@ -88,7 +88,7 @@ At three in the morning, waiting four hours for the gate loses to an eleven
 minute detour. Just before it opens, it does not:
 
 ```python
->>> planner.route(1, 3, departing=time(6, 55))
+>>> planner.route(1, 3, departing=time(6, 55)).routes[0]
 Journey(1 → 2 → 3, cost=380)
 
 ```
@@ -98,7 +98,7 @@ gate and still beats the way round. Cost counts the wait as travel time, and
 the journey keeps the split:
 
 ```python
->>> journey = planner.route(1, 3, departing=time(6, 55))
+>>> journey = planner.route(1, 3, departing=time(6, 55)).routes[0]
 >>> journey.waiting, journey.moving
 (220, 160)
 
@@ -110,7 +110,7 @@ the control that shows it doing real work: a shut edge is simply absent.
 
 ```python
 >>> control = rl.TimeDependentDijkstra(waiting="forbidden").bind(env)
->>> control.route(1, 3, departing=time(6, 55))
+>>> control.route(1, 3, departing=time(6, 55)).routes[0]
 Journey(1 → 3, cost=654)
 
 ```
@@ -121,7 +121,7 @@ A departure time is required, with no default — a time-dependent query without
 a time is not a query with a sensible fallback, it is a different question:
 
 ```python
->>> planner.route(1, 3)                        # doctest: +ELLIPSIS
+>>> planner.route(1, 3).routes[0]                        # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
 ValueError: TimeDependentDijkstra needs a departure time: pass departing=time(8, 30), ...

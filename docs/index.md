@@ -60,7 +60,7 @@ Environment(1 layer)
 
 >>> technique = rl.Dijkstra()                           # a configuration, costing nothing
 >>> planner = technique.bind(env)                       # preprocessing, if any
->>> planner.route("a", "c")                             # the question
+>>> planner.route("a", "c").routes[0]                             # the question
 Journey('a' → 'b' → 'c', cost=16)
 
 ```
@@ -76,10 +76,10 @@ Sixteen landmarks over a city cost a second and 33 MB; that belongs to a verb,
 not a constructor. The split also makes a technique a *value* — something you
 can name, put in a dictionary, and point at more than one dataset.
 
-**A query can keep its working space.** `route` hands back the journey and
-drops the search it read it off; `ask` returns an `Answer` holding both, so the
-space behind a route and the front it belongs to cost one search rather than
-two.
+**A query answers with everything it worked out.** `route` returns an `Answer`:
+`routes` (every journey worth having, best first — usually one), `searchspace()`
+(what the search looked at) and `raw` (the kernel's own table). All three come
+from the one search, so a route and the picture behind it never cost two.
 
 **A technique takes the options its problem needs**, declared as data, and
 refuses the rest by name, saying which technique they belong to. `Dijkstra`

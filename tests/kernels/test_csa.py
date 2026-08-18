@@ -23,7 +23,7 @@ def planner(env) -> rl.CSA:
 
 
 def test_hello_world(planner):
-    journey = planner.route("A", "C", departing=time(8, 0))
+    journey = planner.route("A", "C", departing=time(8, 0)).routes[0]
     assert journey.arrives == 8 * 3600 + 20 * 60
     assert journey.transfers == 1
     assert [leg.head for leg in journey.legs] == ["B", "C"]
@@ -39,7 +39,7 @@ def test_a_search_is_one_to_all(planner):
     assert planner.searches == ("stops", 3)
     # A kept search answers for any destination without searching again — and
     # answers exactly as route() would.
-    assert planner.journey(result, "C") == planner.route("A", "C", departing=time(8, 0))
+    assert planner.journey(result, "C") == planner.route("A", "C", departing=time(8, 0)).routes[0]
     assert planner.journey(result, "B").arrives == 8 * 3600 + 10 * 60
     # Toward a target the scan stops early: nothing after 08:10 is read.
     toward = planner.search("A", targets=[planner.node_id("B")], departing=time(8, 0))
@@ -71,7 +71,7 @@ def test_the_scan_is_a_search_space(planner):
 def test_several_origins_each_carry_a_head_start(feed):
     env = rl.Environment(feed, rl.ScalarEdges(("C", "B", 60)))
     planner = rl.CSA().bind(env)
-    journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0))
+    journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0)).routes[0]
     assert (journey.origin, journey.arrives, journey.cost) == ("C", 8 * 3600 + 360, 360)
     result = planner.search({"A": 0, "C": 300}, departing=time(8, 0))
     assert planner.journey(result, "B").cost == 360, "cost elapsed from the query's departure"
@@ -95,7 +95,7 @@ def test_a_profile_is_one_journey_per_departure_worth_taking(planner):
     assert planner.profile("A", "C", departing=time(9, 0), until=time(12, 0)) == []
     # And every step agrees with asking route() at that moment.
     for journey in planner.profile("A", "B", departing=time(0, 0), until=25 * 3600):
-        assert planner.route("A", "B", departing=journey.departs).arrives == journey.arrives
+        assert planner.route("A", "B", departing=journey.departs).routes[0].arrives == journey.arrives
 
 
 def test_a_profile_from_several_origins_is_merged_on_the_query_clock(feed):
@@ -116,7 +116,7 @@ def test_a_walk_beats_the_steps_it_dominates(feed):
     env = rl.Environment(feed, rl.ScalarEdges(("A", "B", 60)))
     planner = rl.CSA().bind(env)
     assert planner.profile("A", "B", departing=time(0, 0), until=25 * 3600) == []
-    assert planner.route("A", "B", departing=time(12, 0)).arrives == 12 * 3600 + 60
+    assert planner.route("A", "B", departing=time(12, 0)).routes[0].arrives == 12 * 3600 + 60
 
 
 def test_the_profile_refuses_a_missing_or_backwards_window(planner):
@@ -125,7 +125,7 @@ def test_the_profile_refuses_a_missing_or_backwards_window(planner):
     with pytest.raises(ValueError, match="cannot close before it opens"):
         planner.profile("A", "C", departing=time(9, 0), until=time(8, 0))
     with pytest.raises(ValueError, match="takes no until"):
-        planner.route("A", "C", departing=time(8, 0), until=time(9, 0))
+        planner.route("A", "C", departing=time(8, 0), until=time(9, 0)).routes[0]
 
 
 def test_footprint_counts_the_array_on_top_of_the_timetable(env, planner):
@@ -138,6 +138,6 @@ def test_it_needs_a_timetable_and_a_departure(planner):
     plain = rl.Environment(rl.ScalarEdges(("a", "b", 1)))
     assert rl.CSA().missing_from(plain.compile()) == frozenset({"timetable"})
     with pytest.raises(ValueError, match="needs a departure time"):
-        planner.route("A", "C")
+        planner.route("A", "C").routes[0]
     with pytest.raises(ValueError, match="takes no max_transfers; a cap on changes belongs to RAPTOR"):
-        planner.route("A", "C", departing=time(8, 0), max_transfers=1)
+        planner.route("A", "C", departing=time(8, 0), max_transfers=1).routes[0]

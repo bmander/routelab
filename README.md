@@ -85,7 +85,7 @@ env.register(rl.ScalarEdges(("a", "b", 1), ("b", "c", 15)))
 
 technique = rl.Dijkstra()           # a configuration, costing nothing
 planner = technique.bind(env)       # preprocessing, if the technique has any
-planner.route("a", "c")             # Journey('a' → 'b' → 'c', cost=16)
+planner.route("a", "c").routes[0]             # Journey('a' → 'b' → 'c', cost=16)
 ```
 
 An environment is assembled from layers, and nodes take whatever names you
@@ -98,7 +98,7 @@ streets = rl.ScalarEdges(("home", "stop_a", 300), bidirectional=True)
 transit = rl.ScalarEdges(("stop_a", "stop_b", 120))
 env = rl.Environment(streets, transit)
 
-journey = rl.Dijkstra().bind(env).route("home", "stop_b")
+journey = rl.Dijkstra().bind(env).route("home", "stop_b").routes[0]
 [(leg.head, leg.source) for leg in journey.legs]
 # [('stop_a', ScalarEdges(2 edges)), ('stop_b', ScalarEdges(1 edges))]
 ```
@@ -107,11 +107,11 @@ Queries take the arguments the problem needs — several origins, each already
 carrying the cost of an access walk, and a bound on how far to look:
 
 ```python
-rl.Dijkstra().bind(env).route({"stop_a": 0, "stop_b": 45}, "home", max_cost=600)
+rl.Dijkstra().bind(env).route({"stop_a": 0, "stop_b": 45}, "home", max_cost=600).routes[0]
 ```
 
 The same shape holds for every technique, a timetable included:
-`RAPTOR().bind(env).route({"stop_a": 0, "stop_b": 45}, "stop_z", departing=time(8, 30))`
+`RAPTOR().bind(env).route({"stop_a": 0, "stop_b": 45}, "stop_z", departing=time(8, 30)).routes[0]`
 stands at stop_b forty-five seconds after departing. Options are per technique
 and declared as data — `Dijkstra.options` is `{"max_cost"}` — and a technique
 refuses an option it does not take by name, saying which technique it belongs
@@ -136,7 +136,7 @@ for name, technique in study.items():
 
 The library has no registry of names: a dictionary of techniques is a line you
 write, and no fixed set could serve both a demo's dropdown and a parameter
-sweep. `rl.route(rl.Dijkstra(), env, "a", "c")` does the whole thing in one call
+sweep. `rl.route(rl.Dijkstra(), env, "a", "c").routes[0]` does the whole thing in one call
 when you have exactly one question to ask.
 
 ### Guided search
@@ -151,7 +151,7 @@ env = rl.Environment(
     rl.Positions({"home": (0, 0), "stop_a": (300, 40)}),
 )
 
-rl.AStar(rl.Euclidean()).bind(env).route("home", "stop_b")
+rl.AStar(rl.Euclidean()).bind(env).route("home", "stop_b").routes[0]
 ```
 
 `cost_per_distance` is the least a layer can charge to cover one unit of ground.
@@ -199,7 +199,7 @@ An OpenStreetMap extract is a layer like any other:
 ```python
 env = rl.Environment().register(rl.OSM("liechtenstein.osm.pbf", rl.Driving()))
 planner = rl.AStar(rl.Euclidean()).bind(env)
-planner.route(env.sources[0].nearest(47.226, 9.523), ...)
+planner.route(env.sources[0].nearest(47.226, 9.523), ...).routes[0]
 ```
 
 Nodes keep their OSM ids, so a route traces back to the map it came from, and
@@ -364,23 +364,28 @@ reports two `MeetingTrees`, RAPTOR reports `Rounds` (every stop, by the round
 that first reached it), and the two Pyrga models, which keep no search space,
 refuse `explored()` in so many words — but whatever it explored, you can draw
 it. The identity underneath is the same for every technique that keeps a table:
-`planner.route(a, b) == planner.journey(planner.search(a, targets=[...]), b)`.
+`planner.route(a, b).routes[0] == planner.journey(planner.search(a, targets=[...]), b)`.
 
-`route` returns the journey and drops the search behind it, so a caller who
-wants both used to search twice. `ask` keeps it:
+A query answers with all of it, so a caller who wants a route *and* the picture
+behind it searches once:
 
 ```python
-answer = planner.ask(origin, destination)
-answer.journey                           # what route() returns
-answer.explored()                        # the space behind it, same search
-answer.frontier()                        # the Pareto set, where a technique keeps one
-answer.result                            # everything the kernel computed, dense ids
+answer = planner.route(origin, destination)
+answer.routes            # every journey worth having, best first — usually one
+answer.searchspace()     # what the search looked at, drawn
+answer.raw               # everything the kernel computed, on dense ids
 ```
 
-Every technique answers `ask`, the ones that keep no table included: theirs
-holds the journey, `result` is `None`, and the questions needing a table refuse
-by name — which is the difference between the techniques, not something to
-paper over.
+`routes` is a list because a Pareto set is what a query answers with, and a
+technique that tells journeys apart only by when they arrive has exactly one
+such journey — a front of one rather than a lesser kind of answer. `RAPTOR`
+hands back one entry per number of changes; `Dijkstra` hands back one; the
+difference shows up in the length of the list rather than in a method one of
+them refuses. Nothing reachable is an empty list.
+
+Every technique answers `route` this way, the ones that keep no table included:
+theirs hold their routes, `raw` is `None`, and `searchspace()` says so and
+names the ones that do keep a space.
 
 The interactive demo draws exactly this, the quickest way to see what a
 heuristic buys: the same 11.2-minute Seattle route settles 41,161 branches under
@@ -399,7 +404,7 @@ from the target, and meets above the trip:
 
 ```python
 planner = rl.ContractionHierarchy().bind(env)    # ~6 s on Seattle, 19 MB
-planner.route(origin, destination)               # a fifth of a millisecond
+planner.route(origin, destination).routes[0]               # a fifth of a millisecond
 ```
 
 Seattle, driving, 25 random trips (`benchmarks/bench_contraction.py`):
@@ -472,8 +477,8 @@ non-decreasing in departure.
 ```python
 env = rl.Environment(rl.OSM("seattle.osm.pbf", rl.Walking()))
 planner = rl.TimeDependentDijkstra().bind(env)
-planner.route(ballard, magnolia, departing=time(8, 0))    # 30.0 min
-planner.route(ballard, magnolia, departing=time(22, 0))   # 61.6 min
+planner.route(ballard, magnolia, departing=time(8, 0)).routes[0]    # 30.0 min
+planner.route(ballard, magnolia, departing=time(22, 0)).routes[0]   # 61.6 min
 ```
 
 Binding builds the calendar: `rl.Schedule` walks the layers' opening hours into
@@ -515,7 +520,7 @@ into something a shortest-path algorithm can read.
 
 ```python
 env = rl.Environment(rl.GTFS("kcm.zip", date(2026, 8, 17)))
-journey = rl.TimeDependent().bind(env).route(origin, target, departing=time(8, 30))
+journey = rl.TimeDependent().bind(env).route(origin, target, departing=time(8, 30)).routes[0]
 journey.arrives, journey.transfers, journey.waiting   # 33600, 4, 1200
 ```
 
@@ -580,7 +585,7 @@ take at any time, for a fixed duration. Here they are a layer, and an ordinary
 ```python
 feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
 env = rl.Environment(feed, rl.Footpaths(feed, within=200))     # 13,908 walks
-journey = rl.TimeDependent().bind(env).route(origin, target, departing=time(8, 30))
+journey = rl.TimeDependent().bind(env).route(origin, target, departing=time(8, 30)).routes[0]
 journey.arrives, journey.transfers                          # 09:04, 1
 [leg for leg in journey.legs if leg.trip is None]           # the walk across 3rd Ave
 ```
@@ -640,9 +645,9 @@ feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
 env = rl.Environment(feed, rl.Footpaths(feed, within=200))
 
 planner = rl.RAPTOR().bind(env)                          # routes and trips indexed at bind: 0.3 s, 16 MB
-planner.route(downtown, juanita, departing=time(8, 30))  # Journey(... cost=4130): 09:38, 3 changes
-planner.route(downtown, juanita, departing=time(8, 30), max_transfers=1)   # 16:20 — or None
-planner.frontier(downtown, juanita, departing=time(8, 30))
+planner.route(downtown, juanita, departing=time(8, 30)).routes[0]  # Journey(... cost=4130): 09:38, 3 changes
+planner.route(downtown, juanita, departing=time(8, 30), max_transfers=1).routes[0]   # 16:20 — or None
+planner.route(downtown, juanita, departing=time(8, 30)).routes
 # [Journey(1 change, arrives 16:20), Journey(2 changes, 09:41), Journey(3 changes, 09:38)]
 
 result = planner.search(downtown, departing=time(8, 30))  # every stop, by the round that first reached it
@@ -658,15 +663,15 @@ RAPTOR is **one-to-all**: after the rounds every stop holds its label, so it
 has a real `search()` and something to draw — `Rounds`, each stop coloured by
 the round that first reached it, the picture in the paper and the one the demo
 draws. And it is **Pareto** by construction: arrival against changes, one
-incomparable journey per round that improved something, which `frontier` hands
+incomparable journey per round that improved something, which `routes` hands
 back and `max_transfers` cuts.
 
 The refusals are the library's, as everywhere:
 
 ```python
-planner.route(origin, target)
+planner.route(origin, target).routes[0]
 # ValueError: RAPTOR needs a departure time: pass departing=time(8, 30), ...
-rl.TimeDependent().bind(env).route(origin, target, departing=time(8, 30), max_transfers=1)
+rl.TimeDependent().bind(env).route(origin, target, departing=time(8, 30), max_transfers=1).routes[0]
 # ValueError: TimeDependent takes no max_transfers; a cap on changes belongs to RAPTOR(), which searches by round.
 rl.TimeDependent().bind(env).explored(result)
 # NotImplementedError: TimeDependent answers with a journey and keeps no search space, so there is nothing to draw. The techniques that keep a table report one: ask CSA() or RAPTOR().
@@ -699,7 +704,7 @@ feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
 env = rl.Environment(feed, rl.Footpaths(feed, within=200))
 
 planner = rl.CSA().bind(env)                             # 421,604 connections sorted at bind: 0.4 s, 23 MB
-planner.route(downtown, juanita, departing=time(8, 30))  # Journey(... cost=4143): 09:39, 3 changes, 0.4 ms
+planner.route(downtown, juanita, departing=time(8, 30)).routes[0]  # Journey(... cost=4143): 09:39, 3 changes, 0.4 ms
 result = planner.search(downtown, departing=time(8, 30)) # ScanSearch(6313 stops, 345498 connections scanned)
 planner.explored(result)                                 # Scan(6,313 stops within 1124 min)
 ```
@@ -770,8 +775,8 @@ feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
 env = rl.Environment(feed, rl.Footpaths(feed, within=200))
 
 planner = rl.TripBased().bind(env)                       # 35,213,140 transfers computed, 1,216,322 kept: 11 s, 28 MB
-planner.route(downtown, juanita, departing=time(8, 30))  # Journey(... cost=4116): 09:38, 2 changes, 0.9 ms
-planner.frontier(downtown, juanita, departing=time(8, 30))
+planner.route(downtown, juanita, departing=time(8, 30)).routes[0]  # Journey(... cost=4116): 09:38, 2 changes, 0.9 ms
+planner.route(downtown, juanita, departing=time(8, 30)).routes
 # [Journey(1 change, arrives 16:30), Journey(2 changes, 09:38)]     — RAPTOR's front, exactly
 
 result = planner.search(downtown, targets=[planner.node_id(juanita)], departing=time(8, 30))
@@ -846,7 +851,7 @@ env = rl.Environment(feed, rl.Footpaths(feed, within=200))
 
 planner = rl.PTL().bind(env)                             # 428,927 events labelled: 55 s, 1.2 GB
 planner.num_hubs, planner.hubs_per_label                 # 73,961,455 entries, 86 hubs per label
-planner.route(downtown, juanita, departing=time(8, 30))  # 09:39, as the other five say; 0.4 ms
+planner.route(downtown, juanita, departing=time(8, 30)).routes[0]  # 09:39, as the other five say; 0.4 ms
 planner.profile(downtown, juanita, departing=time(8, 30), until=time(10, 30))   # CSA's list, from the labels: 4 ms
 ```
 
@@ -948,7 +953,7 @@ feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
 env = rl.Environment(feed, rl.Footpaths(feed, within=400))
 
 planner = rl.ULTRA(rl.RAPTOR()).bind(env)     # 18,380 shortcuts where the closure wanted 5.5 million
-planner.route(downtown, juanita, departing=time(8, 30))
+planner.route(downtown, juanita, departing=time(8, 30)).routes[0]
 ```
 
 The same layer, read differently. `Footpaths(feed, within=400)` is a *transfer
@@ -1084,7 +1089,7 @@ streets = rl.OSM("data/Seattle.osm.pbf", rl.Walking())
 env     = rl.Environment(streets, feed, rl.Access(feed, streets, within=400))
 
 planner = rl.ULTRA(rl.RAPTOR()).bind(env)
-planner.route(doorstep, office, departing=time(8, 30))   # walk, ride, walk
+planner.route(doorstep, office, departing=time(8, 30)).routes[0]   # walk, ride, walk
 ```
 
 It is an ordinary scalar layer, which is the whole design: nothing about the
@@ -1154,7 +1159,7 @@ time for regular languages, which is more than enough for "walk, ride, walk".
 ```python
 env = Environment(streets, feed, Access(feed, streets))
 
-LabelConstrained().bind(env).route(doorstep, office, departing=time(8, 30))
+LabelConstrained().bind(env).route(doorstep, office, departing=time(8, 30)).routes[0]
 ```
 
 The multimodal shape is Dibbelt, Pajor & Wagner's §2.2, and it needed nothing
@@ -1203,7 +1208,7 @@ searches a core of about two per cent of it, and does so without baking the
 language into the preprocessing.
 
 ```python
-UCCH().bind(env).route(doorstep, office, departing=time(8, 30))
+UCCH().bind(env).route(doorstep, office, departing=time(8, 30)).routes[0]
 ```
 
 An ordinary hierarchy cannot do this. Contract the merged network and a shortcut

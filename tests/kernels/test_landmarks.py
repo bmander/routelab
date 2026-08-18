@@ -34,7 +34,7 @@ def test_landmarks_need_no_geometry(ring):
         rl.AStar(rl.Euclidean()).bind(ring)
 
     planner = rl.AStar(rl.Landmarks(2)).bind(ring)
-    assert planner.route("a", "c").cost == 20
+    assert planner.route("a", "c").routes[0].cost == 20
 
 
 def test_a_measured_bound_knows_which_way_round(ring):
@@ -90,7 +90,7 @@ def test_a_measured_bound_beats_a_geometric_one_on_mixed_speeds():
         planner = rl.AStar(heuristic).bind(env)
         result = planner.search(origin, targets=[planner.node_id(destination)])
         settled[name] = len(result.order)
-        costs[name] = planner.route(origin, destination).cost
+        costs[name] = planner.route(origin, destination).routes[0].cost
 
     assert costs["landmarks"] == costs["euclidean"], "same answer either way"
     assert settled["landmarks"] <= settled["euclidean"]
@@ -134,7 +134,7 @@ def test_an_unknown_selection_says_what_it_expected():
 
 def test_asking_for_more_landmarks_than_nodes_is_fine(ring):
     planner = rl.AStar(rl.Landmarks(99)).bind(ring)
-    assert planner.route("a", "c").cost == 20
+    assert planner.route("a", "c").routes[0].cost == 20
 
 
 def test_the_search_space_is_still_a_tree(ring):

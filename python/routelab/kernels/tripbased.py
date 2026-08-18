@@ -103,7 +103,7 @@ class TripBased(Front, TimetablePlanner):
     # the result, is the whole implementation; the family's `journey` reads
     # an itinerary off it. The itinerary hook the two Pyrga models need is
     # not used here.
-    _ask = Planner._ask
+    _route = Planner._route
 
     def _search(self, starts: "Dict[int, int]", **options: Any) -> "_routelab.TripBasedSearch":
         """Sweep the trip segments toward the one target."""

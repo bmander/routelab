@@ -274,15 +274,12 @@ class Planner:
 
     # --- the three questions ------------------------------------------------
 
-    def route(
-        self, origin: Origins, destination: Hashable, **options: Any
-    ) -> Optional[Journey]:
-        """The cheapest journey from ``origin`` to ``destination``.
+    def route(self, origin: Origins, destination: Hashable, **options: Any) -> Answer:
+        """Ask this planner for a journey from ``origin`` to ``destination``.
 
-        The journey alone. :meth:`ask` is the same query keeping the search it
-        was read off, for a caller who also wants the space behind it or the
-        front it belongs to; this is the shorthand for when the journey is all
-        you wanted.
+        One implementation for every technique: options are checked once,
+        origins are resolved once, and the technique supplies only the part
+        that is its own — see :meth:`_route`.
 
         Args:
             origin: A label, several labels, or ``{label: initial_cost}`` — the
@@ -298,45 +295,41 @@ class Planner:
                 a round-based one.
 
         Returns:
-            A :class:`~routelab.Journey`, or ``None`` if the destination cannot
-            be reached under the given bounds.
-        """
-        return self.ask(origin, destination, **options).journey
-
-    def ask(self, origin: Origins, destination: Hashable, **options: Any) -> Answer:
-        """The same query as :meth:`route`, keeping what the search computed.
-
-        A search works out more than the one journey it is usually asked for,
-        and `route` drops the rest — so drawing the space behind a route, or
-        reading the front it belongs to, used to mean searching twice. This
-        hands back an :class:`~routelab.Answer`: the journey, and the working
-        space to answer everything else from.
-
-        Every technique answers this, including the ones that keep no table;
-        theirs holds the journey and refuses the questions that need a table,
-        in their own words.
+            An :class:`~routelab.Answer`: the routes, best first — empty if
+            nothing was reachable — the search space behind them, and the
+            kernel's own table. The cheapest journey is ``routes[0]``.
         """
         options = self._options(options)
         starts = self._origin_ids(origin)
-        return self._ask(starts, self.node_id(destination), destination, options)
+        return self._route(starts, self.node_id(destination), destination, options)
 
-    def _ask(
+    def _route(
         self,
         starts: "Dict[int, int]",
         target: int,
         destination: Hashable,
         options: "Dict[str, Any]",
     ) -> Answer:
-        """The technique's own half of :meth:`ask`, ids in.
+        """The technique's own half of :meth:`route`, ids in.
 
         The default is the search-based one: run :meth:`_search` toward the
         target and read the journey off the result, keeping the result. A
         technique whose answer is an itinerary rather than a cost table
-        overrides this instead.
+        overrides this instead, and one that tells journeys apart by more than
+        arrival time overrides :meth:`_routes` to say so.
         """
         result = self._search(starts, targets=[target], **options)
-        journey = None if result.cost(target) is None else self.journey(result, destination)
-        return Answer(self, destination, journey, result)
+        return Answer(self, destination, self._routes(result, destination), result)
+
+    def _routes(self, result: Result, destination: Hashable) -> "List[Journey]":
+        """The Pareto set a result holds for ``destination``, best first.
+
+        One entry, for a technique whose search tells journeys apart only by
+        when they arrive — which is most of them, and is a front of one rather
+        than a lesser kind of answer. :class:`Front` overrides this.
+        """
+        journey = self.journey(result, destination)
+        return [] if journey is None else [journey]
 
     def search(self, origins: Origins, **options: Any) -> Result:
         """Run the search and return the raw, id-keyed result.
@@ -401,9 +394,11 @@ class Planner:
         on this signature: it means something only to a tree.
 
         Args:
-            result: A result from :meth:`search`, or from :meth:`route` if you
-                kept one. The tree is rebuilt from it rather than recorded during
-                the search, so asking costs nothing until you ask.
+            result: A result from :meth:`search`, or an answer's
+                :attr:`~routelab.Answer.raw`. The tree is rebuilt from it rather
+                than recorded during the search, so asking costs nothing until
+                you ask — which is why an answer's
+                :meth:`~routelab.Answer.searchspace` is a method.
             magnitude: What each branch should carry from the subtree beyond it:
                 ``"weight"`` for travel time, ``"nodes"`` for a count.
         """
@@ -677,18 +672,18 @@ class TimetablePlanner(Planner):
             return None
         return Journey.from_itinerary(self._bound(), itinerary, destination, result.departing)
 
-    def _ask(
+    def _route(
         self,
         starts: "Dict[int, int]",
         target: int,
         destination: Hashable,
         options: "Dict[str, Any]",
     ) -> Answer:
-        """The earliest arrival at ``destination``, as a journey and nothing else.
+        """The earliest arrival at ``destination``, as a route and nothing else.
 
         A timetable technique of this family answers with an itinerary — which
         vehicles, when — rather than a cost per node, so this is where the
-        shared :meth:`Planner.ask` hands over, and why the answer holds no
+        shared :meth:`Planner.route` hands over, and why the answer holds no
         table. The questions that need one refuse by name, as they always did.
         """
         sources, at = self._sources(starts, options)
@@ -698,7 +693,7 @@ class TimetablePlanner(Planner):
             if itinerary is None
             else Journey.from_itinerary(self._bound(), itinerary, destination, at)
         )
-        return Answer(self, destination, journey, None)
+        return Answer(self, destination, [] if journey is None else [journey], None)
 
     def explored(self, result: Result, **options: Any) -> SearchSpace:
         """Not this: a model that answers with a journey keeps no search space.
@@ -722,13 +717,16 @@ class TimetablePlanner(Planner):
 
 
 class Front:
-    """Answers with a Pareto front, not just its best entry.
+    """Answers with a front of more than one, where most techniques answer one.
 
-    What a technique whose search counts changes as it goes can hand back: one
-    journey per number of changes that arrives strictly earlier than any
-    journey with fewer. :class:`RAPTOR` gets it from its rounds and
-    :class:`TripBased` from its transfer counts, and both read it off a result
-    the same way — so the two verbs are written here rather than twice.
+    Every query here answers with a Pareto set — the journeys no other journey
+    beats on every criterion — and a technique that tells them apart only by
+    when they arrive has exactly one. What this mixin says is that *these* two
+    tell them apart by something else as well: one journey per number of
+    changes that arrives strictly earlier than any journey with fewer.
+    :class:`RAPTOR` gets it from its rounds and :class:`TripBased` from its
+    transfer counts, and both read it off a result the same way — so it is
+    written here rather than twice.
 
     Not on :class:`TimetablePlanner`, because it is not the family's: a
     connection scan counts nothing but time, and :class:`CSA` has no front to
@@ -742,9 +740,9 @@ class Front:
         arrival for each number of changes, fewest changes first, none
         dominated by another.
 
-        The counterpart to :meth:`Planner.journey`, and what :meth:`frontier`
-        is in terms of — so a caller holding a search never pays for a second
-        one.
+        The kernel's own order. An answer's :attr:`~routelab.Answer.routes`
+        is this reversed, so that it leads with the earliest arrival — the
+        journey every technique here would have given — whatever was asked.
         """
         compiled = self._bound()  # type: ignore[attr-defined]
         target = self.node_id(destination)  # type: ignore[attr-defined]
@@ -753,14 +751,17 @@ class Front:
             for itinerary in result.itineraries(target)  # type: ignore[attr-defined]
         ]
 
-    def frontier(
-        self, origin: Origins, destination: Hashable, **options: Any
-    ) -> "List[Journey]":
-        """Every journey worth having, in one call: the Pareto front over
-        arrival time and changes, where :meth:`Planner.route` returns only its
-        last entry.
+    def _routes(self, result: Result, destination: Hashable) -> "List[Journey]":
+        """The front, best first — which is the order an answer promises and
+        the reverse of the order a search produces it in.
+
+        :meth:`journeys` reads the kernel's own order, fewest changes first
+        with arrivals decreasing. An answer leads with the journey every other
+        technique here would have returned, so `routes[0]` means the same thing
+        whatever was asked, and each entry after it trades arrival time for one
+        fewer change.
         """
-        return self.ask(origin, destination, **options).frontier()  # type: ignore[attr-defined]
+        return list(reversed(self.journeys(result, destination)))
 
 
 def route(
@@ -769,7 +770,7 @@ def route(
     origin: Origins,
     destination: Hashable,
     **options: Any,
-) -> Optional[Journey]:
+) -> Answer:
     """One-shot routing: bind a technique, ask it one question, throw it away.
 
         route(AStar(Landmarks(16)), env, "a", "c")

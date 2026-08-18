@@ -26,7 +26,7 @@ def walkable(feed):
 
 def test_hello_world(walkable):
     planner = rl.ULTRA(rl.RAPTOR()).bind(walkable)
-    journey = planner.route("A", "C", departing=time(8, 0))
+    journey = planner.route("A", "C", departing=time(8, 0)).routes[0]
     assert journey.arrives == 8 * 3600 + 120, "two minutes of walking beats waiting"
     assert repr(rl.ULTRA(rl.RAPTOR())) == "ULTRA(RAPTOR())"
     assert repr(rl.ULTRA(rl.CSA())) == "ULTRA(CSA())"
@@ -47,11 +47,11 @@ def test_the_wrapped_technique_has_the_last_word_on_the_knobs(walkable):
     # ULTRA advertises what any of its techniques takes; only the one
     # underneath knows which, so it is asked.
     capped = rl.ULTRA(rl.RAPTOR()).bind(walkable)
-    assert capped.route("A", "C", departing=time(8, 0), max_transfers=0) is not None
+    assert capped.route("A", "C", departing=time(8, 0), max_transfers=0).routes != []
     with pytest.raises(ValueError, match="CSA takes no max_transfers"):
         rl.ULTRA(rl.CSA()).bind(walkable).route(
             "A", "C", departing=time(8, 0), max_transfers=1
-        )
+        ).routes[0]
 
 
 def test_a_transfer_graph_of_islands_is_the_plain_model(env):
@@ -60,14 +60,14 @@ def test_a_transfer_graph_of_islands_is_the_plain_model(env):
     planner = rl.ULTRA(rl.RAPTOR()).bind(env)
     assert rl.ULTRA(rl.RAPTOR()).missing_from(env.compile()) == frozenset()
     assert planner.num_shortcuts == 0
-    assert planner.route("A", "C", departing=time(8, 0)).arrives == 8 * 3600 + 20 * 60
+    assert planner.route("A", "C", departing=time(8, 0)).routes[0].arrives == 8 * 3600 + 20 * 60
 
 
 def test_it_needs_a_timetable_and_a_departure(walkable):
     plain = rl.Environment(rl.ScalarEdges(("a", "b", 1)))
     assert rl.ULTRA(rl.RAPTOR()).missing_from(plain.compile()) == frozenset({"timetable"})
     with pytest.raises(ValueError, match="needs a departure time"):
-        rl.ULTRA(rl.RAPTOR()).bind(walkable).route("A", "C")
+        rl.ULTRA(rl.RAPTOR()).bind(walkable).route("A", "C").routes[0]
 
 
 def test_a_search_is_the_wrapped_technique_s_and_says_so(walkable):
@@ -79,7 +79,7 @@ def test_a_search_is_the_wrapped_technique_s_and_says_so(walkable):
 def test_every_leg_is_an_edge_of_this_environment(walkable):
     # A shortcut is a path, not an edge, so a journey that walked one has to
     # be told hop by hop — which is what makes provenance and geometry work.
-    journey = rl.ULTRA(rl.RAPTOR()).bind(walkable).route("A", "C", departing=time(8, 0))
+    journey = rl.ULTRA(rl.RAPTOR()).bind(walkable).route("A", "C", departing=time(8, 0)).routes[0]
     assert [leg.tail for leg in journey.legs] == ["A", "B"]
     assert [leg.head for leg in journey.legs] == ["B", "C"]
     for leg in journey.legs:
@@ -91,7 +91,7 @@ def test_every_leg_is_an_edge_of_this_environment(walkable):
 def test_several_origins_each_carry_a_head_start(feed):
     env = rl.Environment(feed, rl.ScalarEdges(("C", "B", 60), ("B", "C", 60)))
     planner = rl.ULTRA(rl.RAPTOR()).bind(env)
-    journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0))
+    journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0)).routes[0]
     assert (journey.origin, journey.arrives, journey.cost) == ("C", 8 * 3600 + 360, 360)
 
 
@@ -143,7 +143,7 @@ def test_a_journey_can_start_on_a_doorstep(multimodal):
     # stop, walk to one, ride, and walk off the other end. None of those three
     # walks is a shortcut — the ends are searched when the query is asked.
     planner = rl.ULTRA(rl.RAPTOR()).bind(multimodal)
-    journey = planner.route("doorstep", "corner-C", departing=time(8, 0))
+    journey = planner.route("doorstep", "corner-C", departing=time(8, 0)).routes[0]
     assert journey is not None
     assert journey.origin == "doorstep"
     assert journey.destination == "corner-C"
@@ -162,7 +162,7 @@ def test_walking_the_streets_beats_waiting_when_it_should(multimodal):
     # Not every multimodal answer rides: from one corner to the next, the
     # pavement is ten minutes and the bus does not come sooner.
     planner = rl.ULTRA(rl.RAPTOR()).bind(multimodal)
-    journey = planner.route("doorstep", "corner-A", departing=time(12, 0))
+    journey = planner.route("doorstep", "corner-A", departing=time(12, 0)).routes[0]
     assert journey is not None
     assert all(leg.trip is None for leg in journey.legs), "nothing runs at noon"
     assert journey.cost == 30
@@ -210,8 +210,8 @@ def test_it_answers_as_the_search_that_walks_the_whole_network_does(multimodal):
         departing = 7 * 3600 + 30 * 60 + minute * 60
         for origin in places:
             for destination in places:
-                mine = ultra.route(origin, destination, departing=departing)
-                truth = oracle.route(origin, destination, departing=departing)
+                mine = ultra.route(origin, destination, departing=departing).routes[0]
+                truth = oracle.route(origin, destination, departing=departing).routes[0]
                 assert (mine is None) == (truth is None), (
                     f"{origin} -> {destination} leaving {departing}"
                 )

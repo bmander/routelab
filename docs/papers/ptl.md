@@ -50,7 +50,7 @@ bind time instead: minutes and hundreds of megabytes on a city network.
 >>> env = rl.Environment(feed)
 
 >>> planner = rl.PTL().bind(env)                      # the labels are built here
->>> planner.route("A", "C", departing=time(8, 0))
+>>> planner.route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=1200)
 
 ```

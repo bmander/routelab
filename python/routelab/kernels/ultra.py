@@ -346,7 +346,7 @@ class ULTRA(TimetablePlanner):
             f"{type(self.technique).__name__}() directly to search its stops."
         )
 
-    def _ask(
+    def _route(
         self,
         starts: "Dict[int, int]",
         target: int,
@@ -407,7 +407,7 @@ class ULTRA(TimetablePlanner):
                     arrives, aboard, alight = landed, result, stop
 
         if arrives is None:
-            return Answer(self, destination, None, None)
+            return Answer(self, destination, [], None)
         if aboard is None:
             source, legs = self._access(starts, at, target)
             walked = Journey(
@@ -417,7 +417,7 @@ class ULTRA(TimetablePlanner):
                 legs=tuple(legs),
                 settled=0,
             )
-            return Answer(self, destination, walked, None)
+            return Answer(self, destination, [walked], None)
 
         itinerary = aboard.itinerary(self._inner_of[alight])
         ridden = self._itinerary_legs(itinerary)
@@ -431,13 +431,13 @@ class ULTRA(TimetablePlanner):
         return Answer(
             self,
             destination,
-            Journey(
+            [Journey(
                 origin=compiled.label(source),
                 destination=destination,
                 cost=arrives - at,
                 legs=tuple(legs),
                 settled=itinerary.settled,
-            ),
+            )],
             None,
         )
 

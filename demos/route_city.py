@@ -80,7 +80,7 @@ def main() -> int:
             print(f"{name:<10} no route found")
             continue
         print(f"{name:<10} {len(result.order):>8,} settled  {ms:>7.0f} ms  {cost / 60:>6.1f} min")
-        journey = journey or planner.route(origin, destination)
+        journey = journey or planner.route(origin, destination).routes[0]
 
     if journey is None:
         print("\nnothing to draw: those points are not connected in this profile")

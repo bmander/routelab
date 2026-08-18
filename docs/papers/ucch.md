@@ -56,7 +56,7 @@ core is the same product-graph search — just on two percent of the vertices.
 ... )
 >>> env = rl.Environment(feed, pavement)
 
->>> rl.UCCH().bind(env).route("A", "C", departing=time(8, 0))
+>>> rl.UCCH().bind(env).route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=1200)
 
 ```
@@ -72,7 +72,7 @@ was not built for:
 
 ```python
 >>> on_foot = rl.Modes(states={"foot": ["foot"]}, start=["foot"], end=["foot"])
->>> rl.UCCH(on_foot).bind(env).route("A", "C", departing=time(8, 0))
+>>> rl.UCCH(on_foot).bind(env).route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=1800)
 
 ```

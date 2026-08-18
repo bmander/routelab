@@ -11,8 +11,8 @@ There are two ways in. The high road describes a world and asks it questions:
     >>> env = rl.Environment()
     >>> env.register(rl.ScalarEdges(("a", "b", 1), ("b", "c", 15)))
     Environment(1 layer)
-    >>> rl.Dijkstra().bind(env).route("a", "c")
-    Journey('a' → 'b' → 'c', cost=16)
+    >>> rl.Dijkstra().bind(env).route("a", "c").routes
+    [Journey('a' → 'b' → 'c', cost=16)]
 
 The low road is the kernel itself, on dense integer ids, as the papers state it:
 

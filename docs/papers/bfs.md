@@ -51,7 +51,7 @@ origins here cannot carry a head start.
 ... )
 >>> env = rl.Environment(streets)
 
->>> rl.BFS().bind(env).route("home", "work")
+>>> rl.BFS().bind(env).route("home", "work").routes[0]
 Journey('home' → 'work', cost=1)
 
 ```
@@ -66,7 +66,7 @@ A journey's legs still carry their real weights, so a hop-counted answer can
 still be priced:
 
 ```python
->>> journey = rl.BFS().bind(env).route("home", "work")
+>>> journey = rl.BFS().bind(env).route("home", "work").routes[0]
 >>> journey.cost, [leg.weight for leg in journey.legs]
 (1, [900])
 
@@ -95,7 +95,7 @@ An origin cannot carry a head start, because a hop count has nowhere to put
 one:
 
 ```python
->>> planner.route({"home": 0, "b": 120}, "work")
+>>> planner.route({"home": 0, "b": 120}, "work").routes[0]
 Traceback (most recent call last):
     ...
 ValueError: BFS counts hops, so origins cannot carry an initial cost: 'b'

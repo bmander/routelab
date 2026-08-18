@@ -444,19 +444,24 @@ class Router:
         target = planner.node_id(end)
 
         def ask(target):
+            """One query, and everything this page needs read off it.
+
+            Every technique is asked the same way and asked once. What comes
+            back holds the routes — a front where the technique keeps one, a
+            set of one where it does not — the kernel's table if it kept one,
+            and a search space on request. A technique that keeps no table has
+            `raw` of None, and its refusal for a space arrives later from
+            `searchspace`, only if a space is wanted.
+            """
             began = time.perf_counter()
-            try:
-                result = planner.search(start, targets=[target], **when)
-                journey = planner.journey(result, planner.label(target))
-                settled = result.settled
-            except NotImplementedError:
-                # A technique that keeps no cost table: ask it for the journey
-                # it does answer with. Its refusal for a search space comes
-                # later, from `explored`, and only if a space is wanted.
-                result = None
-                journey = planner.route(start, planner.label(target), **when)
-                settled = journey.settled if journey is not None else 0
-            return result, journey, settled, (time.perf_counter() - began) * 1000
+            answer = planner.route(start, planner.label(target), **when)
+            journey = answer.routes[0] if answer.routes else None
+            settled = (
+                answer.raw.settled
+                if answer.raw is not None
+                else (journey.settled if journey is not None else 0)
+            )
+            return answer, journey, settled, (time.perf_counter() - began) * 1000
 
         # Snap plainly, and work out what is actually connected only if that
         # turns out to have failed. Restricting the snap up front costs a
@@ -464,10 +469,10 @@ class Router:
         # spends routing, and the same quarter-second for all of them, which
         # would flatten the difference this demo exists to show. Paying it on
         # the rare failure keeps a drag answering at the speed of the search.
-        result, journey, settled, elapsed = ask(target)
+        answer, journey, settled, elapsed = ask(target)
         if journey is None and not rides_transit(planner):
             end = layer.nearest(end, within=self.reachable(board, planner_id, start))
-            result, journey, settled, elapsed = ask(planner.node_id(end))
+            answer, journey, settled, elapsed = ask(planner.node_id(end))
         if journey is None:
             # Named where the layer has names — a feed does, a street network
             # does not, and a multimodal environment snaps against whichever
@@ -507,7 +512,7 @@ class Router:
         space = space_kind = space_size = note = None
         if explore:
             try:
-                explored = planner.explored(result)
+                explored = answer.searchspace()
                 space, space_kind, space_size = explored.geojson(), explored.kind, len(explored)
             except NotImplementedError as nothing_to_draw:
                 note = str(nothing_to_draw)
@@ -516,13 +521,13 @@ class Router:
         noun, of = planner.searches
         # Read off the search already in hand rather than asking for another:
         # a second front costs a second full set of rounds, and a drag cannot
-        # afford the query twice.
-        frontier = None
-        if result is not None and hasattr(planner, "journeys"):
-            frontier = [
-                {"arrives": alternative.arrives, "transfers": alternative.transfers}
-                for alternative in planner.journeys(result, end)
-            ]
+        # afford the query twice. Every technique keeps one — a search that
+        # tells journeys apart only by arrival keeps a front of one — so this
+        # asks rather than testing whether it can.
+        frontier = [
+            {"arrives": alternative.arrives, "transfers": alternative.transfers}
+            for alternative in answer.routes
+        ]
         return {
             # No `shapes.txt` yet, so a transit leg has no geometry and the
             # route is drawn stop to stop. Straight lines, and honestly so — a
@@ -545,7 +550,7 @@ class Router:
             "space_kind": space_kind,
             "space_size": space_size,
             "space_note": note,
-            "rounds": getattr(result, "rounds", None),
+            "rounds": getattr(answer.raw, "rounds", None),
             "frontier": frontier,
             # How many edges this profile has a schedule for, and whether the
             # chosen technique is reading it. A schedule quietly ignored is the

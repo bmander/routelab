@@ -52,7 +52,7 @@ a 250,000-node city is a few seconds and about 32 MB.
 >>> spur = [("m0", "s1", 100)] + [(f"s{i}", f"s{i + 1}", 100) for i in range(1, 4)]
 >>> env = rl.Environment(rl.ScalarEdges(*corridor, *spur, bidirectional=True))
 
->>> rl.AStar(rl.Landmarks(2)).bind(env).route("m0", "m5")
+>>> rl.AStar(rl.Landmarks(2)).bind(env).route("m0", "m5").routes[0]
 Journey('m0' → 'm1' → 'm2' → 'm3' → 'm4' → 'm5', cost=500)
 
 ```

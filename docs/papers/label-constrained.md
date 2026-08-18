@@ -60,7 +60,7 @@ it:
 >>> env = rl.Environment(feed, pavement)
 
 >>> planner = rl.LabelConstrained().bind(env)         # nothing precomputed
->>> planner.route("A", "C", departing=time(8, 0))
+>>> planner.route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=1200)
 
 ```
@@ -79,8 +79,8 @@ is a different question:
 >>> on_foot = rl.Modes(states={"foot": ["foot"]}, start=["foot"], end=["foot"])
 >>> aboard = rl.Modes(states={"aboard": ["transit"]}, start=["aboard"], end=["aboard"])
 
->>> walked = rl.LabelConstrained(on_foot).bind(env).route("A", "C", departing=time(8, 0))
->>> ridden = rl.LabelConstrained(aboard).bind(env).route("A", "C", departing=time(8, 0))
+>>> walked = rl.LabelConstrained(on_foot).bind(env).route("A", "C", departing=time(8, 0)).routes[0]
+>>> ridden = rl.LabelConstrained(aboard).bind(env).route("A", "C", departing=time(8, 0)).routes[0]
 >>> (walked.cost, walked.walking), (ridden.cost, ridden.walking)
 ((1800, 1800), (1200, 0))
 

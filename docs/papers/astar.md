@@ -62,7 +62,7 @@ position:
 ... )
 >>> env = rl.Environment(streets, places)
 
->>> rl.AStar(rl.Euclidean()).bind(env).route("m0", "m5")
+>>> rl.AStar(rl.Euclidean()).bind(env).route("m0", "m5").routes[0]
 Journey('m0' → 'm1' → 'm2' → 'm3' → 'm4' → 'm5', cost=500)
 
 ```

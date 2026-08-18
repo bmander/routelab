@@ -94,7 +94,7 @@ That is why this is a **wrapper**, not a technique: `ULTRA(RAPTOR())`,
 ... )
 >>> env = rl.Environment(feed, streets)
 
->>> rl.ULTRA(rl.RAPTOR()).bind(env).route("A", "C", departing=time(8, 0))
+>>> rl.ULTRA(rl.RAPTOR()).bind(env).route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=120)
 
 ```
@@ -111,7 +111,7 @@ The same environment, the same question, two different techniques underneath:
 ```python
 >>> rl.ULTRA(rl.RAPTOR())
 ULTRA(RAPTOR())
->>> rl.ULTRA(rl.CSA()).bind(env).route("A", "C", departing=time(8, 0))
+>>> rl.ULTRA(rl.CSA()).bind(env).route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=120)
 
 ```
@@ -160,7 +160,7 @@ streets = rl.OSM("seattle.osm.pbf", rl.Walking())
 env = rl.Environment(feed, streets, rl.Access(feed, streets))
 
 planner = rl.ULTRA(rl.RAPTOR()).bind(env)     # minutes of preprocessing
-planner.route(doorstep, office, departing=time(8, 30))
+planner.route(doorstep, office, departing=time(8, 30)).routes[0]
 ```
 
 This is the corner of the design space where you pay up front: ten minutes of

@@ -64,7 +64,7 @@ def multimodal(feed, streets):
 
 def test_hello_world(multimodal):
     planner = rl.LabelConstrained().bind(multimodal)
-    journey = planner.route("doorstep", "corner-C", departing=time(7, 55))
+    journey = planner.route("doorstep", "corner-C", departing=time(7, 55)).routes[0]
     assert journey is not None
     assert journey.origin == "doorstep"
     assert journey.destination == "corner-C"
@@ -97,8 +97,8 @@ def test_the_language_is_what_decides(multimodal):
     afoot = rl.LabelConstrained(
         rl.Modes(states={"foot": ["foot"]}, link="link", start=["foot"], end=["foot"])
     ).bind(multimodal)
-    quick = riding.route("doorstep", "corner-C", departing=time(7, 55))
-    slow = afoot.route("doorstep", "corner-C", departing=time(7, 55))
+    quick = riding.route("doorstep", "corner-C", departing=time(7, 55)).routes[0]
+    slow = afoot.route("doorstep", "corner-C", departing=time(7, 55)).routes[0]
     assert slow is not None and quick is not None
     assert quick.arrives < slow.arrives
     assert all(leg.trip is None for leg in slow.legs), "on foot, so nothing was ridden"
@@ -116,7 +116,7 @@ def test_the_automaton_is_read_off_the_environment(multimodal, env):
     # which is what every other timetable technique here assumes.
     alone = rl.LabelConstrained().bind(env)
     assert alone.automaton.num_states == 1
-    assert alone.route("A", "C", departing=time(8, 0)) is not None
+    assert alone.route("A", "C", departing=time(8, 0)).routes != []
 
 
 def test_it_agrees_with_ultra_on_the_same_network(multimodal):
@@ -130,8 +130,8 @@ def test_it_agrees_with_ultra_on_the_same_network(multimodal):
     for origin in ("doorstep", "corner-A", "corner-B"):
         for destination in ("corner-B", "corner-C", "doorstep"):
             for at in (time(7, 30), time(7, 55), time(12, 0)):
-                mine = lcspp.route(origin, destination, departing=at)
-                theirs = ultra.route(origin, destination, departing=at)
+                mine = lcspp.route(origin, destination, departing=at).routes[0]
+                theirs = ultra.route(origin, destination, departing=at).routes[0]
                 assert (mine is None) == (theirs is None), f"{origin}->{destination} at {at}"
                 if mine is not None:
                     assert mine.arrives == theirs.arrives, f"{origin}->{destination} at {at}"
@@ -153,7 +153,7 @@ def test_a_language_naming_a_mode_the_network_lacks_says_so(multimodal):
 
 def test_it_needs_a_departure(multimodal):
     with pytest.raises(ValueError, match="needs a departure time"):
-        rl.LabelConstrained().bind(multimodal).route("doorstep", "corner-C")
+        rl.LabelConstrained().bind(multimodal).route("doorstep", "corner-C").routes[0]
 
 
 def test_it_says_what_it_searches(multimodal):
@@ -177,8 +177,8 @@ def test_ucch_answers_as_the_search_it_accelerates(multimodal):
     for origin in ("doorstep", "corner-A", "corner-B", "A"):
         for destination in ("corner-B", "corner-C", "doorstep", "C"):
             for at in (time(7, 30), time(7, 55), time(12, 0)):
-                mine = quick.route(origin, destination, departing=at)
-                theirs = plain.route(origin, destination, departing=at)
+                mine = quick.route(origin, destination, departing=at).routes[0]
+                theirs = plain.route(origin, destination, departing=at).routes[0]
                 assert (mine is None) == (theirs is None), f"{origin}->{destination} at {at}"
                 if mine is not None:
                     assert mine.arrives == theirs.arrives, f"{origin}->{destination} at {at}"
@@ -203,7 +203,7 @@ def test_ucch_contracts_the_walking_and_keeps_the_rest(multimodal):
 def test_ucch_tells_a_shortcut_as_the_arcs_it_stands_for(multimodal):
     # A contracted walk is a path, not an arc, so the journey has to be told hop
     # by hop or a caller cannot draw it. Every leg joins the one before it.
-    journey = rl.UCCH().bind(multimodal).route("doorstep", "corner-C", departing=time(7, 55))
+    journey = rl.UCCH().bind(multimodal).route("doorstep", "corner-C", departing=time(7, 55)).routes[0]
     assert journey is not None
     for before, after in zip(journey.legs, journey.legs[1:]):
         assert before.head == after.tail
@@ -222,8 +222,8 @@ def test_ucch_on_a_network_with_nothing_to_contract_is_the_plain_model(env):
     quick = rl.UCCH().bind(env)
     plain = rl.LabelConstrained().bind(env)
     for at in (time(8, 0), time(12, 0)):
-        mine = quick.route("A", "C", departing=at)
-        theirs = plain.route("A", "C", departing=at)
-        assert (mine is None) == (theirs is None)
-        if mine is not None:
-            assert mine.arrives == theirs.arrives
+        mine = quick.route("A", "C", departing=at).routes
+        theirs = plain.route("A", "C", departing=at).routes
+        assert bool(mine) == bool(theirs)
+        if mine:
+            assert mine[0].arrives == theirs[0].arrives

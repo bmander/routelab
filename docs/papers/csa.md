@@ -53,7 +53,7 @@ label.
 >>> env = rl.Environment(feed)
 
 >>> planner = rl.CSA().bind(env)
->>> planner.route("A", "C", departing=time(8, 0))
+>>> planner.route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=1200)
 
 ```
@@ -123,7 +123,7 @@ gives four or five steps rather than one.
 to use:
 
 ```python
->>> planner.route("A", "C", departing=time(8, 0), until=time(9, 0))  # doctest: +ELLIPSIS
+>>> planner.route("A", "C", departing=time(8, 0), until=time(9, 0)).routes[0]  # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
 ValueError: CSA takes no until; a departure window belongs to profile() on CSA(), ...
@@ -134,7 +134,7 @@ A connection scan counts nothing but time, so a cap on changes belongs
 elsewhere:
 
 ```python
->>> planner.route("A", "C", departing=time(8, 0), max_transfers=1)   # doctest: +ELLIPSIS
+>>> planner.route("A", "C", departing=time(8, 0), max_transfers=1).routes[0]   # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
 ValueError: CSA takes no max_transfers; a cap on changes belongs to RAPTOR(), ...

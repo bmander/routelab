@@ -61,7 +61,7 @@ back into them before anyone sees the answer.
 >>> env = rl.Environment(rl.ScalarEdges(*corridor, *spur, bidirectional=True))
 
 >>> planner = rl.ContractionHierarchy().bind(env)     # the expensive step
->>> planner.route("m0", "m5")
+>>> planner.route("m0", "m5").routes[0]
 Journey('m0' → 'm1' → 'm2' → 'm3' → 'm4' → 'm5', cost=500)
 
 ```
@@ -131,7 +131,7 @@ A hierarchy query takes no bounds. Its search runs over the contracted graph,
 where a cost bound would cut off paths that are still cheap in the original:
 
 ```python
->>> planner.route("m0", "m5", max_cost=100)    # doctest: +ELLIPSIS
+>>> planner.route("m0", "m5", max_cost=100).routes[0]    # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
 ValueError: ContractionHierarchy takes no max_cost; a cost bound belongs to AStar(), ...

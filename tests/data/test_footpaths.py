@@ -92,7 +92,7 @@ def test_a_walk_beats_waiting_for_the_next_bus(model, feed):
     # and both models must take it.
     walk = rl.ScalarEdges(("B", "C", 60))
     env = rl.Environment(feed, walk)
-    journey = model().bind(env).route("A", "C", departing=time(8, 0))
+    journey = model().bind(env).route("A", "C", departing=time(8, 0)).routes[0]
     assert journey.arrives == 8 * 3600 + 11 * 60
     assert [(leg.tail, leg.head, leg.trip is None) for leg in journey.legs] == [
         ("A", "B", False),
@@ -111,7 +111,7 @@ def test_a_walk_can_start_or_be_the_whole_journey(model, feed):
     # models must find it on foot alone, and the journey must come back as the
     # two edges the walk was made of — the kernel closed them into one.
     env = rl.Environment(feed, rl.ScalarEdges([("A", "B", 30), ("B", "C", 30)]))
-    journey = model().bind(env).route("A", "C", departing=time(12, 0))
+    journey = model().bind(env).route("A", "C", departing=time(12, 0)).routes[0]
     assert journey.arrives == 12 * 3600 + 60
     assert [(leg.tail, leg.head) for leg in journey.legs] == [("A", "B"), ("B", "C")]
     assert all(leg.trip is None for leg in journey.legs)
@@ -122,7 +122,7 @@ def test_a_walk_can_start_or_be_the_whole_journey(model, feed):
     # a short walk away and WEEKDAY2's 08:15 to... nowhere useful. Use A: from
     # C at 07:59, walk to A by 08:00 and ride WEEKDAY1 to B by 08:10.
     env = rl.Environment(feed, rl.ScalarEdges(("C", "A", 60)))
-    journey = model().bind(env).route("C", "B", departing=time(7, 59))
+    journey = model().bind(env).route("C", "B", departing=time(7, 59)).routes[0]
     assert journey.arrives == 8 * 3600 + 10 * 60
     assert [leg.trip is None for leg in journey.legs] == [True, False]
 
@@ -136,7 +136,7 @@ def test_the_two_models_agree_with_footpaths_between_real_stops(feed):
         for destination in "ABC":
             for hour in (7, 8, 12, 23):
                 answers = [
-                    planner.route(origin, destination, departing=time(hour, 0))
+                    planner.route(origin, destination, departing=time(hour, 0)).routes[0]
                     for planner in planners
                 ]
                 arrivals = [None if journey is None else journey.arrives for journey in answers]

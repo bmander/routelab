@@ -1,10 +1,10 @@
-"""One query, asked more than one thing.
+"""One query, one answer, three things to ask it.
 
-`route` returns a journey and drops the search it was read off, which is right
-when the journey is all you wanted. `ask` keeps it, so the space behind a route
-and the front it belongs to are answered from the search already run — the
-thing this file is actually about, since the answers themselves were already
-covered wherever the technique is.
+`route` runs a search that works out more than the journey it is usually asked
+for, and hands back all of it: the routes, the space behind them, and the
+kernel's own table. What this file is about is that they come from *one*
+search, and that a technique which tells journeys apart only by arrival gives a
+Pareto set of one rather than a lesser kind of answer.
 """
 
 from __future__ import annotations
@@ -25,23 +25,24 @@ def streets() -> rl.Environment:
     )
 
 
-def test_ask_answers_what_route_answers(streets):
-    planner = rl.Dijkstra().bind(streets)
-    assert planner.ask("home", "work").journey == planner.route("home", "work")
+def test_an_answer_is_routes_a_space_and_the_raw_table(streets):
+    answer = rl.Dijkstra().bind(streets).route("home", "work")
+    assert [journey.cost for journey in answer.routes] == [600]
+    assert repr(answer.searchspace()) == (
+        "ShortestPathTree(3 branches, magnitude='weight', peak=600)"
+    )
+    assert answer.raw.settled == 4
 
 
-def test_the_answer_keeps_the_search_it_was_read_off(streets):
-    planner = rl.Dijkstra().bind(streets)
-    answer = planner.ask("home", "work")
-    assert answer.result is not None
-    assert answer.result.settled == 4
-    # The space comes off the kept search rather than a second one, which is
-    # the whole point: the same result object, not an equal one.
-    assert repr(answer.explored()) == repr(planner.explored(answer.result))
+def test_one_route_is_a_pareto_set_of_one(streets):
+    # Not a special case: a front is the set of journeys no other journey beats
+    # on every criterion, and a search that knows only arrival has exactly one.
+    answer = rl.Dijkstra().bind(streets).route("home", "work")
+    assert len(answer.routes) == 1
 
 
-def test_asking_searches_once(streets, monkeypatch):
-    """The claim that makes `ask` worth having, held to by counting."""
+def test_routing_searches_once(streets, monkeypatch):
+    """The claim that makes the answer worth having, held to by counting."""
     planner = rl.Dijkstra().bind(streets)
     searches = 0
     underlying = type(planner)._search
@@ -53,57 +54,54 @@ def test_asking_searches_once(streets, monkeypatch):
 
     monkeypatch.setattr(type(planner), "_search", counted)
 
-    answer = planner.ask("home", "work")
-    answer.journey
-    answer.explored()
-    assert searches == 1, "the journey and the space came from one search"
-
-    # What it replaces: the same two answers the long way round cost two.
-    searches = 0
-    planner.route("home", "work")
-    planner.explored(planner.search("home", targets=[planner.node_id("work")]))
-    assert searches == 2
+    answer = planner.route("home", "work")
+    answer.routes
+    answer.searchspace()
+    answer.searchspace(magnitude="nodes")
+    assert searches == 1, "the routes and both spaces came from one search"
 
 
-def test_an_unreachable_destination_is_an_answer_with_no_journey(streets):
-    planner = rl.Dijkstra().bind(streets)
-    answer = planner.ask("home", "work", max_cost=100)
-    assert answer.journey is None
-    assert answer.result is not None, "it searched; it just did not arrive"
+def test_the_space_takes_the_options_it_has_always_taken(streets):
+    answer = rl.Dijkstra().bind(streets).route("home", "work")
+    assert answer.searchspace(magnitude="nodes").magnitude == "nodes"
+    with pytest.raises(ValueError, match="unknown magnitude"):
+        answer.searchspace(magnitude="furlongs")
 
 
-def test_a_front_is_read_off_the_same_search(feed):
-    # RAPTOR keeps a front, and `frontier` is now that read rather than a
-    # second search — the entry it ends on is what `route` returns.
+def test_nothing_reachable_is_an_empty_pareto_set(streets):
+    answer = rl.Dijkstra().bind(streets).route("home", "work", max_cost=100)
+    assert answer.routes == []
+    assert answer.raw is not None, "it searched; it just did not arrive"
+
+
+def test_a_round_based_technique_leads_with_the_earliest_arrival(feed):
+    # The order an answer promises, and the reason it is not the kernel's:
+    # `routes[0]` means the same thing whatever technique was asked.
     planner = rl.RAPTOR().bind(rl.Environment(feed))
-    answer = planner.ask("A", "C", departing=time(8, 0))
-    front = answer.frontier()
-    assert [journey.transfers for journey in front] == [0, 1]
-    assert front[-1] == answer.journey
-    assert front == planner.frontier("A", "C", departing=time(8, 0))
-
-
-def test_a_technique_with_no_front_refuses_by_name(feed):
-    planner = rl.CSA().bind(rl.Environment(feed))
-    answer = planner.ask("A", "C", departing=time(8, 0))
-    with pytest.raises(NotImplementedError, match="RAPTOR\\(\\) or TripBased\\(\\)"):
-        answer.frontier()
+    answer = planner.route("A", "C", departing=time(8, 0))
+    assert [(j.transfers, j.cost) for j in answer.routes] == [(1, 1200), (0, 1800)]
+    assert answer.routes[0].cost == min(journey.cost for journey in answer.routes)
 
 
 def test_a_technique_with_no_table_answers_and_says_so(feed):
-    # The uniform part: every technique answers `ask`, and the ones that keep
-    # no table hold the journey and refuse what needs one, in their own words.
-    planner = rl.TimeDependent().bind(rl.Environment(feed))
-    answer = planner.ask("A", "C", departing=time(8, 0))
-    assert answer.journey is not None
-    assert answer.result is None
+    # Every technique answers `route`; the ones that keep no table hold the
+    # journey and refuse what needs one, in their own words.
+    answer = rl.TimeDependent().bind(rl.Environment(feed)).route(
+        "A", "C", departing=time(8, 0)
+    )
+    assert len(answer.routes) == 1
+    assert answer.raw is None
     with pytest.raises(NotImplementedError, match="keeps no search space"):
-        answer.explored()
+        answer.searchspace()
 
 
 def test_ultra_answers_the_same_way(feed):
     walks = rl.ScalarEdges(("A", "B", 60), ("B", "A", 60), ("B", "C", 60), ("C", "B", 60))
     planner = rl.ULTRA(rl.RAPTOR()).bind(rl.Environment(feed, walks))
-    answer = planner.ask("A", "C", departing=time(8, 0))
-    assert answer.journey == planner.route("A", "C", departing=time(8, 0))
-    assert answer.result is None, "the search it brackets is the wrapped technique's"
+    answer = planner.route("A", "C", departing=time(8, 0))
+    assert [journey.cost for journey in answer.routes] == [120]
+    assert answer.raw is None, "the search it brackets is the wrapped technique's"
+
+
+def test_the_one_shot_helper_answers_the_same_shape(streets):
+    assert rl.route(rl.Dijkstra(), streets, "home", "work").routes[0].cost == 600

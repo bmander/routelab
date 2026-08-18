@@ -61,9 +61,9 @@ the same question:
 >>> feed = rl.GTFS(TINY_GTFS, date(2026, 9, 7))       # a Monday
 >>> env = rl.Environment(feed)
 
->>> rl.TimeExpanded().bind(env).route("A", "C", departing=time(8, 0))
+>>> rl.TimeExpanded().bind(env).route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=1200)
->>> rl.TimeDependent().bind(env).route("A", "C", departing=time(8, 0))
+>>> rl.TimeDependent().bind(env).route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=1200)
 
 ```
@@ -100,8 +100,8 @@ The same ratio shows in the work a query does. Both answer identically; the
 expanded model settles more, because it is settling events rather than places:
 
 ```python
->>> a = expanded.route("A", "C", departing=time(8, 0))
->>> b = dependent.route("A", "C", departing=time(8, 0))
+>>> a = expanded.route("A", "C", departing=time(8, 0)).routes[0]
+>>> b = dependent.route("A", "C", departing=time(8, 0)).routes[0]
 >>> a.cost == b.cost, (a.settled, b.settled)
 (True, (5, 3))
 

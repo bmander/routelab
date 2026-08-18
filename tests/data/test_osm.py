@@ -72,10 +72,10 @@ def test_a_profile_decides_what_counts_as_a_road():
 def test_walking_and_driving_are_different_environments():
     env = rl.Environment(rl.OSM(JUNCTION, rl.Walking()))
     planner = rl.Dijkstra().bind(env)
-    assert planner.route(3, 1) is not None, "on foot you can walk back down Main St"
+    assert planner.route(3, 1).routes != [], "on foot you can walk back down Main St"
 
     driving = rl.Dijkstra().bind(rl.Environment(rl.OSM(JUNCTION, rl.Driving())))
-    assert driving.route(3, 1) is None, "by car there is no way back"
+    assert driving.route(3, 1).routes == [], "by car there is no way back"
 
 
 def test_the_projection_never_overstates_the_ground():
@@ -114,7 +114,7 @@ def test_a_leg_can_find_its_own_shape():
     # Without being handed the environment back. A leg knows its layer and its
     # place in it, which is everything needed to answer.
     env = rl.Environment(rl.OSM(JUNCTION, rl.Walking()))
-    journey = rl.AStar(rl.Euclidean()).bind(env).route(1, 3)
+    journey = rl.AStar(rl.Euclidean()).bind(env).route(1, 3).routes[0]
 
     shapes = [leg.geometry for leg in journey]
     assert all(shape for shape in shapes), "every leg knows where it runs"
@@ -125,7 +125,7 @@ def test_a_leg_can_find_its_own_shape():
 
 def test_a_journey_draws_as_one_polyline():
     env = rl.Environment(rl.OSM(JUNCTION, rl.Walking()))
-    journey = rl.AStar(rl.Euclidean()).bind(env).route(1, 3)
+    journey = rl.AStar(rl.Euclidean()).bind(env).route(1, 3).routes[0]
 
     # Stitched, not concatenated: the shared point at each corner appears once.
     separate = sum(len(leg.geometry) for leg in journey)
@@ -140,14 +140,14 @@ def test_a_layer_without_geometry_simply_has_none():
     assert compiled.geometry(0) is None
 
     # And a journey over it draws as nothing, rather than as half a line.
-    journey = rl.Dijkstra().bind(env).route("a", "b")
+    journey = rl.Dijkstra().bind(env).route("a", "b").routes[0]
     assert journey.legs[0].geometry is None
     assert journey.geometry == []
 
 
 def test_astar_and_dijkstra_agree_on_a_real_extract():
     env = rl.Environment(rl.OSM(JUNCTION, rl.Walking()))
-    guided = rl.AStar(rl.Euclidean()).bind(env).route(1, 5)
-    plain = rl.Dijkstra().bind(env).route(1, 5)
+    guided = rl.AStar(rl.Euclidean()).bind(env).route(1, 5).routes[0]
+    plain = rl.Dijkstra().bind(env).route(1, 5).routes[0]
     assert guided.cost == plain.cost
     assert guided.nodes == plain.nodes

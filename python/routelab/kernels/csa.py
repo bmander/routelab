@@ -64,10 +64,10 @@ class CSA(TimetablePlanner):
         return self._csa.num_connections
 
     # CSA keeps a label per stop, so it has a cost table like any graph search
-    # and `Planner.ask` — search, then read the journey off the result — is
+    # and `Planner.route` — search, then read the journey off the result — is
     # the whole implementation; the family's `journey` reads an itinerary off
     # it. The itinerary hook the two Pyrga models need is not used here.
-    _ask = Planner._ask
+    _route = Planner._route
 
     def _search(self, starts: "Dict[int, int]", **options: Any) -> "_routelab.ScanSearch":
         """Scan — toward one target if given, else to every stop."""

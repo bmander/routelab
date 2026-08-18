@@ -24,7 +24,7 @@ def planner(env) -> rl.PTL:
 
 
 def test_hello_world(planner):
-    journey = planner.route("A", "C", departing=time(8, 0))
+    journey = planner.route("A", "C", departing=time(8, 0)).routes[0]
     assert journey.arrives == 8 * 3600 + 20 * 60
     assert journey.transfers == 1
     assert [leg.head for leg in journey.legs] == ["B", "C"]
@@ -44,7 +44,7 @@ def test_the_labeling_is_the_thing_it_reports(planner):
 def test_several_origins_each_carry_a_head_start(feed):
     env = rl.Environment(feed, rl.ScalarEdges(("C", "B", 60)))
     planner = rl.PTL().bind(env)
-    journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0))
+    journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0)).routes[0]
     assert (journey.origin, journey.arrives, journey.cost) == ("C", 8 * 3600 + 360, 360)
 
 
@@ -60,7 +60,7 @@ def test_a_profile_is_one_journey_per_departure_worth_taking(planner):
     assert [(j.departs, j.arrives, j.transfers) for j in front] == [(8 * 3600, 8 * 3600 + 20 * 60, 1)]
     assert planner.profile("A", "C", departing=time(9, 0), until=time(12, 0)) == []
     for journey in planner.profile("A", "B", departing=time(0, 0), until=25 * 3600):
-        assert planner.route("A", "B", departing=journey.departs).arrives == journey.arrives
+        assert planner.route("A", "B", departing=journey.departs).routes[0].arrives == journey.arrives
 
 
 def test_the_profile_agrees_with_csa(env, feed):
@@ -91,7 +91,7 @@ def test_a_walk_beats_the_steps_it_dominates(feed):
     env = rl.Environment(feed, rl.ScalarEdges(("A", "B", 60)))
     planner = rl.PTL().bind(env)
     assert planner.profile("A", "B", departing=time(0, 0), until=25 * 3600) == []
-    assert planner.route("A", "B", departing=time(12, 0)).arrives == 12 * 3600 + 60
+    assert planner.route("A", "B", departing=time(12, 0)).routes[0].arrives == 12 * 3600 + 60
 
 
 def test_the_profile_refuses_a_missing_or_backwards_window(planner):
@@ -116,6 +116,6 @@ def test_it_needs_a_timetable_and_a_departure(planner):
     plain = rl.Environment(rl.ScalarEdges(("a", "b", 1)))
     assert rl.PTL().missing_from(plain.compile()) == frozenset({"timetable"})
     with pytest.raises(ValueError, match="needs a departure time"):
-        planner.route("A", "C")
+        planner.route("A", "C").routes[0]
     with pytest.raises(ValueError, match="takes no max_transfers; a cap on changes belongs to RAPTOR"):
-        planner.route("A", "C", departing=time(8, 0), max_transfers=1)
+        planner.route("A", "C", departing=time(8, 0), max_transfers=1).routes[0]

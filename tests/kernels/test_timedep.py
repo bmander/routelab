@@ -29,23 +29,23 @@ def at(hour: int, minute: int = 0) -> datetime.time:
 
 def test_hello_world(gated):
     planner = rl.TimeDependentDijkstra().bind(gated)
-    assert planner.route(1, 3, departing=at(12)).nodes == [1, 2, 3]
+    assert planner.route(1, 3, departing=at(12)).routes[0].nodes == [1, 2, 3]
 
 
 def test_the_gate_is_shut_outside_its_hours(gated):
     planner = rl.TimeDependentDijkstra().bind(gated)
-    assert planner.route(1, 3, departing=at(12)).nodes == [1, 2, 3], "through"
-    assert planner.route(1, 3, departing=at(3)).nodes == [1, 3], "round"
+    assert planner.route(1, 3, departing=at(12)).routes[0].nodes == [1, 2, 3], "through"
+    assert planner.route(1, 3, departing=at(3)).routes[0].nodes == [1, 3], "round"
 
 
 def test_plain_dijkstra_ignores_the_schedule_and_says_so_by_its_name(gated):
     # Not a bug: `Dijkstra` is the always-open network, which is a question
     # worth asking. You get the clock by asking for the technique that has one.
-    plain = rl.Dijkstra().bind(gated).route(1, 3)
+    plain = rl.Dijkstra().bind(gated).route(1, 3).routes[0]
     assert plain.nodes == [1, 2, 3]
     assert plain.cost == rl.TimeDependentDijkstra().bind(gated).route(
         1, 3, departing=at(12)
-    ).cost
+    ).routes[0].cost
 
 
 def test_waiting_beats_detouring_only_once_it_is_cheaper(gated):
@@ -54,12 +54,12 @@ def test_waiting_beats_detouring_only_once_it_is_cheaper(gated):
     Nothing here chooses between waiting and going round; the clock does.
     """
     planner = rl.TimeDependentDijkstra().bind(gated)
-    detour = planner.route(1, 3, departing=at(3)).cost
+    detour = planner.route(1, 3, departing=at(3)).routes[0].cost
 
-    early = planner.route(1, 3, departing=at(6, 40))
+    early = planner.route(1, 3, departing=at(6, 40)).routes[0]
     assert early.nodes == [1, 3], "an hour's wait loses to the way round"
 
-    late = planner.route(1, 3, departing=at(6, 58))
+    late = planner.route(1, 3, departing=at(6, 58)).routes[0]
     assert late.nodes == [1, 2, 3], "two minutes' wait beats it"
     assert late.cost < detour
 
@@ -69,9 +69,9 @@ def test_forbidding_waiting_never_helps_and_sometimes_hurts(gated):
     hurried = rl.TimeDependentDijkstra(waiting="forbidden").bind(gated)
     for hour, minute in [(12, 0), (6, 58), (3, 0), (20, 59), (21, 1)]:
         when = at(hour, minute)
-        assert patient.route(1, 3, departing=when).cost <= hurried.route(
+        assert patient.route(1, 3, departing=when).routes[0].cost <= hurried.route(
             1, 3, departing=when
-        ).cost
+        ).routes[0].cost
 
 
 def test_an_unknown_waiting_policy_says_what_it_expected():
@@ -82,7 +82,7 @@ def test_an_unknown_waiting_policy_says_what_it_expected():
 def test_a_departure_time_has_no_default(gated):
     planner = rl.TimeDependentDijkstra().bind(gated)
     with pytest.raises(ValueError, match="needs a departure time"):
-        planner.route(1, 3)
+        planner.route(1, 3).routes[0]
 
 
 def test_a_dataset_with_no_schedule_says_so_before_you_bind():
@@ -116,13 +116,13 @@ def test_the_day_of_the_week_matters(gated):
     planner = rl.TimeDependentDijkstra().bind(gated)
     monday = datetime.datetime(2026, 8, 10, 12, 0)  # a Monday
     sunday = datetime.datetime(2026, 8, 16, 12, 0)
-    assert planner.route(1, 3, departing=monday).cost == planner.route(
+    assert planner.route(1, 3, departing=monday).routes[0].cost == planner.route(
         1, 3, departing=sunday
-    ).cost
+    ).routes[0].cost
 
 
 def test_a_journey_still_reports_geometry_and_provenance(gated):
-    journey = rl.TimeDependentDijkstra().bind(gated).route(1, 3, departing=at(12))
+    journey = rl.TimeDependentDijkstra().bind(gated).route(1, 3, departing=at(12)).routes[0]
     assert all(leg.geometry for leg in journey)
     assert all(leg.source is gated.sources[0] for leg in journey)
     assert journey.geometry[0] and journey.geometry[-1]
@@ -172,27 +172,27 @@ def test_seconds_since_monday_accepts_what_a_caller_would_reach_for():
 
 def test_a_journey_separates_waiting_from_walking(gated):
     planner = rl.TimeDependentDijkstra().bind(gated)
-    moving = planner.route(1, 3, departing=at(12))
+    moving = planner.route(1, 3, departing=at(12)).routes[0]
     assert moving.waiting == 0
     assert moving.moving == moving.cost
 
     # Arriving two minutes before the gate opens: the walk is unchanged and the
     # wait is the whole of the difference. Reporting one total instead makes a
     # short walk after a long wait look like a long walk.
-    waited = planner.route(1, 3, departing=at(6, 58))
+    waited = planner.route(1, 3, departing=at(6, 58)).routes[0]
     assert waited.moving == moving.cost, "the walking is the same walking"
     assert waited.waiting == waited.cost - moving.cost > 0
 
 
 def test_waiting_is_zero_for_a_search_with_no_clock(gated):
-    journey = rl.Dijkstra().bind(gated).route(1, 3)
+    journey = rl.Dijkstra().bind(gated).route(1, 3).routes[0]
     assert journey.waiting == 0 and journey.moving == journey.cost
 
 
 def test_a_hop_count_is_not_a_wait(gated):
     # BFS costs hops while its legs carry seconds, so the difference is
     # meaningless rather than a delay — and is reported as no delay.
-    journey = rl.BFS().bind(gated).route(1, 3)
+    journey = rl.BFS().bind(gated).route(1, 3).routes[0]
     assert journey.waiting == 0
 
 
@@ -206,11 +206,11 @@ def test_a_planner_with_no_clock_refuses_a_departure_by_name(gated, technique):
     # own "unexpected keyword argument 'departing'" names a function the caller
     # never called and offers nothing to do about it.
     with pytest.raises(ValueError, match="as though it were always open"):
-        technique.bind(gated).route(1, 3, departing=at(22))
+        technique.bind(gated).route(1, 3, departing=at(22)).routes[0]
     with pytest.raises(ValueError, match="TimeDependentDijkstra"):
-        technique.bind(gated).route(1, 3, departing=at(22))
+        technique.bind(gated).route(1, 3, departing=at(22)).routes[0]
 
 
 def test_dropping_the_departure_routes_the_always_open_network(gated):
     # And the alternative the message names actually works.
-    assert rl.Dijkstra().bind(gated).route(1, 3).nodes == [1, 2, 3]
+    assert rl.Dijkstra().bind(gated).route(1, 3).routes[0].nodes == [1, 2, 3]

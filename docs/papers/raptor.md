@@ -43,7 +43,7 @@ of the same route than the one they rode in on.
 
 `τ[k]` is the earliest arrival using at most `k` trips, so the table is a Pareto
 frontier of arrival against changes — built rather than computed afterwards.
-`frontier` reads it out, and `max_transfers` caps `k`. Every stop holds a label
+`routes` reads it out, and `max_transfers` caps `k`. Every stop holds a label
 when the rounds finish, which makes this one-to-all by nature.
 
 ## Hello world
@@ -60,7 +60,7 @@ worth making at the middle one. Substitute the path to any GTFS zip.
 >>> env = rl.Environment(feed)
 
 >>> planner = rl.RAPTOR().bind(env)
->>> planner.route("A", "C", departing=time(8, 0))
+>>> planner.route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=1200)
 
 ```
@@ -74,7 +74,7 @@ as the path is. `bind` indexes the routes and trips; `route` runs one query
 against them. Cost is elapsed seconds, and the legs carry the clock:
 
 ```python
->>> journey = planner.route("A", "C", departing=time(8, 0))
+>>> journey = planner.route("A", "C", departing=time(8, 0)).routes[0]
 >>> journey.departs, journey.arrives     # seconds since the service day's midnight
 (28800, 30000)
 >>> journey.transfers, journey.waiting   # one change, five minutes at B
@@ -99,7 +99,7 @@ journey = planner.route(
     feed.nearest(47.6062, -122.3321),              # downtown Seattle
     feed.nearest(47.7076, -122.2054),              # Juanita, across the lake
     departing=time(8, 30),
-)
+).routes[0]
 journey.arrives, journey.transfers                 # when you land, and changes
 feed.names()[journey.destination]                  # the name on the sign
 ```
@@ -132,19 +132,22 @@ The rounds are the frontier, so asking for it costs nothing extra — one
 journey per round that improved something, fewest changes first.
 
 ```python
->>> planner.frontier("A", "C", departing=time(8, 0))
-[Journey('A' → 'B' → 'C', cost=1800), Journey('A' → 'B' → 'C', cost=1200)]
+>>> planner.route("A", "C", departing=time(8, 0)).routes
+[Journey('A' → 'B' → 'C', cost=1200), Journey('A' → 'B' → 'C', cost=1800)]
 
 ```
 
-Stay aboard and arrive at 08:30, or change once and arrive at 08:20. Both are
-real answers; which a rider wants is not the algorithm's business. On a city
+Change once and arrive at 08:20, or stay aboard and arrive at 08:30. Both are
+real answers; which a rider wants is not the algorithm's business. An answer
+leads with the earliest arrival — the journey every other technique here would
+have given — and each entry after it buys one fewer change at the price of
+arriving later. On a city
 feed the spread is wider: downtown Seattle to Juanita is 09:38 with three
 changes, 09:41 with two, and 16:20 for a rider who will change only once.
 `max_transfers` cuts the same frontier from the other end.
 
 ```python
->>> planner.route("A", "C", departing=time(8, 0), max_transfers=0)
+>>> planner.route("A", "C", departing=time(8, 0), max_transfers=0).routes[0]
 Journey('A' → 'B' → 'C', cost=1800)
 
 ```
@@ -157,7 +160,7 @@ and changes what the rounds can do.
 
 ```python
 >>> env = rl.Environment(feed, rl.Footpaths(feed, within=2000))
->>> journey = rl.RAPTOR().bind(env).route("A", "C", departing=time(8, 0))
+>>> journey = rl.RAPTOR().bind(env).route("A", "C", departing=time(8, 0)).routes[0]
 >>> journey.transfers, journey.walking
 (0, 793)
 
@@ -172,7 +175,7 @@ That is the right answer, and one the plain model cannot express.
 A departure time is required, with no default:
 
 ```python
->>> planner.route("A", "C")                       # doctest: +ELLIPSIS
+>>> planner.route("A", "C").routes[0]                       # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
 ValueError: RAPTOR needs a departure time: pass departing=time(8, 30), ...
@@ -183,7 +186,7 @@ And a technique that cannot read a timetable says so, rather than quietly
 routing over the feed's edges as though they were streets:
 
 ```python
->>> rl.Dijkstra().bind(rl.Environment(feed)).route("A", "C")
+>>> rl.Dijkstra().bind(rl.Environment(feed)).route("A", "C").routes[0]
 Traceback (most recent call last):
     ...
 TypeError: Dijkstra cannot route over timetable layers; it accepts scalar

@@ -59,7 +59,7 @@ target*, so a query needs one.
 >>> env = rl.Environment(feed)
 
 >>> planner = rl.TripBased().bind(env)                # the transfer set is built here
->>> planner.route("A", "C", departing=time(8, 0))
+>>> planner.route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=1200)
 
 ```
@@ -77,12 +77,12 @@ The rounds are changes, so the frontier falls out the same way it does for
 RAPTOR:
 
 ```python
->>> planner.frontier("A", "C", departing=time(8, 0))
-[Journey('A' → 'B' → 'C', cost=1800), Journey('A' → 'B' → 'C', cost=1200)]
+>>> planner.route("A", "C", departing=time(8, 0)).routes
+[Journey('A' → 'B' → 'C', cost=1200), Journey('A' → 'B' → 'C', cost=1800)]
 
 ```
 
-Stay aboard and arrive at 08:30; change once and arrive at 08:20. That is
+Change once and arrive at 08:20; stay aboard and arrive at 08:30. That is
 RAPTOR's front on this instance, exactly — the tests hold the two to it.
 
 ## What it scanned
@@ -133,7 +133,7 @@ a [contraction hierarchy](contraction-hierarchies.md).
 ```python
 >>> rl.TripBased(reduce=False)
 TripBased(reduce=False)
->>> rl.TripBased(reduce=False).bind(env).route("A", "C", departing=time(8, 0))
+>>> rl.TripBased(reduce=False).bind(env).route("A", "C", departing=time(8, 0)).routes[0]
 Journey('A' → 'B' → 'C', cost=1200)
 
 ```

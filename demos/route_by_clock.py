@@ -85,7 +85,7 @@ def main() -> int:
     destination = layer.nearest(*args.destination)
     always_open = rl.Dijkstra().bind(env)
 
-    baseline = always_open.route(origin, destination)
+    baseline = always_open.route(origin, destination).routes[0]
     if baseline is None:
         print("\nthose points are not connected in this profile")
         return 1
@@ -97,7 +97,7 @@ def main() -> int:
         departing = datetime.datetime.combine(
             WEEK_START + datetime.timedelta(days=args.day), datetime.time(hour)
         )
-        journey = clock.route(origin, destination, departing=departing)
+        journey = clock.route(origin, destination, departing=departing).routes[0]
         if journey is None:
             print(f"{hour:>5}:00  {'no route at this hour':>33}")
             continue

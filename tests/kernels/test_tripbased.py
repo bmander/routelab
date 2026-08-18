@@ -24,7 +24,7 @@ def planner(env) -> rl.TripBased:
 
 
 def test_hello_world(planner):
-    journey = planner.route("A", "C", departing=time(8, 0))
+    journey = planner.route("A", "C", departing=time(8, 0)).routes[0]
     assert journey.arrives == 8 * 3600 + 20 * 60
     assert journey.transfers == 1
     assert [leg.head for leg in journey.legs] == ["B", "C"]
@@ -51,26 +51,25 @@ def test_the_search_is_goal_directed(planner):
     assert result.scanned == 3, "each was scanned once"
     assert result.rounds == 2
     # A kept search answers for its target exactly as route() would.
-    assert planner.journey(result, "C") == planner.route("A", "C", departing=time(8, 0))
+    assert planner.journey(result, "C") == planner.route("A", "C", departing=time(8, 0)).routes[0]
     assert planner.journey(result, "B") is None
     with pytest.raises(ValueError, match="searches toward a single target, and got no target"):
         planner.search("A", departing=time(8, 0))
 
 
 def test_the_front_is_one_journey_per_number_of_changes(planner):
-    front = planner.frontier("A", "C", departing=time(8, 0))
+    front = planner.route("A", "C", departing=time(8, 0)).routes
     assert [(j.transfers, j.arrives) for j in front] == [
-        (0, 8 * 3600 + 30 * 60),
         (1, 8 * 3600 + 20 * 60),
+        (0, 8 * 3600 + 30 * 60),
     ]
-    assert planner.route("A", "C", departing=time(8, 0)) == front[-1]
-    capped = planner.route("A", "C", departing=time(8, 0), max_transfers=0)
-    assert (capped.arrives, capped.transfers) == (front[0].arrives, 0)
-    assert capped.settled < front[0].settled, "a capped sweep never reaches the third trip"
+    capped = planner.route("A", "C", departing=time(8, 0), max_transfers=0).routes[0]
+    assert (capped.arrives, capped.transfers) == (front[-1].arrives, 0)
+    assert capped.settled < front[-1].settled, "a capped sweep never reaches the third trip"
     result = planner.search("A", targets=[planner.node_id("C")], departing=time(8, 0))
-    assert planner.journeys(result, "C") == front
+    assert planner.journeys(result, "C") == list(reversed(front))
     with pytest.raises(ValueError, match="cannot be -1"):
-        planner.route("A", "C", departing=time(8, 0), max_transfers=-1)
+        planner.route("A", "C", departing=time(8, 0), max_transfers=-1).routes[0]
 
 
 def test_the_segments_are_a_search_space(planner):
@@ -102,7 +101,7 @@ def test_the_segments_are_a_search_space(planner):
 def test_several_origins_each_carry_a_head_start(feed):
     env = rl.Environment(feed, rl.ScalarEdges(("C", "B", 60)))
     planner = rl.TripBased().bind(env)
-    journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0))
+    journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0)).routes[0]
     assert (journey.origin, journey.arrives, journey.cost) == ("C", 8 * 3600 + 360, 360)
     result = planner.search({"A": 0, "C": 300}, targets=[planner.node_id("B")], departing=time(8, 0))
     assert planner.journey(result, "B").cost == 360, "cost elapsed from the query's departure"
@@ -130,7 +129,7 @@ def test_a_profile_is_one_journey_per_departure_worth_taking(planner):
     # And every step agrees with asking route() at that moment with that
     # many changes allowed.
     for journey in planner.profile("A", "C", departing=time(0, 0), until=25 * 3600):
-        again = planner.route("A", "C", departing=journey.departs, max_transfers=journey.transfers)
+        again = planner.route("A", "C", departing=journey.departs, max_transfers=journey.transfers).routes[0]
         assert again.arrives == journey.arrives
 
 
@@ -138,7 +137,7 @@ def test_a_walk_beats_the_steps_it_dominates(feed):
     env = rl.Environment(feed, rl.ScalarEdges(("A", "B", 60)))
     planner = rl.TripBased().bind(env)
     assert planner.profile("A", "B", departing=time(0, 0), until=25 * 3600) == []
-    assert planner.route("A", "B", departing=time(12, 0)).arrives == 12 * 3600 + 60
+    assert planner.route("A", "B", departing=time(12, 0)).routes[0].arrives == 12 * 3600 + 60
 
 
 def test_the_profile_refuses_a_missing_or_backwards_window(planner):
@@ -147,7 +146,7 @@ def test_the_profile_refuses_a_missing_or_backwards_window(planner):
     with pytest.raises(ValueError, match="cannot close before it opens"):
         planner.profile("A", "C", departing=time(9, 0), until=time(8, 0))
     with pytest.raises(ValueError, match=r"takes no until; .*profile\(\) on CSA\(\), PTL\(\) or TripBased\(\)"):
-        planner.route("A", "C", departing=time(8, 0), until=time(9, 0))
+        planner.route("A", "C", departing=time(8, 0), until=time(9, 0)).routes[0]
 
 
 def test_reduction_is_a_policy_and_never_an_answer(env, planner):
@@ -157,10 +156,10 @@ def test_reduction_is_a_policy_and_never_an_answer(env, planner):
     for hour in (7, 8, 12, 23):
         for origin in "ABC":
             for destination in "ABC":
-                a = planner.route(origin, destination, departing=time(hour, 0))
-                b = unreduced.route(origin, destination, departing=time(hour, 0))
-                assert (a is None) == (b is None)
-                assert a is None or a.arrives == b.arrives
+                a = planner.route(origin, destination, departing=time(hour, 0)).routes
+                b = unreduced.route(origin, destination, departing=time(hour, 0)).routes
+                assert bool(a) == bool(b)
+                assert not a or a[0].arrives == b[0].arrives
 
 
 def test_footprint_counts_the_transfers_on_top_of_the_timetable(env, planner):
@@ -179,6 +178,6 @@ def test_it_needs_a_timetable_and_a_departure(planner):
     plain = rl.Environment(rl.ScalarEdges(("a", "b", 1)))
     assert rl.TripBased().missing_from(plain.compile()) == frozenset({"timetable"})
     with pytest.raises(ValueError, match="needs a departure time"):
-        planner.route("A", "C")
+        planner.route("A", "C").routes[0]
     with pytest.raises(ValueError, match="takes no max_cost; a cost bound belongs to"):
-        planner.route("A", "C", departing=time(8, 0), max_cost=10)
+        planner.route("A", "C", departing=time(8, 0), max_cost=10).routes[0]

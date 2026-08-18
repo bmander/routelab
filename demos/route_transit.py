@@ -142,9 +142,9 @@ def main(argv: "list[str] | None" = None) -> int:
 
         # Timed a second time, because the first query of a run pays for pages
         # the bind step only just wrote.
-        planner.route(origin, target, departing=args.departing)
+        planner.route(origin, target, departing=args.departing).routes[0]
         started = time.perf_counter()
-        journey = planner.route(origin, target, departing=args.departing)
+        journey = planner.route(origin, target, departing=args.departing).routes[0]
         query = (time.perf_counter() - started) * 1000
 
         if journey is None:

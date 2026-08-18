@@ -22,8 +22,8 @@ def town() -> rl.Environment:
 
 def test_hello_world(town):
     planner = rl.ContractionHierarchy().bind(town)
-    journey = planner.route((0, 0), (8, 8))
-    assert journey.cost == rl.Dijkstra().bind(town).route((0, 0), (8, 8)).cost
+    journey = planner.route((0, 0), (8, 8)).routes[0]
+    assert journey.cost == rl.Dijkstra().bind(town).route((0, 0), (8, 8)).routes[0].cost
 
 
 @pytest.mark.parametrize("seed", range(5))
@@ -40,16 +40,17 @@ def test_it_answers_exactly_what_dijkstra_answers(seed):
     for source in labels[:12]:
         truth = plain.search(source)
         for target in labels[:12]:
-            found = hierarchy.route(source, target)
+            found = hierarchy.route(source, target).routes
             expected = truth.cost(plain.node_id(target))
-            assert (found.cost if found else None) == expected, f"{source} -> {target}"
+            # An unreachable pair is a Pareto set with nothing in it.
+            assert (found[0].cost if found else None) == expected, f"{source} -> {target}"
 
 
 def test_the_path_it_reports_is_a_real_one(town):
     # A hierarchy searches over shortcuts, so its answer has to be unpacked back
     # into edges the environment recognises. Walking them is the proof.
     compiled = town.compile()
-    journey = rl.ContractionHierarchy().bind(town).route((0, 0), (8, 8))
+    journey = rl.ContractionHierarchy().bind(town).route((0, 0), (8, 8)).routes[0]
 
     edges = [leg.edge for leg in journey.legs]
     start = compiled.node_id(journey.origin)
@@ -64,9 +65,9 @@ def test_legs_come_back_with_geometry_and_provenance():
     # the parts that only know about the environment's own layers.
     env = rl.Environment(rl.OSM(JUNCTION, rl.Walking()))
     compiled = env.compile()
-    journey = rl.ContractionHierarchy().bind(env).route(1, 5)
+    journey = rl.ContractionHierarchy().bind(env).route(1, 5).routes[0]
 
-    assert journey.cost == rl.Dijkstra().bind(env).route(1, 5).cost
+    assert journey.cost == rl.Dijkstra().bind(env).route(1, 5).routes[0].cost
     assert all(leg.source is env.sources[0] for leg in journey.legs)
     assert all(compiled.geometry(leg.edge) for leg in journey.legs)
 
@@ -96,7 +97,7 @@ def test_ordering_changes_the_hierarchy_and_not_the_answers(town):
     careful = rl.ContractionHierarchy(rl.EdgeDifference()).bind(town)
     arbitrary = rl.ContractionHierarchy(rl.RandomOrder(seed=3)).bind(town)
 
-    assert careful.route((0, 0), (8, 8)).cost == arbitrary.route((0, 0), (8, 8)).cost
+    assert careful.route((0, 0), (8, 8)).routes[0].cost == arbitrary.route((0, 0), (8, 8)).routes[0].cost
     assert careful.hierarchy.num_shortcuts < arbitrary.hierarchy.num_shortcuts
 
 
@@ -132,12 +133,12 @@ def test_the_same_query_twice_gives_the_same_path(town):
     routes it may pick a different one. What it cannot do is pick differently
     from run to run — that would make any diff against it meaningless.
     """
-    first = rl.ContractionHierarchy().bind(town).route((0, 0), (8, 8))
-    second = rl.ContractionHierarchy().bind(town).route((0, 0), (8, 8))
+    first = rl.ContractionHierarchy().bind(town).route((0, 0), (8, 8)).routes[0]
+    second = rl.ContractionHierarchy().bind(town).route((0, 0), (8, 8)).routes[0]
     assert first.nodes == second.nodes
 
     # And however it broke the tie, the cost is Dijkstra's exactly.
-    assert first.cost == rl.Dijkstra().bind(town).route((0, 0), (8, 8)).cost
+    assert first.cost == rl.Dijkstra().bind(town).route((0, 0), (8, 8)).routes[0].cost
 
 
 def test_it_refuses_options_that_mean_nothing_to_it(town):
@@ -161,19 +162,19 @@ def test_it_refuses_bounds_it_cannot_honour(town):
     # the original, so it is refused rather than quietly answered wrong.
     planner = rl.ContractionHierarchy().bind(town)
     with pytest.raises(ValueError, match="takes no max_cost; a cost bound belongs to"):
-        planner.route((0, 0), (8, 8), max_cost=100)
+        planner.route((0, 0), (8, 8), max_cost=100).routes[0]
 
 
 def test_unreachable_destinations_return_nothing():
     env = rl.Environment(rl.ScalarEdges([("a", "b", 1), ("c", "d", 1)]))
-    assert rl.ContractionHierarchy().bind(env).route("a", "d") is None
+    assert rl.ContractionHierarchy().bind(env).route("a", "d").routes == []
 
 
 def test_several_origins_with_access_costs(town):
     hierarchy = rl.ContractionHierarchy().bind(town)
     plain = rl.Dijkstra().bind(town)
     origins = {(0, 0): 0, (8, 0): 500}
-    assert hierarchy.route(origins, (8, 8)).cost == plain.route(origins, (8, 8)).cost
+    assert hierarchy.route(origins, (8, 8)).routes[0].cost == plain.route(origins, (8, 8)).routes[0].cost
 
 
 def test_the_search_space_is_two_trees_that_met(town):

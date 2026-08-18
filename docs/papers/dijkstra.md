@@ -54,9 +54,28 @@ Three steps: describe a network, bind a technique to it, ask a question.
 
 >>> planner = rl.Dijkstra().bind(env)
 >>> planner.route("home", "work")
-Journey('home' → 'a' → 'b' → 'work', cost=600)
+Answer(Journey('home' → 'a' → 'b' → 'work', cost=600), SearchResult(num_nodes=4, settled=4))
 
 ```
+
+A query answers with three things, and the journey is one of them:
+
+```python
+>>> answer = planner.route("home", "work")
+>>> answer.routes                      # every journey worth having, best first
+[Journey('home' → 'a' → 'b' → 'work', cost=600)]
+>>> answer.searchspace()               # what the search looked at
+ShortestPathTree(3 branches, magnitude='weight', peak=600)
+>>> answer.raw.settled                 # the kernel's own table
+4
+
+```
+
+`routes` is a list because a technique that tells journeys apart by more than
+one criterion has more than one answer, and one that does not has a Pareto set
+of exactly one — a front of one rather than a lesser kind of answer. Nothing
+above searched twice: the space and the table were read off the search the
+routes came from.
 
 Edges are directed, and nodes take whatever names you already use — strings
 here, transit stop ids or OpenStreetMap node ids elsewhere. Ten minutes the
@@ -64,7 +83,7 @@ long way round beats fifteen straight down the arterial, and the answer carries
 its parts:
 
 ```python
->>> journey = planner.route("home", "work")
+>>> journey = planner.route("home", "work").routes[0]
 >>> journey.cost, journey.nodes
 (600, ['home', 'a', 'b', 'work'])
 
@@ -89,7 +108,7 @@ planner = rl.Dijkstra().bind(env)
 journey = planner.route(
     streets.nearest(47.6062, -122.3321),      # snap a coordinate to a node id
     streets.nearest(47.6740, -122.1215),
-)
+).routes[0]
 journey.cost                                  # seconds of driving
 journey.geometry                              # the whole route, as (lat, lon)
 ```
@@ -116,7 +135,7 @@ there. This is ordinary multi-source Dijkstra — only the initial queue differs
 walking distance is an origin, with its walk as the head start.
 
 ```python
->>> planner.route({"home": 0, "b": 120}, "work")
+>>> planner.route({"home": 0, "b": 120}, "work").routes[0]
 Journey('b' → 'work', cost=360)
 
 ```
@@ -126,8 +145,8 @@ a one-to-all search that gives an isochrone; on a point-to-point one it says
 "don't bother if it is further than this".
 
 ```python
->>> print(planner.route("home", "work", max_cost=500))
-None
+>>> planner.route("home", "work", max_cost=500).routes
+[]
 
 ```
 
@@ -135,7 +154,7 @@ A technique refuses options it does not take, and names the technique they
 belong to:
 
 ```python
->>> planner.route("home", "work", max_transfers=1)      # doctest: +ELLIPSIS
+>>> planner.route("home", "work", max_transfers=1).routes[0]      # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
 ValueError: Dijkstra takes no max_transfers; a cap on changes belongs to RAPTOR(), ...
@@ -159,27 +178,14 @@ ShortestPathTree(3 branches, magnitude='weight', peak=600)
 
 ```
 
-`route` returns the journey and drops the search it read it off, which is right
-when the journey is all you wanted. When it is not — a route *and* the picture
-behind it — `ask` keeps the search, and everything else is read from the one
-already run:
+`searchspace()` is a method rather than an attribute for two reasons: it takes
+options — `magnitude="nodes"` counts settled nodes where the default
+accumulates travel time — and building it is real work over everything
+settled, which a caller who only wanted a route should not pay for.
 
-```python
->>> answer = planner.ask("home", "work")
->>> answer.journey
-Journey('home' → 'a' → 'b' → 'work', cost=600)
->>> answer.explored()
-ShortestPathTree(3 branches, magnitude='weight', peak=600)
->>> answer.result.settled
-4
-
-```
-
-Reading is not free — a path walks parent pointers, a search space is built
-from what was settled — but nothing there searches twice. Every technique
-answers `ask`, including the ones that keep no table: theirs holds the journey
-and `answer.result` is `None`, and the questions needing a table refuse by
-name.
+Every technique answers `route` the same way. The ones that keep no table hold
+their routes and nothing else: `raw` is `None`, and `searchspace()` says so and
+names the techniques that do keep one.
 
 Dijkstra grows and returns a shortest-path tree. Each branch carries the total
 of everything hanging off it, so a city-sized search draws as a river network
