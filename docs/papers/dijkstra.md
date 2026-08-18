@@ -187,9 +187,9 @@ benchmark an algorithm, not to route over a real network.
 
 ## See also
 
-- [A*](../../README.md#guided-search) — the same search, guided by an estimate
+- [A*](astar.md) — the same search, guided by an estimate
   of the cost still to go.
-- [Contraction hierarchies](../../README.md#not-searching-the-city-at-all) — the
+- [Contraction hierarchies](contraction-hierarchies.md) — the
   same answer without searching the city.
 - `rl.BFS()` — Moore's breadth-first search: the same question by hop count,
   when every edge costs the same.

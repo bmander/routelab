@@ -13,34 +13,29 @@ assumes it.
 | Paper | Technique | Page |
 |---|---|---|
 | Dijkstra, *A note on two problems in connexion with graphs* (1959) | `Dijkstra()` | [Dijkstra's algorithm](papers/dijkstra.md) |
-| Moore, *The shortest path through a maze* (1959) | `BFS()` | *to be written* — [README](../README.md#use) |
-| Hart, Nilsson & Raphael, *A formal basis for the heuristic determination of minimum cost paths* (1968) | `AStar(Euclidean())`, `AStar(Zero())` | *to be written* — [README](../README.md#guided-search) |
-| Goldberg & Harrelson, *Computing the shortest path: A\* search meets graph theory* (2005) | `AStar(Landmarks(16))` | *to be written* — [README](../README.md#measuring-instead-of-assuming) |
-| Geisberger, Sanders, Schultes & Delling, *Contraction hierarchies* (2008) | `ContractionHierarchy(EdgeDifference())` | *to be written* — [README](../README.md#not-searching-the-city-at-all) |
-| Dreyfus, *An appraisal of some shortest-path algorithms* (1969) | `TimeDependentDijkstra()` | *to be written* — [README](../README.md#when-the-network-is-not-always-open) |
+| Moore, *The shortest path through a maze* (1959) | `BFS()` | [Breadth-first search](papers/bfs.md) |
+| Hart, Nilsson & Raphael, *A formal basis for the heuristic determination of minimum cost paths* (1968) | `AStar(Euclidean())`, `AStar(Zero())` | [A*](papers/astar.md) |
+| Goldberg & Harrelson, *Computing the shortest path: A\* search meets graph theory* (2005) | `AStar(Landmarks(16))` | [ALT landmarks](papers/landmarks.md) |
+| Geisberger, Sanders, Schultes & Delling, *Contraction hierarchies* (2008) | `ContractionHierarchy(EdgeDifference())` | [Contraction hierarchies](papers/contraction-hierarchies.md) |
+| Dreyfus, *An appraisal of some shortest-path algorithms* (1969) | `TimeDependentDijkstra()` | [Time-dependent Dijkstra](papers/time-dependent.md) |
 
 ## Timetables
 
 | Paper | Technique | Page |
 |---|---|---|
-| Pyrga, Schulz, Wagner & Zaroliagis, *Efficient models for timetable information in public transportation systems* (2007) | `TimeExpanded()`, `TimeDependent()` | *to be written* — [README](../README.md#timetables-two-models-of-the-same-departures) |
+| Pyrga, Schulz, Wagner & Zaroliagis, *Efficient models for timetable information in public transportation systems* (2007) | `TimeExpanded()`, `TimeDependent()` | [Two models of a timetable](papers/pyrga.md) |
 | Delling, Pajor & Werneck, *Round-based public transit routing* (2012) | `RAPTOR()` | [RAPTOR](papers/raptor.md) |
-| Dibbelt, Pajor, Strasser & Wagner, *Intriguingly simple and fast transit routing* (2013) | `CSA()` | *to be written* — [README](../README.md#one-array-scanned-once) |
-| Witt, *Trip-based public transit routing* (2015) | `TripBased()` | *to be written* — [README](../README.md#trips-and-the-transfers-between-them) |
-| Delling, Dibbelt, Pajor & Werneck, *Public transit labeling* (2015) | `PTL()` | *to be written* — [README](../README.md#labels-over-the-events) |
+| Dibbelt, Pajor, Strasser & Wagner, *Intriguingly simple and fast transit routing* (2013) | `CSA()` | [Connection scan](papers/csa.md) |
+| Witt, *Trip-based public transit routing* (2015) | `TripBased()` | [Trip-based routing](papers/trip-based.md) |
+| Delling, Dibbelt, Pajor & Werneck, *Public transit labeling* (2015) | `PTL()` | [Public transit labeling](papers/ptl.md) |
 
 ## Multimodal
 
 | Paper | Technique | Page |
 |---|---|---|
-| Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for multi-modal route planning* (2019) | `ULTRA(RAPTOR())`, `ULTRA(CSA())` | *to be written* — [README](../README.md#walking-without-a-radius) |
-| Barrett, Jacob & Marathe, *Formal-language-constrained path problems* (2000) | `LabelConstrained()`, `Modes(...)` | *to be written* — [README](../README.md#saying-which-modes-and-nothing-precomputed) |
-| Dibbelt, Pajor & Wagner, *User-constrained multi-modal route planning* (2012) §3 — UCCH | `UCCH()` | *to be written* — [README](../README.md#contracting-the-walking-not-the-language) |
-
-*To be written* means the technique is implemented and tested — every one of
-them is — and only its page is missing; the README link beside it holds that
-material today. Cross-references from the written pages point there too, and
-will move as pages land.
+| Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for multi-modal route planning* (2019) | `ULTRA(RAPTOR())`, `ULTRA(CSA())` | [ULTRA](papers/ultra.md) |
+| Barrett, Jacob & Marathe, *Formal-language-constrained path problems* (2000) | `LabelConstrained()`, `Modes(...)` | [Label-constrained routing](papers/label-constrained.md) |
+| Dibbelt, Pajor & Wagner, *User-constrained multi-modal route planning* (2012) §3 — UCCH | `UCCH()` | [UCCH](papers/ucch.md) |
 
 The shelf's *to do* list — Delling, Pajor & Wagner (2009), Geisberger (2010),
 transfer patterns (2010) — appears in the [README](../README.md); those papers

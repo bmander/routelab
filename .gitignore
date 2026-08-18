@@ -13,3 +13,4 @@ __pycache__/
 route.html
 route.geojson
 .claude/
+/site/

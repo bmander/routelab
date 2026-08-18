@@ -12,10 +12,10 @@ a second top-level module named ``conftest`` shadows this suite's own — see th
 note in ``pyproject.toml``. So the pages are collected by hand instead, which
 costs one loop and keeps the arrangement the tests already depend on.
 
-The only name a page may assume is ``TINY_GTFS``. Spelling that path out in the
-page would tie the snippet to whichever directory pytest started in; naming it
-says the one true thing about it, which is that a reader substitutes their own
-feed.
+The names a page may assume are the fixture paths below, and nothing else.
+Spelling one out in a page would tie the snippet to whichever directory pytest
+started in; naming it says the one true thing about it, which is that a reader
+substitutes their own feed or extract.
 """
 
 from __future__ import annotations
@@ -26,9 +26,19 @@ from typing import List
 
 import pytest
 
-from conftest import TINY_GTFS
+from conftest import FIXTURES, JUNCTION, TINY_GTFS
 
 DOCS = Path(__file__).resolve().parent.parent / "docs"
+
+#: What a page may name. Every one is a fixture this repository ships and the
+#: Rust crates test against, so a page and a kernel are describing one file.
+NAMESPACE = {
+    "TINY_GTFS": TINY_GTFS,
+    "JUNCTION_OSM": JUNCTION,
+    #: A gate shut outside 07:00–21:00 with a longer way round it — the
+    #: fixture the time-dependent page is about.
+    "CONDITIONAL_OSM": FIXTURES / "conditional.osm",
+}
 
 #: Every page, so a new one is covered by existing here rather than by being
 #: added to a list someone has to remember.
@@ -46,7 +56,7 @@ def test_page_examples(page: Path) -> None:
     failures, _ = doctest.testfile(
         str(page),
         module_relative=False,
-        globs={"TINY_GTFS": TINY_GTFS},
+        globs=dict(NAMESPACE),
         encoding="utf-8",
         # Reported rather than raised, so a page with three broken examples
         # says all three instead of stopping at the first.

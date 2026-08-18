@@ -28,6 +28,12 @@ Each technique is a published algorithm, implemented as its paper states it,
 and named after it in the API. This is the shelf; the sections below say what
 each one buys and what it costs.
 
+Every paper also has a page of its own — the algorithm as pseudocode, a runnable
+hello-world, and a section per variant — at
+**[bmander.github.io/routelab](https://bmander.github.io/routelab/)**, or in
+[`docs/`](docs/index.md) if you would rather read the Markdown. Their examples
+are run by the test suite, so they cannot drift from the code.
+
 | Paper | Technique | Section |
 |---|---|---|
 | Dijkstra, *A note on two problems in connexion with graphs* (1959) | `Dijkstra()` | [Use](#use) |

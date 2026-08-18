@@ -230,11 +230,11 @@ best arrival is the answer rather than the search, and lives on the result:
 
 ## See also
 
-- [CSA](../../README.md#one-array-scanned-once) — the same problem with even the
+- [CSA](csa.md) — the same problem with even the
   routes thrown away: one array, scanned once.
-- [Trip-based routing](../../README.md#trips-and-the-transfers-between-them) —
+- [Trip-based routing](trip-based.md) —
   labels on trips rather than stops, with the transfers precomputed.
-- [The two graph models](../../README.md#timetables-two-models-of-the-same-departures)
+- [The two graph models](pyrga.md)
   RAPTOR is arguing with — a node per departure event, or a node per stop with
   edges that depend on when you arrive.
 - [Dijkstra](dijkstra.md) — the same three steps on a road network.
