@@ -2,26 +2,25 @@
 
 Reference implementations of routing algorithms — Python veneer, Rust kernels.
 
-Routing research has a transfer problem. On one side are papers with bespoke C++
-harnesses, each with its own binary formats and console apps, benchmarked on
-whichever network the authors had handy. On the other are production engines
-(OTP2, MOTIS, Valhalla) that are excellent at serving traffic and poor at
-answering "what does this new algorithm actually buy?" There is no lobby between
-the two — no place where two implementations of the same problem can be swapped,
-run on the same instance, and compared.
+Routing research has a transfer problem. On one side sit papers with bespoke
+C++ harnesses, each with its own binary formats and console apps, benchmarked
+on whichever network the authors had handy. On the other sit production engines
+(OTP2, MOTIS, Valhalla), excellent at serving traffic and poor at answering
+"what does this new algorithm actually buy?" There is no lobby between the two
+— no place to swap two implementations of the same problem, run them on the
+same instance, and compare.
 
 routelab is that lobby. It is not a production routing engine and does not want
 to be. It is a place to implement published algorithms honestly — fast enough
 that their constant factors mean something, behind an API shared across
-implementations, checked against something independent that is obviously
-correct.
+implementations, checked against something independent and obviously correct.
 
 **Status: early.** Today it has a static graph, the searches everything else
 builds on (Dijkstra, BFS, A*), two heuristics, contraction hierarchies,
 time-dependent search over OpenStreetMap's scheduled restrictions, both of
 Pyrga et al.'s timetable models over GTFS, RAPTOR, CSA, trip-based routing,
 public transit labeling, and ULTRA's unlimited transfers. The path from here
-runs on through the multimodal and multicriteria layers above them.
+runs through the multimodal and multicriteria layers above them.
 
 ## What is implemented
 
@@ -50,13 +49,13 @@ each one buys and what it costs.
 | Dibbelt, Pajor & Wagner, *User-constrained multi-modal route planning* (2012) §3 — UCCH | `UCCH()` | [Contracting the walking, not the language](#contracting-the-walking-not-the-language) |
 
 The rows marked *not yet implemented* are the shelf's gaps, in the order the
-literature filled them: after Pyrga et al. the timetable graphs were engineered
-harder, then RAPTOR and CSA — both here — stopped building a graph at all,
-Witt's trip-based search — here too — stopped labelling stops, PTL — also
-here — built the biggest graph of all and labelled it once, and the rest are
-what came after. Every kernel that is here is checked against something that
-cannot be wrong in the same direction — a pure-Python reference, a brute-force
-oracle, or the paper's own second model — see [The contract](#the-contract).
+literature filled them: after Pyrga et al. came harder-engineered timetable
+graphs; then RAPTOR and CSA — both here — stopped building a graph at all;
+Witt's trip-based search — here too — stopped labelling stops; PTL — also
+here — built the biggest graph of all and labelled it once; and the rest came
+after. Every kernel here is checked against something that cannot be wrong in
+the same direction — a pure-Python reference, a brute-force oracle, or the
+paper's own second model — see [The contract](#the-contract).
 
 ## Install
 
@@ -83,10 +82,10 @@ planner = technique.bind(env)       # preprocessing, if the technique has any
 planner.route("a", "c")             # Journey('a' → 'b' → 'c', cost=16)
 ```
 
-An environment is assembled from layers, and nodes are labelled by whatever you
-already call them — stop ids, OSM node ids, `("bike", 42)`. Each leg of a journey
-remembers which layer it came from, which is what makes a multimodal answer
-readable rather than just a number:
+An environment is assembled from layers, and nodes take whatever names you
+already use — stop ids, OSM node ids, `("bike", 42)`. Each leg of a journey
+remembers its layer, which makes a multimodal answer readable rather than just
+a number:
 
 ```python
 streets = rl.ScalarEdges(("home", "stop_a", 300), bidirectional=True)
@@ -98,8 +97,8 @@ journey = rl.Dijkstra().bind(env).route("home", "stop_b")
 # [('stop_a', ScalarEdges(2 edges)), ('stop_b', ScalarEdges(1 edges))]
 ```
 
-Queries take the arguments the problem actually needs — several origins, each
-already carrying the cost of an access walk, and a bound on how far to look:
+Queries take the arguments the problem needs — several origins, each already
+carrying the cost of an access walk, and a bound on how far to look:
 
 ```python
 rl.Dijkstra().bind(env).route({"stop_a": 0, "stop_b": 45}, "home", max_cost=600)
@@ -108,13 +107,14 @@ rl.Dijkstra().bind(env).route({"stop_a": 0, "stop_b": 45}, "home", max_cost=600)
 The same shape holds for every technique, a timetable included:
 `RAPTOR().bind(env).route({"stop_a": 0, "stop_b": 45}, "stop_z", departing=time(8, 30))`
 stands at stop_b forty-five seconds after departing. Options are per technique
-and declared as data — `Dijkstra.options` is `{"max_cost"}` — and an option a
-technique does not take is refused by name, with the technique it belongs to.
+and declared as data — `Dijkstra.options` is `{"max_cost"}` — and a technique
+refuses an option it does not take by name, saying which technique it belongs
+to.
 
 Configuring and binding are separate because the middle step gets expensive:
-sixteen landmarks over a city is a second and 33 MB, and that belongs to a verb
-rather than to a constructor. It also makes a technique a *value* — something you
-can name, put in a list, and point at more than one dataset:
+sixteen landmarks over a city cost a second and 33 MB, and that belongs to a
+verb, not a constructor. The split also makes a technique a *value* — something
+you can name, put in a list, and point at more than one dataset:
 
 ```python
 study = {
@@ -128,15 +128,15 @@ for name, technique in study.items():
     planner = technique.bind(env)
 ```
 
-There is no registry of names in the library: a dictionary of techniques is a
-line you write, and no fixed set could serve both a demo's dropdown and a
-parameter sweep. `rl.route(rl.Dijkstra(), env, "a", "c")` does the whole thing in
-one call when you have exactly one question to ask.
+The library has no registry of names: a dictionary of techniques is a line you
+write, and no fixed set could serve both a demo's dropdown and a parameter
+sweep. `rl.route(rl.Dijkstra(), env, "a", "c")` does the whole thing in one call
+when you have exactly one question to ask.
 
 ### Guided search
 
 A* takes a heuristic — an estimate of the cost still to go — and settles fewer
-nodes for the same answer. Layers supply what the estimate is built from:
+nodes for the same answer. Layers supply the estimate's ingredients:
 
 ```python
 env = rl.Environment(
@@ -151,27 +151,27 @@ rl.AStar(rl.Euclidean()).bind(env).route("home", "stop_b")
 `cost_per_distance` is the least a layer can charge to cover one unit of ground.
 `Euclidean` takes the **minimum** across layers, because a path may ride the
 fastest one the whole way — add a train to a walking network and a bound priced
-at walking speed starts overestimating, which turns an admissible heuristic into
-one that quietly returns paths that are not the cheapest. A layer that declares
-no rate disables the heuristic rather than being assumed slow; a heuristic that
-cannot be built says so instead of falling back:
+at walking speed overestimates, and an admissible heuristic becomes one that
+quietly returns paths that are not the cheapest. A layer that declares no rate
+disables the heuristic rather than being assumed slow; a heuristic that cannot
+be built says so instead of falling back:
 
 ```python
 rl.AStar(rl.Euclidean()).bind(env)
 # ValueError: Euclidean needs a position for every node; 2 have none ...
 ```
 
-The environment does not keep a coordinates table or a rate. `Euclidean` derives
-both when it binds — `rl.Plane` and `rl.Pace`, two small specifications with the
-same `missing_from`/`bind` shape as a heuristic — and refuses if the layers
-cannot supply them. That is what keeps the environment a merge of labels, edges
-and provenance rather than a place every technique's needs accumulate.
+The environment keeps neither a coordinates table nor a rate. `Euclidean`
+derives both when it binds — `rl.Plane` and `rl.Pace`, two small specifications
+with the same `missing_from`/`bind` shape as a heuristic — and refuses if the
+layers cannot supply them. That keeps the environment a merge of labels, edges
+and provenance rather than a place where every technique's needs accumulate.
 
 There is no default heuristic. A* whose guidance silently became zero is Dijkstra
-wearing its name — the one failure a benchmark cannot see — so `rl.Zero()` has to
-be asked for out loud.
+wearing its name — the one failure a benchmark cannot see — so you must ask for
+`rl.Zero()` out loud.
 
-Whether guidance pays depends on how tight the bound is, which is a thing to
+Whether guidance pays depends on how tight the bound is, which you should
 measure rather than assume. On a 200×200 grid, corner to corner
 (`benchmarks/bench_astar.py`):
 
@@ -197,19 +197,20 @@ planner.route(env.sources[0].nearest(47.226, 9.523), ...)
 ```
 
 Nodes keep their OSM ids, so a route traces back to the map it came from, and
-each leg can produce the shape of the street it followed — `compiled.geometry(leg.edge)`
-gives the polyline, not just the endpoints.
+each leg can produce the shape of the street it followed — `leg.geometry` gives
+the polyline, not just the endpoints, and `journey.geometry` stitches them.
 
 A `Profile` decides who is travelling, because the same file is three different
 networks: which `highway` classes count, how fast each goes, whether `oneway`
-binds. `Walking()`, `Cycling()`, and `Driving()` ship as defaults, and any of them
-can be adjusted — `Driving().but(respect_oneway=False)`.
+binds. `Walking()`, `Cycling()`, and `Driving()` ship as defaults, and you can
+adjust any of them — `Driving().but(respect_oneway=False)`.
 
-One consequence worth knowing, because it is counter-intuitive and the demo
+One consequence is worth knowing, because it is counter-intuitive and the demo
 measures it. A profile's top speed becomes the layer's `cost_per_distance`, so a
-straight-line bound must assume *everything* moves at motorway speed. The wider a
-network's range of speeds, the weaker that bound — guidance helps least exactly
-where the network is most varied. Same code, same heuristic, Liechtenstein:
+straight-line bound must assume *everything* moves at motorway speed. The wider
+a network's range of speeds, the weaker that bound — guidance helps least
+exactly where the network is most varied. Same code, same heuristic,
+Liechtenstein:
 
 | profile | speeds | short route | long route |
 |---|---|---:|---:|
@@ -222,17 +223,17 @@ That is the argument for the other heuristic in the box.
 
 `Euclidean` assumes one thing about a network and must assume the worst of it:
 priced at the fastest layer, it is three times too optimistic on every street
-that is not a motorway. `Landmarks` measures instead — precomputing the distance
-to and from a handful of fixed nodes, and bounding by the triangle inequality:
+that is not a motorway. `Landmarks` measures instead, precomputing the distance
+to and from a handful of fixed nodes and bounding by the triangle inequality:
 
 ```python
 planner = rl.AStar(rl.Landmarks(16)).bind(env)   # a few seconds, ~32 MB
 ```
 
-The bound it produces already knows about one-way streets, dead ends, bridges,
-and speed limits, because it was measured through them. It also asks nothing of
-the environment — no coordinates, no declared speeds — which makes it the
-heuristic for networks whose geometry is unknown or beside the point.
+Its bound already knows about one-way streets, dead ends, bridges, and speed
+limits, because it was measured through them. It also asks nothing of the
+environment — no coordinates, no declared speeds — which makes it the heuristic
+for networks whose geometry is unknown or beside the point.
 
 Seattle, driving, corner to corner (258,029 nodes):
 
@@ -245,8 +246,8 @@ Seattle, driving, corner to corner (258,029 nodes):
 Same 11.2-minute route from all three. The landmark count is the dial: 2
 landmarks (4 MB) already beat Euclidean, 32 (66 MB) settle 443 nodes. Spreading
 them to the edges of the network beats scattering them at random by about 2× for
-the same memory, which is why `selection="farthest"` is the default and
-`"random"` is kept as the control.
+the same memory, so `selection="farthest"` is the default and `"random"` stays
+as the control.
 
 ```bash
 python demos/route_city.py liechtenstein.osm.pbf \
@@ -256,44 +257,43 @@ python demos/route_city.py liechtenstein.osm.pbf \
 writes a map of the route with every settled node behind it — blue where both
 searches went, orange for the 8,330 nodes A* never had to look at.
 
-For poking at it by hand, `demos/serve.py` puts the same thing behind a local
+To poke at it by hand, `demos/serve.py` puts the same thing behind a local
 page: click an origin, click a destination, and the route comes back with the
-search drawn underneath it.
+search drawn underneath.
 
 ```bash
 python demos/serve.py data/Seattle.osm.pbf     # then open http://localhost:8000
 python demos/serve.py data/Seattle.osm.pbf --gtfs data/kcm.zip --date 2026-08-17
 ```
 
-Under the map is a **node board**, and it is these three steps drawn as a graph:
-layers feed an `Environment`, a technique binds to one and becomes a planner, a
-`Query` asks it something. Drag the nodes, pull the wires out, plug them in
-somewhere else. There is no second representation of what the controls mean —
-the board *is* the query, so unplugging a wire really does remove an argument
-and the page says which one.
+Under the map sits a **node board**: the three steps drawn as a graph. Layers
+feed an `Environment`, a technique binds to one and becomes a planner, a `Query`
+asks it something. Drag the nodes, pull the wires out, plug them in somewhere
+else. There is no second representation of what the controls mean — the board
+*is* the query, so unplugging a wire really does remove an argument, and the
+page says which one.
 
-The map is a node in it, and the graph runs out through the map and back: it
+The map is a node too, and the graph runs out through the map and back: the map
 gives the query an `origin` and a `destination` and takes a `route` and a
 `space` in return. Cross the two points and the trip reverses. Unplug `space`
-and no search space gets built — ten megabytes of GeoJSON that nothing was
-listening for. Unplug `route` and the query still runs and still reports what it
-cost, with nothing drawing it.
+and no search space gets built — ten megabytes of GeoJSON nothing was listening
+for. Unplug `route` and the query still runs and still reports what it cost,
+with nothing drawing it.
 
-A node whose configuration the board has never had an answer for greys out and
-spins until it does, and because a node's identity includes everything upstream
-of it, the spinners spread exactly as far as the rebuild does and no further. A
-change that costs nothing shows nothing. Where the work can count itself the
-node shows how far along: contraction reports nodes retired, then arcs
+A node whose configuration the board has never answered greys out and spins
+until it does, and because a node's identity includes everything upstream of
+it, the spinners spread exactly as far as the rebuild does and no further. A
+change that costs nothing shows nothing. Where the work can count itself, the
+node shows how far along it is: contraction reports nodes retired, then arcs
 assembled; a landmark table reports searches run. Where it cannot — a file
-parser that yields no counts — it says so rather than inventing a bar.
+parser that yields no counts — the node says so rather than inventing a bar.
 
-Watch that bar on a big network and it will teach you something the timings
-table hides. Contracting Seattle's walking graph settles 99.5% of its 554,393
-nodes in the first minute and spends two more on the rest: the last nodes left
-are the most connected, and they are where the shortcut search does its real
-work.
+Watch that bar on a big network and it teaches you something the timings table
+hides. Contracting Seattle's walking graph settles 99.5% of its 554,393 nodes in
+the first minute and spends two more on the rest: the last nodes left are the
+most connected, and that is where the shortcut search does its real work.
 
-Which is what makes the refusals worth causing on purpose. Wire a GTFS layer
+That is what makes the refusals worth causing on purpose. Wire a GTFS layer
 into `Dijkstra` and the node turns red with the library's own sentence:
 
 ```
@@ -302,16 +302,16 @@ Dijkstra cannot route over timetable layers; it accepts scalar
 
 A dropdown in the board's toolbar loads a starting point — road with landmarks,
 road with a contraction hierarchy, plain Dijkstra as the control, walking that
-reads the clock, and either timetable model when the demo was given a feed. They
-are places to begin rather than modes: load one and then pull it apart. The pins
-stay put across a change, which is the point of having more than one.
+reads the clock, and either timetable model when the demo was given a feed.
+These are places to begin, not modes: load one and pull it apart. The pins stay
+put across a change, which is the point of having more than one.
 
 Rewiring is cheap because everything is cached by a canonical spelling of the
-node and everything upstream of it, so going back to a shape you had before is
+node and everything upstream of it, so returning to a shape you had before is
 free. That matters because the expensive things are exactly the ones worth
-comparing. Seattle is 258,029 nodes and 590,671 edges from a 65 MB extract, read
-in about five seconds; swapping the technique node re-runs the same query the
-other way:
+comparing. Seattle is 258,029 nodes and 590,671 edges from a 65 MB extract,
+read in about five seconds; swapping the technique node re-runs the same query
+the other way:
 
 | wired up as | settled | query |
 |---|---:|---:|
@@ -331,8 +331,8 @@ from [BBBike](https://download.bbbike.org/osm/bbbike/). Neither is committed —
 
 ### Looking at the search
 
-The route is the answer; the search is the work, and most of what separates one
-algorithm from another lives there. Every planner can hand over what it explored:
+The route is the answer; the search is the work, and most of what separates
+algorithms lives there. Every planner can hand over what it explored:
 
 ```python
 result = planner.search(origin, targets=[planner.node_id(destination)])
@@ -340,30 +340,30 @@ tree = planner.explored(result)          # ShortestPathTree(19529 branches, ...)
 tree.geojson()                           # drop into QGIS, geojson.io, Leaflet
 ```
 
-Dijkstra and A* explore by growing a shortest-path tree, so that is what they
-report. Each branch carries the total of everything hanging off it, which is what
-makes a hundred thousand identical lines into a picture: magnitudes accumulate
-toward the root, so the tree renders like a river network — thick where the whole
-search flowed, thinning to capillaries where it stopped.
+Dijkstra and A* explore by growing a shortest-path tree, and return one. Each
+branch carries the total of everything hanging off it, which turns a hundred
+thousand identical lines into a picture: magnitudes accumulate toward the root,
+so the tree renders like a river network — thick where the whole search flowed,
+thinning to capillaries where it stopped.
 
 ```python
 for branch in tree.branches(min_magnitude=1000):
     branch.tail, branch.head, branch.magnitude
 ```
 
-`magnitude="weight"` accumulates travel time beyond each branch; `"nodes"` counts
-settled nodes instead. `SearchSpace` is the general promise — an algorithm that
-explores differently reports something else: a contraction hierarchy reports two
-`MeetingTrees`, RAPTOR reports `Rounds` (every stop, by the round that first
-reached it), and the two Pyrga models, which keep no search space, refuse
-`explored()` in so many words — but whatever it explored, you can draw it.
-The identity underneath is the same for every technique that keeps a table:
+`magnitude="weight"` accumulates travel time beyond each branch; `"nodes"`
+counts settled nodes instead. `SearchSpace` is the general promise. An algorithm
+that explores differently reports something else — a contraction hierarchy
+reports two `MeetingTrees`, RAPTOR reports `Rounds` (every stop, by the round
+that first reached it), and the two Pyrga models, which keep no search space,
+refuse `explored()` in so many words — but whatever it explored, you can draw
+it. The identity underneath is the same for every technique that keeps a table:
 `planner.route(a, b) == planner.journey(planner.search(a, targets=[...]), b)`.
 
-The interactive demo draws exactly this, which is the quickest way to see what a
+The interactive demo draws exactly this, the quickest way to see what a
 heuristic buys: the same 11.2-minute Seattle route settles 41,161 branches under
-Dijkstra, reaching across Lake Washington to Bellevue, and 12,172 under A*, which
-never leaves the corridor.
+Dijkstra, reaching across Lake Washington to Bellevue, and 12,172 under A*,
+which never leaves the corridor.
 
 ### Not searching the city at all
 
@@ -371,9 +371,9 @@ Everything above narrows the search. A contraction hierarchy (Geisberger,
 Sanders, Schultes and Delling, *Exact Routing in Large Road Networks Using
 Contraction Hierarchies*) stops doing one. Preprocessing removes nodes one at a
 time, least important first, adding a **shortcut** wherever removing a node
-would otherwise have lengthened a shortest path. What comes out is the original
-graph plus shortcuts and a rank per node — and a query that climbs from the
-source, climbs from the target, and meets above the trip:
+would otherwise lengthen a shortest path. The result is the original graph plus
+shortcuts and a rank per node — and a query that climbs from the source, climbs
+from the target, and meets above the trip:
 
 ```python
 planner = rl.ContractionHierarchy().bind(env)    # ~6 s on Seattle, 19 MB
@@ -393,16 +393,16 @@ Identical costs on every trip — the benchmark fails if any row disagrees. Not
 necessarily the identical *path*: where two routes tie, a search climbing from
 both ends cannot honour the `(cost, node)` tie-break a one-directional search
 does, so it may return a different equally-cheap way. The claim is exact
-distances, and that is what the tests hold it to.
-Preprocessing adds 504,022 shortcuts to Seattle's 590,671 edges, an 85% larger
-graph in exchange for touching 0.1% of it per query.
+distances, and the tests hold it to that. Preprocessing adds 504,022 shortcuts
+to Seattle's 590,671 edges — an 85% larger graph in exchange for touching 0.1%
+of it per query.
 
-This is the first technique here that searches a graph the environment has never
-seen, which is the constraint worth stating out loud: **a technique may search
-whatever graph it likes, but it answers in the caller's terms.** Every shortcut
-is unpacked back into the original edges it stands for before anything leaves
-the planner, so journeys, legs, geometry and provenance work exactly as they do
-under Dijkstra.
+This is the first technique here that searches a graph the environment has
+never seen, which makes the constraint worth stating out loud: **a technique
+may search whatever graph it likes, but it answers in the caller's terms.** The
+planner unpacks every shortcut back into the original edges it stands for
+before anything leaves, so journeys, legs, geometry and provenance work exactly
+as they do under Dijkstra.
 
 It is also the first search that is not one tree, so `explored()` reports a
 different `SearchSpace`:
@@ -413,15 +413,15 @@ for direction, tail, head, level, edges in space.branches(min_span=50):
     ...                                  # 'forward' or 'backward', and what it leapt
 ```
 
-Branches are drawn with their unpacked geometry, so every line is real road
-rather than a straight cut through the buildings a shortcut jumped over. The
-hierarchy shows up in two properties instead: `span`, how many original edges a
-branch stands for, and `level`, the rank of its higher end. The longest branch
-of a cross-town Seattle query stands for a couple of hundred edges: that is the
-query crossing the city in one step, which is the whole trick. The demo colours
-the two halves differently, which makes the shape
-plain — two small fans climbing away from either end of the trip, joined by a
-few enormous arcs, and nothing in between.
+Branches carry their unpacked geometry, so every line is real road rather than
+a straight cut through the buildings a shortcut jumped over. The hierarchy shows
+up in two properties instead: `span`, how many original edges a branch stands
+for, and `level`, the rank of its higher end. The longest branch of a
+cross-town Seattle query stands for a couple of hundred edges: the query
+crossing the city in one step, which is the whole trick. The demo colours the
+two halves differently, and the shape is plain — two small fans climbing away
+from either end of the trip, joined by a few enormous arcs, and nothing in
+between.
 
 Ordering is a policy and never a correctness choice:
 
@@ -432,9 +432,9 @@ rl.ContractionHierarchy(rl.RandomOrder(seed=0))   # the control
 
 Both answer identical distances; the random one just builds a far bigger
 hierarchy to do it. The same holds for the witness-search limits — a witness
-search that gives up early adds a shortcut that was not needed, costing space
-and query time and never accuracy, which is why `max_settled` and `max_hops` are
-tuning knobs rather than correctness ones.
+search that gives up early adds an unneeded shortcut, costing space and query
+time but never accuracy, so `max_settled` and `max_hops` are tuning knobs, not
+correctness ones.
 
 ### When the network is not always open
 
@@ -444,7 +444,7 @@ across Seattle's Hiram M. Chittenden Locks is tagged
 `oneway=reversible` with hours. `Dijkstra` ignores every one of those and routes
 the always-open network, honestly and knowingly. `TimeDependentDijkstra` reads
 the clock — Dreyfus, *An Appraisal of Some Shortest-Path Algorithms* (1969),
-whose observation is that Dijkstra generalises unchanged provided arrival is
+who observed that Dijkstra generalises unchanged provided arrival is
 non-decreasing in departure.
 
 ```python
@@ -454,10 +454,10 @@ planner.route(ballard, magnolia, departing=time(8, 0))    # 30.0 min
 planner.route(ballard, magnolia, departing=time(22, 0))   # 61.6 min
 ```
 
-Binding is where the calendar is built: `rl.Schedule` walks the layers' opening
-hours into one kernel calendar, and the planner keeps it — `planner.calendar`
-— rather than the environment. Bind to a network with no schedule and it says
-so, in the same breath a heuristic would.
+Binding builds the calendar: `rl.Schedule` walks the layers' opening hours into
+one kernel calendar, and the planner keeps it — `planner.calendar` — rather
+than the environment. Bind to a network with no schedule and it says so, in the
+same breath a heuristic would.
 
 `python demos/route_by_clock.py seattle.osm.pbf` prints the same trip at every
 hour. 354 of Seattle's 1,480,122 walking edges carry a schedule — a rounding
@@ -471,15 +471,15 @@ error that changes the answer completely for the trips that meet one:
 | 21:00 | 61.6 min | 0 min | 153 | 0 |
 
 The gate opens at seven and shuts at nine, and the alternative is the long way
-around the ship canal. Waiting is a policy rather than an assumption:
-`TimeDependentDijkstra("forbidden")` treats a shut edge as absent, which is the
-control that shows waiting doing real work.
+around the ship canal. Waiting is a policy, not an assumption:
+`TimeDependentDijkstra("forbidden")` treats a shut edge as absent — the control
+that shows waiting doing real work.
 
 Two things are stated rather than discovered. The clock is **weekly** — seconds
 since Monday 00:00 — because every restriction OSM can express repeats weekly;
-a schedule naming a date or a holiday is refused at parse time and counted in
-`unreadable_schedules` rather than approximated. And a conditional tag is read as
-the whole story for its edge: `yes @ (hours)` means shut outside them, `no @
+the parser refuses a schedule naming a date or a holiday and counts it in
+`unreadable_schedules` rather than approximating. And a conditional tag is the
+whole story for its edge: `yes @ (hours)` means shut outside them, `no @
 (hours)` means open outside them, and the base `access` tag does not get a vote.
 
 ### Timetables: two models of the same departures
@@ -487,8 +487,8 @@ the whole story for its edge: `yes @ (hours)` means shut outside them, `no @
 Pyrga, Schulz, Wagner & Zaroliagis, *Efficient Models for Timetable Information
 in Public Transportation Systems* (ACM JEA 12, Article 2.4, 2007) is not a paper
 about an algorithm. A timetable is not a network with weights on it — it is a
-set of **connections**, each one a vehicle leaving one stop at one instant and
-reaching another at another — and the paper is about the two ways to make that
+set of **connections**, each a vehicle leaving one stop at one instant and
+reaching another at another — and the paper is about the two ways to turn that
 into something a shortest-path algorithm can read.
 
 ```python
@@ -498,8 +498,7 @@ journey.arrives, journey.transfers, journey.waiting   # 33600, 4, 1200
 ```
 
 Both models answer with the same verb, `route(..., departing=)`, because
-comparing them is the point — and so do RAPTOR, CSA, TripBased and PTL,
-below.
+comparing them is the point — and so do RAPTOR, CSA, TripBased and PTL, below.
 Twenty-five random stop pairs at 08:30 with 200 m footpaths
 (`benchmarks/bench_transit.py`), all six agreeing on every one:
 
@@ -514,34 +513,33 @@ Twenty-five random stop pairs at 08:30 with 200 m footpaths
 
 King County Metro plus Sound Transit on a Monday: 6,313 stops, 421,604
 connections, 7,038 stop pairs, 0 trips the reader could not represent. The
-time-expanded model builds a node per departure and per arrival, and what comes
-out is an **ordinary static graph** — `dijkstra` routes it unchanged, and so
-would A*, or landmarks, or a contraction hierarchy. That generality is the whole
-appeal, and 133× the nodes is what it costs. The time-dependent model keeps one
-node per stop and pays in the search instead: relaxing an edge is not reading a
-weight but a binary search for what leaves next.
+time-expanded model builds a node per departure and per arrival, and produces
+an **ordinary static graph** — `dijkstra` routes it unchanged, and so would A*,
+or landmarks, or a contraction hierarchy. That generality is the whole appeal,
+and it costs 133× the nodes. The time-dependent model keeps one node per stop
+and pays in the search instead: relaxing an edge is not reading a weight but a
+binary search for what leaves next.
 
 Neither is the reference implementation. **Each is the other's** — they must
 agree on every query, which is the paper's thesis and this module's main test,
 checked over random timetables, against a brute-force oracle, and on the real
 feed.
 
-The cost model is what makes the seam load-bearing rather than decorative:
+The cost model makes the seam load-bearing rather than decorative:
 
 ```python
 rl.Dijkstra().bind(env)
 # TypeError: Dijkstra cannot route over timetable layers; it accepts scalar
 ```
 
-A GTFS layer contributes one edge per pair of adjacent stops weighted by the
+A GTFS layer contributes one edge per pair of adjacent stops, weighted by the
 *shortest ride anyone makes along it* — a genuine lower bound, enough to give
 every stop a label and to snap a coordinate to one, and not enough to route on.
-Routing it as though those weights told the whole story is a wrong answer that
-looks like a right one, so `Dijkstra` refuses it and `missing_from` says so
-before anything is built. The departures themselves are what the timetable
-techniques derive from the layer at bind — `rl.Departures`, kept as
-`planner.timetable` — which is the pattern every clock-reading technique here
-follows, and the one the next one should.
+Routing it as though those weights told the whole story gives a wrong answer
+that looks right, so `Dijkstra` refuses it and `missing_from` says so before
+anything is built. The timetable techniques derive the departures themselves
+from the layer at bind — `rl.Departures`, kept as `planner.timetable` — the
+pattern every clock-reading technique here follows, and the one the next should.
 
 #### Crossing the street
 
@@ -550,7 +548,7 @@ northbound stop and the southbound one across the street are, for a rider, the
 same place — King County Metro's has no `transfers.txt` and no parent stations
 at all — and a timetable technique that cannot cross the street cannot make
 most real trips. Downtown to the U District at 08:30 came back at 09:20 with
-four changes because every change had to happen at one pole; 39 of 200 random
+four changes, because every change had to happen at one pole; 39 of 200 random
 stop pairs had no answer at all.
 
 The paper's *foot-edges* are the fix: a walk between two stops that a rider may
@@ -567,36 +565,36 @@ journey.arrives, journey.transfers                          # 09:04, 1
 
 A timetable technique always accepted a scalar layer beside its timetable; now
 it reads one, as the links a rider may walk — `rl.Walks`, derived at bind like
-the departures are. Nothing about the environment changed to carry them, and a
-walk leg has provenance and geometry through the same machinery as every other
-leg. How far a rider will walk is a modelling choice, which is why it is a
-knob on a layer you register and not something the environment does for you.
-Two hundred metres joins the two sides of a street and the bays of a transit
-centre: 197 of the same 200 pairs now route, every one of them using a walk,
-and the models still agree on all of them.
+the departures. Nothing about the environment changed to carry them, and a walk
+leg gets provenance and geometry through the same machinery as every other leg.
+How far a rider will walk is a modelling choice, so it is a knob on a layer you
+register, not something the environment does for you. Two hundred metres joins
+the two sides of a street and the bays of a transit centre: 197 of the same 200
+pairs now route, every one using a walk, and the models still agree on all of
+them.
 
-Two things worth knowing about how they are carried. The kernel **closes the
-set under composition** — walk A→B and B→C and you may walk A→C — because the
-time-dependent search chains walks on its own and the time-expanded graph must
-not, or a pair of opposite footpaths would spawn events for ever; closing the
-set is what lets one model take a walk one hop at a time and the other in one
-and still agree. Seattle's 13,908 walks close to 74,636. And in the
-time-expanded graph a walk is not a new event but an edge from the arrival at
-one stop to the first departure you could catch at the other, which keeps the
-event count where it was; the walk edges themselves are 5.2 million, and the
-model's memory goes from 37 MB to 136 MB. That is the paper's trade again, and
-worth having a number for.
+Two things are worth knowing about how walks are carried. The kernel **closes
+the set under composition** — walk A→B and B→C and you may walk A→C — because
+the time-dependent search chains walks on its own and the time-expanded graph
+must not, or a pair of opposite footpaths would spawn events for ever; closing
+the set lets one model take a walk one hop at a time and the other in one, and
+still agree. Seattle's 13,908 walks close to 74,636. And in the time-expanded
+graph a walk is not a new event but an edge from the arrival at one stop to
+the first departure you could catch at the other, which keeps the event count
+where it was; the walk edges themselves number 5.2 million, and the model's
+memory goes from 37 MB to 136 MB. That is the paper's trade again, and worth
+having a number for.
 
-Two limits worth stating. Changing vehicles is **instantaneous**, which is the
-paper's *simple* model; its *realistic* one charges a minimum change time and is
-not expressible with one label per stop, because staying in your seat must not be
-charged and a stop label cannot say which vehicle you arrived on. The paper's
-answer is more nodes (§4.2), and that is its own increment — so `Transfer` offers
-only `Transfer::instant()` rather than a parameter that would be quietly ignored.
-And a timetable is on a **linear service day** — GTFS writes `25:30:00`, so
-`service_seconds` does not wrap the way `weekly_seconds` does. The two clocks are
-deliberately not interchangeable, which means walking and transit cannot yet
-share one environment. That is the multimodal problem, and the conversion needs a
+Two limits are worth stating. Changing vehicles is **instantaneous** — the
+paper's *simple* model. Its *realistic* one charges a minimum change time,
+which one label per stop cannot express, because staying in your seat must not
+be charged and a stop label cannot say which vehicle you arrived on. The
+paper's answer is more nodes (§4.2), its own increment — so `Transfer` offers
+only `Transfer::instant()` rather than a parameter it would quietly ignore. And
+a timetable runs on a **linear service day** — GTFS writes `25:30:00`, so
+`service_seconds` does not wrap the way `weekly_seconds` does. The two clocks
+are deliberately not interchangeable, so walking and transit cannot yet share
+one environment. That is the multimodal problem, and the conversion needs a
 service-day-to-calendar anchor: exactly the thing that must not be implicit.
 
 `python demos/route_transit.py kcm.zip --date 2026-08-17` runs all five and
@@ -606,14 +604,14 @@ quickest way to see what the footpaths buy.
 ### Not building a graph at all
 
 Delling, Pajor & Werneck, *Round-Based Public Transit Routing* (2012). Both of
-Pyrga et al.'s models make a timetable into a graph and hand it to a
-shortest-path search; the priority queue and the graph are the cost. RAPTOR's
-observation is that a timetable has structure a graph throws away — **routes**
+Pyrga et al.'s models turn a timetable into a graph and hand it to a
+shortest-path search; the priority queue and the graph are the cost. RAPTOR
+observes that a timetable has structure a graph throws away — **routes**
 (ordered stop sequences) and the **trips** along them — and that with it the
 search is a few array scans and no heap. Round *k* scans, once each, every
-route touched in round *k−1* and rides the earliest trip that can be caught,
-so after *k* rounds every stop holds its earliest arrival with at most *k−1*
-changes; footpaths are relaxed one hop from whatever a round improved.
+route touched in round *k−1* and rides the earliest trip it can catch, so
+after *k* rounds every stop holds its earliest arrival with at most *k−1*
+changes; footpaths relax one hop from whatever a round improved.
 
 ```python
 feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
@@ -626,21 +624,20 @@ planner.frontier(downtown, juanita, departing=time(8, 30))
 # [Journey(1 change, arrives 16:20), Journey(2 changes, 09:41), Journey(3 changes, 09:38)]
 
 result = planner.search(downtown, departing=time(8, 30))  # every stop, by the round that first reached it
-planner.explored(result)                                  # Rounds(6,313 stops over 6 rounds)
+planner.explored(result)                                  # Rounds(6,313 stops, out to round 6)
 ```
 
 Downtown Seattle to Juanita, across the lake: three changes gets there at
 09:38, two at 09:41, and a rider who will change only once waits until 16:20 —
-three answers a rider might reasonably want, and the graph models return one.
+three answers a rider might reasonably want, where the graph models return one.
 
-Two things fall out of the construction that the graph models cannot give.
+Two things follow from the construction that the graph models cannot give.
 RAPTOR is **one-to-all**: after the rounds every stop holds its label, so it
 has a real `search()` and something to draw — `Rounds`, each stop coloured by
-the round that first got there, which is the picture in the paper and what the
-demo draws. And it is **Pareto** by
-construction: arrival against changes, one incomparable journey per round that
-improved something, which is what `frontier` hands back and `max_transfers`
-cuts.
+the round that first reached it, the picture in the paper and the one the demo
+draws. And it is **Pareto** by construction: arrival against changes, one
+incomparable journey per round that improved something, which `frontier` hands
+back and `max_transfers` cuts.
 
 The refusals are the library's, as everywhere:
 
@@ -654,27 +651,26 @@ rl.TimeDependent().bind(env).explored(result)
 ```
 
 Routes here are the paper's — distinct stop sequences, split so that no trip
-overtakes another — so `planner.num_routes` is larger than the feed's
-`routes.txt`; on the KCM feed's Monday, 139 GTFS routes become 410. What
-is not here: McRAPTOR (more criteria than changes), rRAPTOR (a range of
-departure times — the question CSA's `profile`, next, answers), and a minimum
-change time — a new kernel `Transfer` constructor that all five timetable
-techniques would take at once, and this and TripBased are the two that could
-honour it.
+overtakes another — so `planner.num_routes` exceeds the feed's `routes.txt`; on
+the KCM feed's Monday, 139 GTFS routes become 410. Not here: McRAPTOR (more
+criteria than changes), rRAPTOR (a range of departure times — the question
+CSA's `profile`, next, answers), and a minimum change time — a new kernel
+`Transfer` constructor that all five timetable techniques would take at once,
+of which this and TripBased are the two that could honour it.
 
 ### One array, scanned once
 
 Dibbelt, Pajor, Strasser & Wagner, *Intriguingly Simple and Fast Transit
-Routing* (2013). RAPTOR threw away the graph and kept the routes; CSA's
-observation is that even routes are more structure than the question needs. A
+Routing* (2013). RAPTOR threw away the graph and kept the routes; CSA
+observes that even routes are more structure than the question needs. A
 connection is *reachable* if you are already aboard its trip or standing at
-its departure stop in time — and because a timetable is aperiodic, that can be
-checked in one pass over the connections sorted by departure. So: **one
-array**, a label per stop, a flag per trip, and a linear scan. A reachable
-connection flags its trip and, if it improves its arrival stop, walks that
-stop's footpaths; the scan starts at the first connection leaving after the
-query (a binary search) and, with a target, stops at the first one leaving
-after the target's label.
+its departure stop in time — and because a timetable is aperiodic, one pass
+over the connections sorted by departure can check that. So: **one array**, a
+label per stop, a flag per trip, and a linear scan. A reachable connection
+flags its trip and, if it improves its arrival stop, walks that stop's
+footpaths; the scan starts at the first connection leaving after the query (a
+binary search) and, with a target, stops at the first one leaving after the
+target's label.
 
 ```python
 feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
@@ -690,19 +686,18 @@ Without a target the scan runs to the end of the day and every stop holds
 its earliest arrival, so like RAPTOR this technique has a real `search()` and
 a space to draw: `Scan`, every stop stamped with how long after departure the
 sweep reached it — the origin's neighbourhood first, the far side of the
-network last, and with a target the sweep stopping the moment it passes the
+network last, and with a target the sweep stops the moment it passes the
 target's label. Toward Juanita it labels 4,320 stops and reads 29,426 of the
 day's connections; `settled` counts stops, and `result.scanned` is the
 paper's own measure of work.
 
-The same array read the other way is a **profile** (the paper's §4, pCSA):
+The same array read the other way gives a **profile** (the paper's §4, pCSA):
 scan latest departure first, keep at every stop the Pareto pairs of (leave
-here at, arrive at the target by), and each connection learns the earliest it
-can deliver a rider — by getting off, staying aboard, or changing into its
-arrival stop's profile — and offers that as a pair at its departure stop and
-at every stop that can walk to it. When the scan reaches the start of the
-window the origin's profile is the answer: one journey per moment worth
-leaving.
+here at, arrive at the target by), and let each connection learn the earliest
+it can deliver a rider — by getting off, staying aboard, or changing into its
+arrival stop's profile — and offer that as a pair at its departure stop and at
+every stop that can walk to it. When the scan reaches the start of the window
+the origin's profile is the answer: one journey per moment worth leaving.
 
 ```python
 planner.profile(downtown, juanita, departing=time(8, 30), until=time(10, 30))
@@ -721,32 +716,32 @@ The refusals are the library's: `route(..., until=)` is refused with a
 pointer at `profile()`, and `max_transfers` names RAPTOR, since a connection
 scan counts nothing but time — which is also why the 08:35 journey above
 changes four times where RAPTOR's 09:39 changes three: same arrival, and CSA
-has no reason to prefer one over the other. What is not here: the paper's cache-friendlier
-profile layouts (pseudoconnections and time indexing, pCSA-C/CT), its
-multi-criteria profile (mcpCSA, arrival against trips taken), and its minimum
-expected arrival time problem (§5) — each its own increment. Journey
-extraction is not spelled out in the paper; the pointers here are the obvious
-ones (the connection that reached each stop, the connection each trip was
-entered with) and every itinerary is checked against the same
-`is_valid` the other four answer to.
+has no reason to prefer one over the other. Not here: the paper's
+cache-friendlier profile layouts (pseudoconnections and time indexing,
+pCSA-C/CT), its multi-criteria profile (mcpCSA, arrival against trips taken),
+and its minimum expected arrival time problem (§5) — each its own increment.
+The paper does not spell out journey extraction; the pointers here are the
+obvious ones (the connection that reached each stop, the connection each trip
+was entered with), and every itinerary is checked against the same `is_valid`
+the other four answer to.
 
 ### Trips, and the transfers between them
 
 Witt, *Trip-Based Public Transit Routing* (2015). RAPTOR labels stops and
-scans routes; CSA labels stops and scans connections. Witt's observation is
-that once a rider is aboard a trip at a known stop, everything that can
-happen next is already written in the timetable — every stop the trip
-reaches, and every other trip they could change onto — so it is **trips**
-that should carry labels, and the changes between them can be worked out
-once, ahead of any query. Binding computes that **transfer set**: for every
-trip and every stop it reaches, the earliest trip of every line at that stop
-or a footpath away, minus the ones that stay on your own line and the
-U-turns; then a *reduction* walks each trip backwards keeping the earliest it
-can reach every stop with and without each transfer, and drops the transfers
-that improve nothing. A query is then a breadth-first sweep with no priority
-queue: round *n* scans every *trip segment* reached with *n* changes, checks
-whether the trip reaches the target, prunes it if it cannot beat the best
-arrival so far, and follows its transfers into round *n+1*.
+scans routes; CSA labels stops and scans connections. Witt observes that once
+a rider is aboard a trip at a known stop, everything that can happen next is
+already written in the timetable — every stop the trip reaches, and every
+other trip they could change onto — so **trips** should carry the labels, and
+the changes between them can be worked out once, ahead of any query. Binding
+computes that **transfer set**: for every trip and every stop it reaches, the
+earliest trip of every line at that stop or a footpath away, minus the ones
+that stay on your own line and the U-turns; then a *reduction* walks each
+trip backwards, keeping the earliest it can reach every stop with and without
+each transfer, and drops the transfers that improve nothing. A query is then
+a breadth-first sweep with no priority queue: round *n* scans every *trip
+segment* reached with *n* changes, checks whether the trip reaches the
+target, prunes it if it cannot beat the best arrival so far, and follows its
+transfers into round *n+1*.
 
 ```python
 feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
@@ -759,28 +754,27 @@ planner.frontier(downtown, juanita, departing=time(8, 30))
 
 result = planner.search(downtown, targets=[planner.node_id(juanita)], departing=time(8, 30))
 result.settled, result.scanned                           # 9,807 trips labelled, 2,533 segments scanned
-planner.explored(result)                                 # Segments(2,533 trip segments over 4 rounds)
+planner.explored(result)                                 # Segments(2,533 trip segments, out to round 4)
 ```
 
-Two things are different in kind here, and both show in the numbers. Binding
-is **the expensive half** — seconds where the others take a fraction of one,
-which is why it reports progress as it works, the way contraction and a
-landmark table do, and why the transfer set is the thing worth measuring:
-KCM's 12,482 trips make 35 million transfers and reduction keeps 3.5% of
-them (the paper keeps 16% of London's). Almost all of that time is the
-reduction, which is why both algorithms are parallel over trips — a thread
-per core drawing blocks until there are none. `TripBased(reduce=False)` is the
-paper's own control (its Table 3): identical answers, 300 MB instead of 28,
-and 8.9 ms a query instead of 0.9. Reduction is a policy and never a
-correctness choice, on the same footing as `RandomOrder()` for a hierarchy —
-the tests hold the reduced and unreduced sets to the same front on every
-query. And `settled` counts **trips**, since that is what this kernel labels
-(the paper's own footnote on how to compare it): 9,807 of 12,482 sounds like
-most of the network until you see that only 2,533 segments were scanned. The
-rest were labelled to say *don't bother* — reaching a trip at a stop settles
-every later trip of its line at once, which is the trick, and the segments
-the sweep actually read are what `Segments` draws: each vehicle from the stop
-it was boarded at, coloured by the changes it took to get aboard.
+Two things differ in kind here, and both show in the numbers. Binding is
+**the expensive half** — seconds where the others take a fraction of one — so
+it reports progress as it works, the way contraction and a landmark table do,
+and the transfer set is the thing worth measuring: KCM's 12,482 trips make 35
+million transfers and reduction keeps 3.5% of them (the paper keeps 16% of
+London's). Almost all of that time is the reduction, so both algorithms run
+parallel over trips — a thread per core drawing blocks until there are none.
+`TripBased(reduce=False)` is the paper's own control (its Table 3): identical
+answers, 300 MB instead of 28, and 8.9 ms a query instead of 0.9. Reduction is
+a policy, never a correctness choice, on the same footing as `RandomOrder()`
+for a hierarchy — the tests hold the reduced and unreduced sets to the same
+front on every query. And `settled` counts **trips**, since that is what this
+kernel labels (the paper's own footnote on how to compare it): 9,807 of 12,482
+sounds like most of the network until you see that only 2,533 segments were
+scanned. The rest were labelled to say *don't bother* — reaching a trip at a
+stop settles every later trip of its line at once, which is the trick — and
+`Segments` draws the segments the sweep actually read: each vehicle from the
+stop it was boarded at, coloured by the changes it took to get aboard.
 
 The same sweep, run once per moment the origin offers a departure in a
 window — latest first, keeping the labels between runs, since whatever an
@@ -801,16 +795,16 @@ leaves: the tests hold every triple to RAPTOR's front asked at every second
 of a window, and every itinerary to `is_valid`.
 
 The refusals are the library's. `search()` without a target is refused the
-way A\* and a hierarchy refuse it — the paper's query is point-to-point, its
+way A\* and a hierarchy refuse it — the paper's query is point-to-point, the
 target is what the lines are checked against and what prunes the rest, and
 there is no one-to-all form to fall back on. `max_transfers` names RAPTOR and
-TripBased; `until` names `profile()` on CSA, PTL and TripBased. What is not here:
-the paper's SIMD and three-loop query layout (§3.4) and its transfer
-preferences — each its own increment. Preprocessing is parallel over trips,
-which is the one place the paper's "trivially parallelized" is taken up: both
-algorithms judge each trip on its own, so a thread per core does. Changing vehicles is instantaneous, and this is the
-second kernel — a transfer knows both trips — that a minimum change time could
-land in.
+TripBased; `until` names `profile()` on CSA, PTL and TripBased. Not here: the
+paper's SIMD and three-loop query layout (§3.4) and its transfer preferences —
+each its own increment. Preprocessing runs parallel over trips, the one place
+this takes up the paper's "trivially parallelized": both algorithms judge each
+trip on its own, so a thread per core does. Changing vehicles is instantaneous,
+and this is the second kernel — a transfer knows both trips — that a minimum
+change time could land in.
 
 ### Labels over the events
 
@@ -819,10 +813,10 @@ and CSA stopped building a graph; PTL builds the biggest one of all — the
 time-expanded graph, a vertex per event — and then never searches it. Every
 arc points forward in time (a wait, a ride, a walk), so the graph is a DAG,
 "there is a journey from this event to that one" is *reachability*, and
-reachability in a DAG is what **2-hop labeling** answers in a list
-intersection: give every event a forward label of hubs it reaches and a
-backward label of hubs that reach it, such that any reachable pair shares
-one. The search happens once, at bind, for every query at once.
+**2-hop labeling** answers reachability in a DAG with a list intersection:
+give every event a forward label of hubs it reaches and a backward label of
+hubs that reach it, such that any reachable pair shares one. The search
+happens once, at bind, for every query at once.
 
 ```python
 feed = rl.GTFS("kcm.zip", date(2026, 8, 17))
@@ -837,12 +831,12 @@ planner.profile(downtown, juanita, departing=time(8, 30), until=time(10, 30))   
 **Earliest arrival** is the paper's event-label query: enter at the first
 event at the origin at or after departing, and find the earliest event at
 the target it reaches. Reachability along a stop's events is monotone — a
-later event is always reachable from an earlier one by waiting — so that is a
+later event is always reachable from an earlier one by waiting — so this is a
 **binary search** over the target's events, each probe one intersection of
 two sorted labels, pruned to events no earlier than the departure. A journey
 that ends on foot arrives at a stop plus a walk rather than at an event, so
-the stops that walk to the target are probed too; walks from the origin seed
-the search the way they do for the time-expanded model. `settled` on the
+the query probes the stops that walk to the target too; walks from the origin
+seed the search as they do for the time-expanded model. `settled` on the
 answer counts label entries read — the paper's own "hubs" column.
 
 **Profile** is the paper's §4. Event labels cover every pair of events, most
@@ -869,63 +863,62 @@ above, `benchmarks/bench_transit.py`):
 | `PTL` | 73,961,455 hubs | 55.0 s | 1,165 MB | 12,973 | 0.348 ms |
 
 That is the paper's trade at this scale — London took its authors 54 minutes
-and 1.3 GB — and it is worth reading both columns of. The query is the
-fastest here, and most of its 0.3 ms is building the `Journey`; the kernel
-itself reads its thirteen thousand entries in tens of microseconds. What it
-buys is a preprocessing bill 150× CSA's and fifty times its memory, which is
-why the board's progress bar counts hubs while it labels, and the reason
-`footprint` is on every planner.
+and 1.3 GB — and both columns are worth reading. The query is the fastest
+here, and most of its 0.3 ms goes to building the `Journey`; the kernel
+itself reads its thirteen thousand entries in tens of microseconds. The price
+is a preprocessing bill 150× CSA's and fifty times its memory, which is why
+the board's progress bar counts hubs while it labels, and why `footprint` is
+on every planner.
 
 Two things are the library's rather than the paper's, and both are stated
-in the code. The labels are computed by **pruned labeling** (Akiba, Iwata &
+in the code. The labels come from **pruned labeling** (Akiba, Iwata &
 Yoshida, 2013 — the paper's own reference for the technique) rather than
 RXL, which the paper uses as a black box: hubs are taken in descending
-degree order and from each a forward and a backward search adds it to
+degree order, and from each a forward and a backward search adds it to
 everything it reaches that the labels so far do not already cover. Ties are
 broken **at random**, and that is not cosmetic: almost every event has the
 same small degree, and taking a stop's events in a block — in time order —
 had each one label its entire future before anything stood between; on a
 two-hour window of the feed that is 200 hubs per label, and shuffling the
-ties is 20. And each label entry carries the next vertex toward its hub, so
-a hub match unpacks to the full event path and from there to rides and
+ties gives 20. And each label entry carries the next vertex toward its hub,
+so a hub match unpacks to the full event path and from there to rides and
 walks — the "known path unpacking techniques" the paper's §5 points at,
 checked by the same `is_valid` as the other five.
 
-What is not here: the paper's multicriteria labels (a second, weighted graph
-whose distances count trips, and distance labels over it — 26–88× the
-preprocessing in the paper, its own increment), so `max_transfers` is refused
-with a pointer at RAPTOR; minimum transfer times, which no timetable kernel
-here honours yet; and the paper's *trimmed* event labels, which it notes
-break the plain earliest-arrival query and answers with stop labels — the
-event labels here are kept whole. Like the two Pyrga models, PTL keeps no
-table, so `search()` and `explored()` say so and point at the techniques
-that do.
+Not here: the paper's multicriteria labels (a second, weighted graph whose
+distances count trips, and distance labels over it — 26–88× the preprocessing
+in the paper, its own increment), so `max_transfers` is refused with a
+pointer at RAPTOR; minimum transfer times, which no timetable kernel here
+honours yet; and the paper's *trimmed* event labels, which it notes break the
+plain earliest-arrival query and answers with stop labels — the event labels
+here are kept whole. Like the two Pyrga models, PTL keeps no table, so
+`search()` and `explored()` say so and point at the techniques that do.
 
 ### Walking without a radius
 
 Baum, Buchhold, Sauer, Wagner & Zündorf, *UnLimited TRAnsfers for Multi-Modal
 Route Planning* (2019). Every technique above takes its walks as one-hop
 transfers between stops, **closed under composition** — which is exactly why
-`Footpaths(feed, within=200)` has a radius. The closure is what does not
-scale, not the walking; the paper reports that a twenty-minute bound "already
-leads to a graph that is too large for practical applications". On King County
-Metro the wall is easy to see: widen the radius and the transfer graph grows
-linearly while its closure does not.
+`Footpaths(feed, within=200)` has a radius. The closure does not scale, not
+the walking; the paper reports that a twenty-minute bound "already leads to a
+graph that is too large for practical applications". On King County Metro the
+wall is easy to see: widen the radius and the transfer graph grows linearly
+while its closure does not.
 
 | `Footpaths(feed, within=)` | transfer graph | its closure | ULTRA shortcuts |
 |---|---:|---:|---:|
 | 200 m | 13,982 | 76,402 | **9,133** |
 | 400 m | 41,540 | 5,498,488 | **18,380** |
 
-ULTRA removes the radius without touching a single query algorithm. Its
-observation is that where a walk sits in a journey decides how much it
-matters: the walk from your door to the first stop, and from the last stop to
-your door, are common and can be searched when the query is asked; the walk
-*between* two vehicles is rare, and the few that any optimal journey needs can
-be worked out in advance. Those become **shortcuts** — ordinary one-hop
-stop-to-stop transfers, which is what every kernel here already reads.
+ULTRA removes the radius without touching a single query algorithm. It
+observes that where a walk sits in a journey decides how much it matters: the
+walk from your door to the first stop, and from the last stop to your door,
+are common and can be searched at query time; the walk *between* two vehicles
+is rare, and the few that any optimal journey needs can be worked out in
+advance. Those become **shortcuts** — ordinary one-hop stop-to-stop transfers,
+which every kernel here already reads.
 
-So it is not a routing algorithm but a preprocessing one, and it wraps the
+So it is a preprocessing algorithm, not a routing one, and it wraps the
 technique that does the routing — the paper's own *ULTRA-Query family*:
 
 ```python
@@ -939,20 +932,20 @@ planner.route(downtown, juanita, departing=time(8, 30))
 The same layer, read differently. `Footpaths(feed, within=400)` is a *transfer
 graph* here rather than a set of walks: nothing closes it, and a long walk is a
 path of short hops instead of an edge somebody had to write down. RAPTOR does
-not know — it is handed a smaller transfer set through the same
+not know — it receives a smaller transfer set through the same
 `TimetablePlanner.walks()` seam every technique reads its walks through, and is
 otherwise untouched, which is the paper's central claim and this module's main
 test. `ULTRA(CSA())` is the other one the paper names, and answers identically.
 
-What the query pays for that is the part worth stating. ULTRA's shortcuts cover
-only the middle of a journey, so the ends are searched when you ask: a walk out
-of the origin, the wrapped technique run from every stop that reached, and a
-walk into the target from wherever it is best to get off. Three searches rather
-than one, and on KCM that is 3 ms against plain RAPTOR's 0.5 — the paper gets
-its ends back to RAPTOR's speed with Bucket-CH one-to-many searches, which is
-not here. Every walk in the answer, at either end or in the middle, is a
-*path*, so it is told hop by hop in the environment's own edges — the same
-unpacking a contraction hierarchy does before anyone sees a shortcut.
+What the query pays for that is worth stating. ULTRA's shortcuts cover only the
+middle of a journey, so the ends are searched when you ask: a walk out of the
+origin, the wrapped technique run from every stop that reached, and a walk into
+the target from wherever it is best to get off. Three searches rather than one,
+and on KCM that is 3 ms against plain RAPTOR's 0.5 — the paper gets its ends
+back to RAPTOR's speed with Bucket-CH one-to-many searches, which is not here.
+Every walk in the answer, at either end or in the middle, is a *path*, told hop
+by hop in the environment's own edges — the same unpacking a contraction
+hierarchy does before anyone sees a shortcut.
 
 Preprocessing is a minute at 200 m and several at 400, parallel over source
 stops, and includes the **self-pruning** of §3.2: runs from one source go in
@@ -963,28 +956,28 @@ earlier and arrives no sooner stops dead instead of propagating. Worth 2.5× to
 Self-pruning comes with a repair, because keeping labels across runs implicitly
 maximises departure time as a third criterion and can discard a journey that is
 optimal for the two you asked for. The paper's three-part dominance rule is
-implemented, and it is live — stub it out and a fixture's shortcuts drop from
-seven to four. What is *not* established is that it is **necessary** here: over
-4,400 random instances, 241 had a different shortcut set with it than without,
-and none of those answered a query wrongly without it. That agrees with the
-paper rather than contradicting it, since Theorem 3 routes the repair's
-necessity through the canonical MR of §3.1, which is not implemented — absent
-canonical tiebreaking this keeps a superset in which the rescued journeys are
-covered anyway. It stays because a superset is the safe direction.
+implemented and live — stub it out and a fixture's shortcuts drop from seven to
+four. What is *not* established is that it is **necessary** here: over 4,400
+random instances, 241 had a different shortcut set with it than without, and
+none of those answered a query wrongly without it. That agrees with the paper
+rather than contradicting it, since Theorem 3 routes the repair's necessity
+through the canonical MR of §3.1, which is not implemented — absent canonical
+tiebreaking this keeps a superset in which the rescued journeys are covered
+anyway. It stays because a superset is the safe direction.
 
-The **canonical MR** of §3.1 is here, and turned out to already be: §3.1 spends
-its length on tiebreaking sequences, a total order on equivalent journeys, but
-Lemma 2 reduces the whole construction to two mechanical changes — scan routes
-in route-index order, key the transfer queue on `⟨arrival, vertex index⟩` — and
-both were satisfied incidentally. Nothing was testing either, and both are a
-`.rev()` away from wrong, so each is now pinned on an instance whose answer
+The **canonical MR** of §3.1 is here, and turned out to be here already: §3.1
+spends its length on tiebreaking sequences, a total order on equivalent
+journeys, but Lemma 2 reduces the whole construction to two mechanical changes
+— scan routes in route-index order, key the transfer queue on `⟨arrival, vertex
+index⟩` — and both held incidentally. Nothing was testing either, and both are
+a `.rev()` away from wrong, so each is now pinned on an instance whose answer
 changes when it is reversed.
 
 Most of §3.3 is here as well. Round 2 collects only the routes serving what
 round 1 marked; each round's transfer search stops once nothing left in its
 queue can prune a candidate; and a candidate whose intermediate transfer is
 already a shortcut is demoted to a witness, which cuts candidates six-fold for
-the same shortcuts. Zero-distance clique contraction is *not applicable* here at
+the same shortcuts. Zero-distance clique contraction does *not apply* here at
 all — every walk this library builds is `max(1, ceil(...))` seconds, so no two
 stops are ever zero apart.
 
@@ -1004,8 +997,8 @@ on faith — stop to stop, builds interleaved, three runs each:
 Two pieces of §3.3 remain. The **queue kept across runs**, with label runs
 inherited from parents, is by far the larger: a profile of the multimodal build
 puts `relax` and its heap at **59%** of the time against `ride`'s 16%, and
-carrying the queue is what stops a transfer search being re-run from scratch
-every one of those 421,604 times.
+carrying the queue stops a transfer search being re-run from scratch every one
+of those 421,604 times.
 
 **Round 1's departure-window route collection** (Algorithm 1 line 6) was
 written, measured at 1.27×, and reverted: on a ten-stop instance with thirty
@@ -1015,12 +1008,12 @@ persisting is not queues persisting — a run's unfinished witnesses live in its
 queue. So it waits on them. Also out: the **event-to-event** variant that
 ULTRA-TB wants.
 
-A note on the numbers in this section. This machine has spent the last day
-carrying other work at load averages between 3 and 240, and the same binary has
-spanned 4.58 s to 6.02 s on consecutive runs. Every figure quoted here is from
-builds run interleaved, back to back, and where the effect is small it is a
-minimum over several runs rather than a single reading. Where an effect could not
-be separated from the noise, it says so.
+A note on the numbers in this section. This machine spent the last day carrying
+other work at load averages between 3 and 240, and the same binary has spanned
+4.58 s to 6.02 s on consecutive runs. Every figure quoted here comes from builds
+run interleaved, back to back, and where the effect is small it is a minimum
+over several runs rather than a single reading. Where an effect could not be
+separated from the noise, the text says so.
 
 #### Contracting the streets away
 
@@ -1028,9 +1021,9 @@ The walking above is between stops, because ULTRA's preprocessing searches the
 transfer graph once per departure event — 421,604 of them on a Monday of King
 County Metro — and Seattle's pavements are 554,393 vertices. The paper's answer
 is **Core-CH**, the variant of contraction it names and UCCH and MCR used
-before it: contract every vertex that is not a stop, and what is left is a
-graph over the stops whose arcs already carry the walking distance through
-everything that went.
+before it: contract every vertex that is not a stop, leaving a graph over the
+stops whose arcs already carry the walking distance through everything that
+went.
 
 ```python
 core = rl._routelab.CoreHierarchy.build(compiled.graph, stops, max_degree=12)
@@ -1038,11 +1031,11 @@ core.core            # a graph in the same numbering, so a stop is the node it w
 ```
 
 Two rules make it that rather than contraction with a list. A vertex in the
-core is never contracted whatever its priority, which is what guarantees every
-stop survives. And contraction **stops early**, once what is left standing
-averages more than a given degree — not an optimisation but a necessity, since
-a core of stops alone has arcs quadratic in the stops, "which slows down both
-the precomputation and query algorithms to the point where they become
+core is never contracted whatever its priority, which guarantees every stop
+survives. And contraction **stops early**, once what is left standing averages
+more than a given degree — not an optimisation but a necessity, since a core of
+stops alone has arcs quadratic in the stops, "which slows down both the
+precomputation and query algorithms to the point where they become
 impractical". Seattle's walking network, keeping 6,313 stops:
 
 | `max_degree` | core vertices | core arcs | contracted | build |
@@ -1052,16 +1045,16 @@ impractical". Seattle's walking network, keeping 6,313 stops:
 
 A thirty-fold smaller graph, and the last vertices are the expensive ones —
 tightening the bound from 30 to 12 leaves twice as many standing and costs a
-fifth of the time. The distances are exact, which is what the tests hold it
-to: on random networks against plain Dijkstra, and on Seattle's own pavements,
-2,356 stop-pair walks with nothing to report.
+fifth of the time. The distances are exact, and the tests hold it to that: on
+random networks against plain Dijkstra, and on Seattle's own pavements, 2,356
+stop-pair walks with nothing to report.
 
 #### Starting from a doorway
 
-Streets and a timetable in one environment need one more thing, and it is the
-thing neither layer knows: that a stop and the pavement outside it are the same
-place. `Access` is that and nothing else — an edge each way between every stop
-and the street node nearest it, costed as a walk:
+Streets and a timetable in one environment need one more thing, which neither
+layer knows: that a stop and the pavement outside it are the same place.
+`Access` is that and nothing else — an edge each way between every stop and the
+street node nearest it, costed as a walk:
 
 ```python
 feed    = rl.GTFS("data/kcm.zip", date(2026, 8, 17))
@@ -1080,8 +1073,8 @@ this pair, King County stops standing outside the Seattle extract. Attaching
 them to the nearest corner regardless would have made journeys nobody could
 take.
 
-Two graphs come out of that environment and ULTRA reads both. Preprocessing
-runs on the **core**, because it searches the transfer graph once per departure
+That environment yields two graphs, and ULTRA reads both. Preprocessing runs
+on the **core**, because it searches the transfer graph once per departure
 event and Seattle's pavements are half a million vertices; the query runs on
 the **full** graph, because a query starts and ends wherever the caller stood.
 So the upward and downward searches Core-CH would otherwise need never arise —
@@ -1116,26 +1109,25 @@ to 300 seconds rather than the zero the paper measures, which cost another 2.2×
 Where the time goes, since the shape is not obvious. A progress tick is one
 **source stop**, and a source stop is not one search: it is `|DT(s)|` runs —
 421,604 connections over 6,313 stops, so about **67 runs each** — and every run
-rides, walks, rides, and walks again. So per source stop it is roughly **134
+rides, walks, rides, and walks again. So each source stop costs roughly **134
 Dijkstras over the core plus 67 scans of the collected routes**. At ~76 ms a
-source that works out to about a millisecond per traversal of a 180,767-arc
+source, that works out to about a millisecond per traversal of a 180,767-arc
 graph, which is simply what a binary-heap Dijkstra costs. Nothing is anomalous;
 the multiplier is the whole story.
 
 The stop-to-stop case is the same algorithm on a 13,982-arc transfer graph and
-takes **16 s**, which is where the 39× between them comes from: 13× the arcs and
-2.8× the reachable vertices.
+takes **16 s**; the 39× between them is 13× the arcs and 2.8× the reachable
+vertices.
 
 ### Saying which modes, and nothing precomputed
 
 ULTRA buys a fast multimodal query with minutes of preprocessing. The other
-corner of that trade is to precompute nothing at all, and there is a paper for
-it: Barrett, Jacob & Marathe's **label-constrained shortest path problem**.
-Label every arc with the mode of transport it belongs to, hand the query a
-regular language over those labels, and take the shortest path whose labels,
-read in order, spell a word of it. They proved it solvable in deterministic
-polynomial time for regular languages, which is more than enough for "walk,
-ride, walk".
+corner of that trade precomputes nothing at all, and there is a paper for it:
+Barrett, Jacob & Marathe's **label-constrained shortest path problem**. Label
+every arc with the mode of transport it belongs to, hand the query a regular
+language over those labels, and take the shortest path whose labels, read in
+order, spell a word of it. They proved it solvable in deterministic polynomial
+time for regular languages, which is more than enough for "walk, ride, walk".
 
 ```python
 env = Environment(streets, feed, Access(feed, streets))
@@ -1146,10 +1138,10 @@ LabelConstrained().bind(env).route(doorstep, office, departing=time(8, 30))
 The multimodal shape is Dibbelt, Pajor & Wagner's §2.2, and it needed nothing
 new here. Their link arcs are *"each station node linked to its geographically
 closest node of the road network, only nodes no more than distance δ apart"*,
-costed at walking speed — which is what `Access` already builds. Every compiled
-arc already knows the layer it came from, so the alphabet was already there
-too. `Access` simply declares `mode = "link"`, the way a layer already declares
-its cost model.
+costed at walking speed — which `Access` already builds. Every compiled arc
+already knows the layer it came from, so the alphabet was already there too.
+`Access` simply declares `mode = "link"`, the way a layer already declares its
+cost model.
 
 The automaton takes the shape §2.2 prescribes: a state stands for one or more
 modes, travelling within one is a self-loop, and **distinct states are joined
@@ -1161,9 +1153,9 @@ Figure 1(a), a walking state and a riding state; where there is none the stops
 changes vehicles standing still.
 
 The query is Dijkstra over the product of the graph and the automaton, settling
-`(vertex, state)`. Two relaxations in one search, which is the whole of the
-multimodal part: a scalar arc has a duration and is added, a timetable arc has a
-schedule so relaxing it asks what leaves next along it.
+`(vertex, state)`. Two relaxations in one search make up the whole multimodal
+part: a scalar arc has a duration and is added; a timetable arc has a schedule,
+so relaxing it asks what leaves next along it.
 
 On King County Metro and Seattle's pavements — 560,706 vertices, 1,498,026 arcs:
 
@@ -1172,14 +1164,14 @@ On King County Metro and Seattle's pavements — 560,706 vertices, 1,498,026 arc
 | `LabelConstrained()` | **1.9 s** | ~70 ms |
 | `ULTRA(RAPTOR())` | ~8 min | ~3 ms |
 
-Both answer the same question the same way, which is what
-`test_it_agrees_with_ultra_on_the_same_network` holds them to.
+Both answer the same question the same way, and
+`test_it_agrees_with_ultra_on_the_same_network` holds them to it.
 
 Two costs, and the survey names them: to write a constraint you must know what
 modes the network has, and a language admits no journey that combines the modes
 differently, so this answers with one journey rather than a set of
-alternatives. What is not here is UCCH, the contribution of the paper the model
-comes from, which is the speedup that sits between these two corners.
+alternatives. Not here: UCCH, the contribution of the paper the model comes
+from, the speedup that sits between these two corners.
 
 ### Contracting the walking, not the language
 
@@ -1195,11 +1187,10 @@ UCCH().bind(env).route(doorstep, office, departing=time(8, 30))
 An ordinary hierarchy cannot do this. Contract the merged network and a shortcut
 can span two modes; its label becomes the concatenation `lbl(e₁)···lbl(e_k)`, so
 where consecutive labels differ **the shortcut has a modal transfer inside it**.
-A query forbidding that transfer cannot use the shortcut — and the path avoiding
-it may already have been thrown away by the witness search. Repairing that with
-a witness search per automaton state works, and the paper calls it SDCH, but it
-fixes the automaton at preprocessing time, which is the one thing LCSPP exists
-not to do.
+A query forbidding that transfer cannot use the shortcut — and the witness
+search may already have thrown away the path avoiding it. Repairing that with a
+witness search per automaton state works, and the paper calls it SDCH, but it
+fixes the automaton at preprocessing time, the one thing LCSPP exists not to do.
 
 UCCH's two rules avoid it. **Contract each mode's subnetwork on its own**, so no
 shortcut crosses a boundary. And **never contract a transfer node** — anything
@@ -1209,7 +1200,7 @@ walk, and no label has to survive the contraction at all.
 
 The query is three parts, and §3.3's two observations make them cheap. A state
 can only change on a link arc and every link arc is in the core, so **the
-automaton is used on the core alone** and the two component climbs are ordinary
+automaton runs on the core alone** and the two component climbs are ordinary
 one-mode searches. And the climb from the target stays in the component, which
 the paper found most effective and which also settles how to search a
 time-dependent core backwards: it never happens.
@@ -1226,24 +1217,24 @@ On King County Metro and Seattle's pavements — 560,706 vertices, of which
 Thirty random street-to-street queries, all thirty agreeing with
 `LabelConstrained` exactly.
 
-**3.5×, and that is close to its ceiling here** — which the measurement says
+**3.5×, and that is close to its ceiling here** — the measurement says so
 plainly. A query between two stops, skipping both climbs, takes 29.4 ms against
 32.5 ms street to street: the climbs are three milliseconds and everything else
-is the core. Contracting the walking took it from about 65 ms to 3, and the rest
-is the transit search, which the paper says in as many words UCCH does not
+is the core. Contracting the walking took it from about 65 ms to 3, and the
+rest is the transit search, which the paper says in as many words UCCH does not
 accelerate — *"most of the time is spent inside the core (particularly, in the
 public transit network), which we do not accelerate."*
 
-So its argument is not speed. It is that **the language is still a query input**:
-`Modes(...)` can forbid buses, or allow walking only at the ends, without
-re-running a minute of preprocessing — which `ULTRA` cannot do at all, having
-baked its transfers in. Of §3.3's improvements, only node reordering applied and
-it was worth 1.4×; the others are already structural here, and are noted where
-they are not.
+So its argument is not speed. It is that **the language is still a query
+input**: `Modes(...)` can forbid buses, or allow walking only at the ends,
+without re-running a minute of preprocessing — which `ULTRA` cannot do at all,
+having baked its transfers in. Of §3.3's improvements, only node reordering
+applied, and it was worth 1.4×; the others are already structural here, and are
+noted where they are not.
 
 ### Underneath
 
-The kernels are also callable directly, on dense integer ids, as the papers
+You can also call the kernels directly, on dense integer ids, as the papers
 state them. This is the layer to implement or benchmark an algorithm against:
 
 ```python
@@ -1260,19 +1251,19 @@ rl.dijkstra(graph, 0, targets=[3])    # stop as soon as these are settled
 rl.dijkstra(graph, 0, max_cost=90)    # or bound the search: an isochrone
 rl.bfs(graph, 0, max_depth=2)         # hop counts, ignoring weights
 
-# A* wants a compiled heuristic, which is what Heuristic.bind produces — bound
-# to the same environment the graph came from, since it is indexed by node id.
+# A* wants a compiled heuristic — Heuristic.bind produces one — bound to the
+# same environment the graph came from, since it is indexed by node id.
 compiled = env.compile()
 rl.astar(compiled.graph, 0, compiled.node_id("stop_b"), rl.Euclidean().bind(compiled))
 ```
 
-Every search records the order it settled nodes in (`result.order`), which is how
-you compare algorithms by work done rather than by wall-clock alone.
+Every search records the order it settled nodes in (`result.order`), so you
+can compare algorithms by work done rather than by wall-clock alone.
 
 ## The contract
 
-Three commitments hold the project together, and every algorithm added later has
-to keep them.
+Three commitments hold the project together, and every algorithm added later
+must keep them.
 
 **One API per problem.** A search takes a graph, sources, and bounds, and returns
 a result you can ask for costs, paths, and the order nodes were settled in. Two
@@ -1288,21 +1279,21 @@ random graphs on every result field rather than on distances alone. Where a
 second implementation would only be a second copy of the same reasoning, the
 check is something else independent — a brute-force oracle over tiny instances,
 or two models of one problem that must agree. The timetable kernels have both,
-and neither of the two is the reference: each is the other's. "Returns the right
-answer" stays a falsifiable claim either way, which is what makes contributing a
-new kernel tractable — write it, diff it against something that cannot be wrong
-in the same direction, and the diff is the review.
+and neither is the reference: each is the other's. "Returns the right answer"
+stays a falsifiable claim either way, which makes contributing a new kernel
+tractable — write it, diff it against something that cannot be wrong in the
+same direction, and the diff is the review.
 
 **Results are checkable, not merely reported.** `Graph.walk` follows a returned
-edge path and reports where it lands and what it cost. A path is only correct if
-walking it arrives at the target at the reported cost, and the tests check exactly
-that rather than trusting the search's own bookkeeping.
+edge path and reports where it lands and what it cost. A path is correct only
+if walking it arrives at the target at the reported cost, and the tests check
+exactly that rather than trusting the search's own bookkeeping.
 
 ## Layout
 
 The same three words divide both halves. **Kernels** are the papers, one entry
 each. **Model** is the vocabulary they all speak — a type earns a place there
-when more than one technique reads it, which is the whole test. **Util** is
+when more than one technique reads it; that is the whole test. **Util** is
 plumbing with no routing content.
 
 ```
@@ -1350,20 +1341,20 @@ literature is integer-valued throughout, and float comparison is a poor foundati
 for the Pareto dominance checks the multicriteria algorithms are built on.
 
 **CSR, immutable.** A graph is built once from an edge list and never mutated,
-which is what lets searches run with the GIL released. Edges are permuted into CSR
+which lets searches run with the GIL released. Edges are permuted into CSR
 order, so edge ids are not positions in your input list — `Graph.input_index`
-maps back, which is how per-edge attributes (mode, trip, route) stay attached.
+maps back, which keeps per-edge attributes (mode, trip, route) attached.
 Preprocessing that needs to *grow* a graph — contraction inserting shortcuts —
-builds its own mutable adjacency and hands back finished CSR graphs, rather than
-making every search pay for an edge list that might change underneath it.
+builds its own mutable adjacency and hands back finished CSR graphs, rather
+than making every search pay for an edge list that might change underneath it.
 
 **Deterministic tie-breaking.** Nodes settle in order of `(cost, node)`, and
-out-edges relax in CSR order. Equal-cost paths are common in transit networks, and
-without a rule for them two correct implementations disagree constantly and
-usefully diffing them becomes impossible. Every search is deterministic; not all
-of them agree with each other, because a rule about settle order says nothing
-across algorithms that do not settle in one order — a bidirectional search picks
-its own equally-cheap winner among ties.
+out-edges relax in CSR order. Equal-cost paths are common in transit networks,
+and without a rule for them two correct implementations disagree constantly and
+usefully diffing them becomes impossible. Every search is deterministic; not
+all of them agree with each other, because a rule about settle order says
+nothing across algorithms that do not settle in one order — a bidirectional
+search picks its own equally-cheap winner among ties.
 
 **The environment is a merge, not a bag.** Compiling layers produces exactly
 three things: a numbering of labels, one graph, and which layer each edge came
@@ -1371,10 +1362,10 @@ from. A calendar, a timetable, a coordinates table, a rate — anything a
 technique reads beyond the graph — is derived by that technique at bind time
 from the compiled layers (`rl.Schedule`, `rl.Departures`, `rl.Plane`,
 `rl.Pace`), and refused there if the layers cannot supply it. The rule that
-falls out is worth stating: a thing is an *argument* — a constructor parameter,
+follows is worth stating: a thing is an *argument* — a constructor parameter,
 a wire on the demo's board — if and only if it is a choice. A heuristic is a
 choice; a calendar assembled from the layers has one possible construction and
-no knobs, so it is derived rather than passed. This is what lets the next
+no knobs, so it is derived rather than passed. This lets the next
 schedule-based algorithm arrive without touching `environment.py`: it brings
 its own derivation, and the environment need not know what it is for. The
 corollary for knobs: a bound on one question is a query option, a property of
@@ -1383,8 +1374,9 @@ the technique is a constructor argument — `max_transfers` is the former,
 
 **Multi-source with initial costs.** The one-to-all search takes
 `(node, initial_cost)` pairs rather than a single origin. Every multimodal
-algorithm needs this — the transit search starts from a set of stops each already
-reached at some cost — so it belongs in the primitive rather than in a wrapper.
+algorithm needs this — the transit search starts from a set of stops, each
+already reached at some cost — so it belongs in the primitive rather than in a
+wrapper.
 
 ## Development
 

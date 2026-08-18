@@ -32,9 +32,13 @@ features = ["extension-module"]
 
 [tool.pytest.ini_options]
 # Docstring examples are run as tests, so the documentation cannot drift.
+# The paper pages under docs/ are collected the same way, for the same reason:
+# a hello-world that no longer runs is worse than no hello-world.
 testpaths = ["tests", "python/routelab"]
 # tests/ on the path so nested test files keep reaching conftest's helpers
-# by name. Do not add __init__.py under tests/ — a second conftest module
-# would then shadow this one.
+# by name. Do not add __init__.py under tests/, and do not add a conftest.py
+# anywhere else — a second conftest module would then shadow this one, which
+# is why the pages under docs/ are run by tests/test_docs.py rather than by
+# pointing --doctest-glob at them.
 pythonpath = ["tests"]
 addopts = "--doctest-modules"
