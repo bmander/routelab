@@ -524,8 +524,32 @@ class Router:
         # afford the query twice. Every technique keeps one — a search that
         # tells journeys apart only by arrival keeps a front of one — so this
         # asks rather than testing whether it can.
+        # Every route the answer holds, drawn as well as counted. The first is
+        # the one the map draws prominently; the rest are what you would give
+        # up a change for, and seeing them is the point of a technique that
+        # keeps a front at all. Cheap: a front is a handful of journeys, and
+        # each is a line through stops rather than a search space.
+        def drawn_as(journey):
+            """A journey as one line, the way the main route is drawn.
+
+            `geometry` stitches the shapes of the legs that *have* one and
+            skips the rest, which is right for a street journey and wrong for
+            a transit one: a feed with no `shapes.txt` gives its rides no
+            shape, so a stitched line would be the walks alone and would claim
+            a bus went somewhere it did not. Anything scheduled therefore draws
+            stop to stop, which is what the segments beside it already do.
+            """
+            if any(leg.trip is not None for leg in journey.legs):
+                return [coordinates[label] for label in journey.nodes]
+            return journey.geometry or [coordinates[label] for label in journey.nodes]
+
         frontier = [
-            {"arrives": alternative.arrives, "transfers": alternative.transfers}
+            {
+                "arrives": alternative.arrives,
+                "transfers": alternative.transfers,
+                "seconds": alternative.cost,
+                "points": drawn_as(alternative),
+            }
             for alternative in answer.routes
         ]
         return {

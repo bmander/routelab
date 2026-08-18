@@ -718,6 +718,24 @@ async function request(explore) {
   // and the readout still reports what the search cost, because the query was
   // asked either way.
   route.clearLayers();
+  // The rest of the front, underneath. An answer's routes are every journey
+  // worth having — the first is the earliest arrival and each one after it
+  // buys a change back at the price of arriving later — and the ones you are
+  // not taking are worth seeing while you drag, because that is the choice the
+  // technique found and a single line hides it. Added first so the answer
+  // itself draws over them.
+  if (answer.drawn && (answer.frontier || []).length > 1) {
+    for (const alternative of answer.frontier.slice(1)) {
+      if (!alternative.points) { continue; }
+      L.polyline(alternative.points, {
+        color: '#7a8894', weight: 2.5, opacity: 0.55, dashArray: '1 5',
+        lineCap: 'round',
+      }).addTo(route).bindTooltip(
+        `${alternative.transfers} transfer${alternative.transfers === 1 ? '' : 's'}` +
+        `, arrives ${hhmm(alternative.arrives)}`,
+        {sticky: true});
+    }
+  }
   if (answer.drawn && answer.segments) {
     // A transit answer, in pieces: each vehicle boarded takes the next colour
     // in turn, so a change of bus reads as a change of colour, and a walk
