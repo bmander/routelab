@@ -70,13 +70,20 @@ def test_the_rounds_are_a_search_space(planner):
     assert {(reach.stop, reach.round) for reach in space.branches()} == {("A", 0), ("B", 1), ("C", 1)}
     assert space.peak == 1
     assert len(space) == 3
+    # A reach is one round's frontier, so its arrival is that round's and not
+    # the search's best: round 1 rides straight through to C at 08:30, and the
+    # 08:20 the query answers with is round 2's, which discovered no new stop.
+    reaches = {reach.stop: reach.arrives for reach in space.branches()}
+    assert reaches["C"] == 8 * 3600 + 30 * 60
+    assert result.cost(planner.node_id("C")) == 8 * 3600 + 20 * 60
+    assert space.peak < result.rounds, "the last round found nothing new"
     drawn = space.geojson()
     features = drawn["features"]
     assert len(features) == 3
     assert {f["geometry"]["type"] for f in features} == {"Point"}
     assert {f["properties"]["round"] for f in features} == {0, 1}
     assert drawn["peak"] == 1, "the collection carries what a round is a share of"
-    assert repr(space) == "Rounds(3 stops over 1 rounds)"
+    assert repr(space) == "Rounds(3 stops, out to round 1)"
     with pytest.raises(ValueError, match="rounds has no magnitude"):
         planner.explored(result, magnitude="weight")
 

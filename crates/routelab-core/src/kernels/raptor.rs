@@ -497,13 +497,23 @@ impl RaptorSearch {
         })
     }
 
-    /// Every stop reached, with the round that first reached it and its
-    /// earliest arrival — the search space, for drawing.
+    /// Every stop reached, with the round that first reached it and the
+    /// arrival *that round* achieved — the search space, for drawing.
+    ///
+    /// Deliberately not [`Self::cost`], which is the best arrival over every
+    /// round: a later round often improves a stop it did not discover, and
+    /// pairing that arrival with this round would describe a journey no round
+    /// ever made. A frontier is a picture of where each round got to, so both
+    /// halves of the pair have to come from the same round. Ask `cost` for the
+    /// answer and this for the search.
     pub fn reached(&self) -> Vec<(NodeId, usize, Time)> {
         (0..self.labels[0].len())
             .filter_map(|s| {
                 let stop = s as NodeId;
-                Some((stop, self.round_reached(stop)?, self.cost(stop)?))
+                let round = self.round_reached(stop)?;
+                // Reachable in that row by construction — it is the first row
+                // where the stop is not UNREACHABLE.
+                Some((stop, round, self.labels[round][s]))
             })
             .collect()
     }

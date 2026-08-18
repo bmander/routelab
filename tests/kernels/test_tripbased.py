@@ -94,7 +94,7 @@ def test_the_segments_are_a_search_space(planner):
     assert {f["properties"]["round"] for f in drawn["features"]} == {0, 1}
     assert drawn["peak"] == 1
     assert len(space.geojson(min_round=1)["features"]) == 1
-    assert repr(space) == "Segments(3 trip segments over 1 rounds)"
+    assert repr(space) == "Segments(3 trip segments, out to round 1)"
     with pytest.raises(ValueError, match="trip segments has no magnitude"):
         planner.explored(result, magnitude="weight")
 

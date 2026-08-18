@@ -149,7 +149,11 @@ class Reach(NamedTuple):
     #: The round that first reached it: 0 for the origins and what they can
     #: walk to, `k` for a stop first reached with `k` trips.
     round: int
-    #: The earliest arrival the whole search settled on, on the service-day clock.
+    #: When :attr:`round` got there, on the service-day clock — not the best
+    #: arrival the whole search settled on, which a later round may improve
+    #: without ever discovering the stop. Both halves of the pair come from
+    #: the same round, so a reach describes one journey rather than two; the
+    #: best arrival is the planner's answer, and lives on the result.
     arrives: int
 
 
@@ -371,6 +375,11 @@ class Rounds(SearchSpace):
     frontier lay. Drawn as points — a stop is a place, not a road — coloured by
     round, which is the picture in the paper: the origin's neighbourhood, then
     everything one bus away, then two.
+
+    A stop's arrival here is the one its own round achieved, not the best the
+    search ended up with — see :class:`Reach`. That is what makes this a
+    frontier rather than a table of answers: the planner's answer for a stop
+    is :meth:`~routelab.kernels.Planner.journey`, and may be a later round's.
     """
 
     kind = "rounds"
@@ -385,7 +394,12 @@ class Rounds(SearchSpace):
 
     @property
     def peak(self) -> int:
-        """The last round that reached anything."""
+        """The last round that reached a stop no earlier round had.
+
+        A round number rather than a count of rounds — it is what a renderer
+        divides a stop's round by — and lower than the search's own round
+        count whenever the final rounds only improved stops already found.
+        """
         return max((round for _, round, _ in self._reached), default=0)
 
     def branches(self, *, min_round: int = 0) -> "Iterator[Reach]":
@@ -436,7 +450,11 @@ class Rounds(SearchSpace):
         return {"type": "FeatureCollection", "features": features, "peak": self.peak}
 
     def __repr__(self) -> str:
-        return f"Rounds({len(self):,} stops over {self.peak} rounds)"
+        # "out to round k" rather than "over k rounds": `peak` is a round
+        # number, so reading it as a count names neither the rounds the search
+        # ran nor the rounds that found something — and it reads as "1 rounds"
+        # when the answer is round 1.
+        return f"Rounds({len(self):,} stops, out to round {self.peak})"
 
 
 class Scan(SearchSpace):
@@ -545,7 +563,8 @@ class Segments(SearchSpace):
 
     @property
     def peak(self) -> int:
-        """The last round any segment was reached in."""
+        """The last round any segment was reached in — a round number rather
+        than a count of rounds, as :attr:`Rounds.peak` is."""
         return max((round for round, _, _ in self._reached), default=0)
 
     def branches(self, *, min_round: int = 0) -> "Iterator[Segment]":
@@ -590,4 +609,5 @@ class Segments(SearchSpace):
         return {"type": "FeatureCollection", "features": features, "peak": self.peak}
 
     def __repr__(self) -> str:
-        return f"Segments({len(self):,} trip segments over {self.peak} rounds)"
+        # A round number, not a count — see :meth:`Rounds.__repr__`.
+        return f"Segments({len(self):,} trip segments, out to round {self.peak})"
