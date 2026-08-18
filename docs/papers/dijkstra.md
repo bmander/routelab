@@ -159,6 +159,28 @@ ShortestPathTree(3 branches, magnitude='weight', peak=600)
 
 ```
 
+`route` returns the journey and drops the search it read it off, which is right
+when the journey is all you wanted. When it is not — a route *and* the picture
+behind it — `ask` keeps the search, and everything else is read from the one
+already run:
+
+```python
+>>> answer = planner.ask("home", "work")
+>>> answer.journey
+Journey('home' → 'a' → 'b' → 'work', cost=600)
+>>> answer.explored()
+ShortestPathTree(3 branches, magnitude='weight', peak=600)
+>>> answer.result.settled
+4
+
+```
+
+Reading is not free — a path walks parent pointers, a search space is built
+from what was settled — but nothing there searches twice. Every technique
+answers `ask`, including the ones that keep no table: theirs holds the journey
+and `answer.result` is `None`, and the questions needing a table refuse by
+name.
+
 Dijkstra grows and returns a shortest-path tree. Each branch carries the total
 of everything hanging off it, so a city-sized search draws as a river network
 rather than a hundred thousand identical lines.

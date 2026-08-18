@@ -8,6 +8,7 @@ from typing import Any, Dict, Hashable, List, Optional, Set, Tuple
 
 from .. import _routelab
 from ..model.environment import CompiledEnvironment, Environment
+from ..model.answer import Answer
 from ..model.journey import Journey, Leg, _edge_between, _leg
 from ..model.search import Result
 from ..model.searchspace import SearchSpace
@@ -345,9 +346,13 @@ class ULTRA(TimetablePlanner):
             f"{type(self.technique).__name__}() directly to search its stops."
         )
 
-    def route(
-        self, origin: Origins, destination: Hashable, **options: Any
-    ) -> Optional[Journey]:
+    def _ask(
+        self,
+        starts: "Dict[int, int]",
+        target: int,
+        destination: Hashable,
+        options: "Dict[str, Any]",
+    ) -> Answer:
         """The earliest arrival at ``destination``, walking without a radius.
 
         The paper's Algorithm 2. One hierarchy query gives the direct walk
@@ -356,15 +361,16 @@ class ULTRA(TimetablePlanner):
         having, which is every one that beats walking the whole way. The
         wrapped technique then runs on the stops that survived, and the best
         place to get off is read from the final transfers.
+
+        The answer holds no table, for the reason :meth:`explored` gives: the
+        search whose space could be drawn is the wrapped technique's, and it is
+        bracketed by two walks that are this one's.
         """
-        options = self._options(options)
         # The technique underneath has the last word on the knobs: this one
         # advertises what any of them takes, and only it knows which.
         self.inner._options(options)  # noqa: SLF001 - the seam this technique is
         compiled = self._bound()
         at = service_seconds(options["departing"])
-        target = self.node_id(destination)
-        starts = self._origin_ids(origin)
 
         # Algorithm 2, lines 1-3: the direct walk, and the initial and final
         # transfers that beat it. Two bucket scans over a hierarchy's search
@@ -401,16 +407,17 @@ class ULTRA(TimetablePlanner):
                     arrives, aboard, alight = landed, result, stop
 
         if arrives is None:
-            return None
+            return Answer(self, destination, None, None)
         if aboard is None:
             source, legs = self._access(starts, at, target)
-            return Journey(
+            walked = Journey(
                 origin=compiled.label(source),
                 destination=destination,
                 cost=arrives - at,
                 legs=tuple(legs),
                 settled=0,
             )
+            return Answer(self, destination, walked, None)
 
         itinerary = aboard.itinerary(self._inner_of[alight])
         ridden = self._itinerary_legs(itinerary)
@@ -421,12 +428,17 @@ class ULTRA(TimetablePlanner):
         legs += ridden
         egress = self.buckets.path([(alight, 0)], target)
         legs += self._walk_legs([] if egress is None else egress[1], itinerary.arrives)
-        return Journey(
-            origin=compiled.label(source),
-            destination=destination,
-            cost=arrives - at,
-            legs=tuple(legs),
-            settled=itinerary.settled,
+        return Answer(
+            self,
+            destination,
+            Journey(
+                origin=compiled.label(source),
+                destination=destination,
+                cost=arrives - at,
+                legs=tuple(legs),
+                settled=itinerary.settled,
+            ),
+            None,
         )
 
     def _access(

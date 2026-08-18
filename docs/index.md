@@ -76,6 +76,11 @@ Sixteen landmarks over a city cost a second and 33 MB; that belongs to a verb,
 not a constructor. The split also makes a technique a *value* — something you
 can name, put in a dictionary, and point at more than one dataset.
 
+**A query can keep its working space.** `route` hands back the journey and
+drops the search it read it off; `ask` returns an `Answer` holding both, so the
+space behind a route and the front it belongs to cost one search rather than
+two.
+
 **A technique takes the options its problem needs**, declared as data, and
 refuses the rest by name, saying which technique they belong to. `Dijkstra`
 takes `max_cost`; `RAPTOR` takes `departing` and `max_transfers`; asking either

@@ -366,6 +366,22 @@ refuse `explored()` in so many words — but whatever it explored, you can draw
 it. The identity underneath is the same for every technique that keeps a table:
 `planner.route(a, b) == planner.journey(planner.search(a, targets=[...]), b)`.
 
+`route` returns the journey and drops the search behind it, so a caller who
+wants both used to search twice. `ask` keeps it:
+
+```python
+answer = planner.ask(origin, destination)
+answer.journey                           # what route() returns
+answer.explored()                        # the space behind it, same search
+answer.frontier()                        # the Pareto set, where a technique keeps one
+answer.result                            # everything the kernel computed, dense ids
+```
+
+Every technique answers `ask`, the ones that keep no table included: theirs
+holds the journey, `result` is `None`, and the questions needing a table refuse
+by name — which is the difference between the techniques, not something to
+paper over.
+
 The interactive demo draws exactly this, the quickest way to see what a
 heuristic buys: the same 11.2-minute Seattle route settles 41,161 branches under
 Dijkstra, reaching across Lake Washington to Bellevue, and 12,172 under A*,

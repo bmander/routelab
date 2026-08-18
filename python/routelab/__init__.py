@@ -39,6 +39,7 @@ from .model.environment import (
 )
 from .model.graph import Graph
 from .kernels.heuristics import Euclidean, Heuristic, Landmarks, Pace, Plane, Zero
+from .model.answer import Answer
 from .model.journey import Journey, Leg
 from .kernels.orderings import EdgeDifference, Ordering, RandomOrder
 from .util.clock import WEEK, service_seconds, weekly_seconds
@@ -85,6 +86,7 @@ from .data import GTFS, OSM, Access, Cycling, Driving, Footpaths, Profile, Walki
 
 __all__ = [
     "AStar",
+    "Answer",
     "Access",
     "Arrival",
     "BFS",

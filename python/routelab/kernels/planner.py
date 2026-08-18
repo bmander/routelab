@@ -34,6 +34,7 @@ from typing import Any, Dict, Hashable, Iterable, List, Mapping, Optional, Tuple
 
 from .. import _routelab
 from ..model.environment import CompiledEnvironment, Environment
+from ..model.answer import Answer
 from ..model.journey import Journey
 from ..model.search import Result
 from ..model.searchspace import SearchSpace, ShortestPathTree
@@ -278,9 +279,10 @@ class Planner:
     ) -> Optional[Journey]:
         """The cheapest journey from ``origin`` to ``destination``.
 
-        One implementation for every technique: options are checked once,
-        origins are resolved once, and the technique supplies only the part
-        that is its own — see :meth:`_route`.
+        The journey alone. :meth:`ask` is the same query keeping the search it
+        was read off, for a caller who also wants the space behind it or the
+        front it belongs to; this is the shorthand for when the journey is all
+        you wanted.
 
         Args:
             origin: A label, several labels, or ``{label: initial_cost}`` — the
@@ -299,27 +301,42 @@ class Planner:
             A :class:`~routelab.Journey`, or ``None`` if the destination cannot
             be reached under the given bounds.
         """
+        return self.ask(origin, destination, **options).journey
+
+    def ask(self, origin: Origins, destination: Hashable, **options: Any) -> Answer:
+        """The same query as :meth:`route`, keeping what the search computed.
+
+        A search works out more than the one journey it is usually asked for,
+        and `route` drops the rest — so drawing the space behind a route, or
+        reading the front it belongs to, used to mean searching twice. This
+        hands back an :class:`~routelab.Answer`: the journey, and the working
+        space to answer everything else from.
+
+        Every technique answers this, including the ones that keep no table;
+        theirs holds the journey and refuses the questions that need a table,
+        in their own words.
+        """
         options = self._options(options)
         starts = self._origin_ids(origin)
-        return self._route(starts, self.node_id(destination), destination, options)
+        return self._ask(starts, self.node_id(destination), destination, options)
 
-    def _route(
+    def _ask(
         self,
         starts: "Dict[int, int]",
         target: int,
         destination: Hashable,
         options: "Dict[str, Any]",
-    ) -> Optional[Journey]:
-        """The technique's own half of :meth:`route`, ids in.
+    ) -> Answer:
+        """The technique's own half of :meth:`ask`, ids in.
 
         The default is the search-based one: run :meth:`_search` toward the
-        target and read the journey off the result. A technique whose answer is
-        an itinerary rather than a cost table overrides this instead.
+        target and read the journey off the result, keeping the result. A
+        technique whose answer is an itinerary rather than a cost table
+        overrides this instead.
         """
         result = self._search(starts, targets=[target], **options)
-        if result.cost(target) is None:
-            return None
-        return self.journey(result, destination)
+        journey = None if result.cost(target) is None else self.journey(result, destination)
+        return Answer(self, destination, journey, result)
 
     def search(self, origins: Origins, **options: Any) -> Result:
         """Run the search and return the raw, id-keyed result.
@@ -353,6 +370,22 @@ class Planner:
         if result.cost(self.node_id(destination)) is None:
             return None
         return Journey.from_result(self._bound(), result, destination)
+
+    def journeys(self, result: Result, destination: Hashable) -> "List[Journey]":
+        """Not this: a search that told journeys apart only by arrival holds no
+        front to read off.
+
+        Said in so many words rather than left to fail as a missing attribute,
+        and who to ask instead is read off the shelf — the techniques that mix
+        in :class:`Front` — so a new one joins the sentence by existing.
+        """
+        keepers = names(cls for cls in techniques() if issubclass(cls, Front))
+        raise NotImplementedError(
+            f"{type(self).__name__} answers with one journey rather than a "
+            f"front: its search never told two journeys apart by anything but "
+            f"when they arrive. The techniques that count changes as they go "
+            f"keep one: ask {keepers}."
+        )
 
     def explored(self, result: Result, **options: Any) -> SearchSpace:
         """What the search looked at, in a form something can draw.
@@ -644,24 +677,28 @@ class TimetablePlanner(Planner):
             return None
         return Journey.from_itinerary(self._bound(), itinerary, destination, result.departing)
 
-    def _route(
+    def _ask(
         self,
         starts: "Dict[int, int]",
         target: int,
         destination: Hashable,
         options: "Dict[str, Any]",
-    ) -> Optional[Journey]:
-        """The earliest arrival at ``destination``, as a journey.
+    ) -> Answer:
+        """The earliest arrival at ``destination``, as a journey and nothing else.
 
-        A timetable technique answers with an itinerary — which vehicles, when
-        — rather than a cost per node, so this is where the shared
-        :meth:`Planner.route` hands over.
+        A timetable technique of this family answers with an itinerary — which
+        vehicles, when — rather than a cost per node, so this is where the
+        shared :meth:`Planner.ask` hands over, and why the answer holds no
+        table. The questions that need one refuse by name, as they always did.
         """
         sources, at = self._sources(starts, options)
         itinerary = self._earliest_arrival(sources, target, options)
-        if itinerary is None:
-            return None
-        return Journey.from_itinerary(self._bound(), itinerary, destination, at)
+        journey = (
+            None
+            if itinerary is None
+            else Journey.from_itinerary(self._bound(), itinerary, destination, at)
+        )
+        return Answer(self, destination, journey, None)
 
     def explored(self, result: Result, **options: Any) -> SearchSpace:
         """Not this: a model that answers with a journey keeps no search space.
@@ -723,12 +760,7 @@ class Front:
         arrival time and changes, where :meth:`Planner.route` returns only its
         last entry.
         """
-        options = self._options(options)  # type: ignore[attr-defined]
-        starts = self._origin_ids(origin)  # type: ignore[attr-defined]
-        result = self._search(  # type: ignore[attr-defined]
-            starts, targets=[self.node_id(destination)], **options  # type: ignore[attr-defined]
-        )
-        return self.journeys(result, destination)
+        return self.ask(origin, destination, **options).frontier()  # type: ignore[attr-defined]
 
 
 def route(
