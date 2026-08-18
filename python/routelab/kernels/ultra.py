@@ -7,7 +7,7 @@ import copy
 from typing import Any, Dict, Hashable, List, Optional, Set, Tuple
 
 from .. import _routelab
-from ..model.environment import CompiledEnvironment
+from ..model.environment import CompiledEnvironment, Environment
 from ..model.journey import Journey, Leg, _edge_between, _leg
 from ..model.search import Result
 from ..model.searchspace import SearchSpace
@@ -16,6 +16,10 @@ from .departures import Departures
 from .planner import Origins, Planner, TimetablePlanner, names, techniques
 
 __all__ = ["ULTRA", "Transfers"]
+
+#: What a vertex that is not a stop renumbers to — the kernel's own `NO_NODE`,
+#: which `footpaths_renumbered` reads as "drop this end".
+_NOT_A_STOP = 0xFFFFFFFF
 
 
 class Transfers:
@@ -193,15 +197,27 @@ class ULTRA(TimetablePlanner):
 
     def walks(self) -> Any:
         """The shortcuts, which is what the wrapped technique reads instead of
-        a closure — see :meth:`TimetablePlanner.walks`."""
-        return _Shortcuts(self.shortcuts)
+        a closure — see :meth:`TimetablePlanner.walks`.
+
+        Renumbered into the transit network's own vertices, since that is what
+        the technique underneath was bound to.
+        """
+        return _Shortcuts(self.shortcuts, self._slots, self._inner_stops)
 
     def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
         """Work the shortcuts out, then bind the technique onto them.
 
-        The wrapped technique binds to the same environment this did, so its
-        stops are numbered alike and its answers are already in the caller's
-        terms; the only thing changed underneath it is which walks it reads.
+        The wrapped technique is bound to the **timetable layers alone**, not
+        to the environment this was given. That is Algorithm 2's last line —
+        the black box runs on the public transit network, not on the merged
+        one — and it is the difference between a technique whose tables are a
+        row per stop and one whose tables are a row per street corner. On
+        Seattle's pavement with King County Metro that is 6,313 against
+        560,706, nine rounds of it per query.
+
+        The cost is a second numbering, and :attr:`_inner_of` is the seam.
+        Nothing outside this class sees it: what goes in and comes out of
+        :meth:`route` is the caller's own labels, as everywhere else.
         """
         compiled = self._bound()
         self.timetable = Departures().bind(compiled, progress)
@@ -214,11 +230,32 @@ class ULTRA(TimetablePlanner):
         self.buckets = _routelab.Buckets.build(
             self.transfers.graph, self.transfers.stops, progress
         )
+
+        # The transit network on its own, and the two translations between its
+        # numbering and the caller's.
+        riding = [
+            source for source in self.environment.sources
+            if source.cost_model == "timetable"
+        ]
+        inner_environment = Environment(*riding)
+        inner_compiled = inner_environment.compile()
+        self._inner_of = {
+            compiled.node_id(label): inner_compiled.node_id(label)
+            for label in inner_compiled.labels
+        }
+        self._outer_of = {inner: outer for outer, inner in self._inner_of.items()}
+        # Indexed by *this* graph's vertices, for renumbering the shortcuts:
+        # NO_NODE wherever a vertex is a street corner rather than a stop.
+        self._slots = [_NOT_A_STOP] * len(compiled)
+        for outer, inner in self._inner_of.items():
+            self._slots[outer] = inner
+        self._inner_stops = len(inner_compiled)
+
         # The technique underneath reads the shortcuts rather than a closure,
         # which is the whole of the integration: `walks()` is the seam.
         inner = copy.copy(self.technique)
         inner.walks = self.walks  # type: ignore[method-assign]
-        self.inner = inner.bind(self.environment, progress)
+        self.inner = inner.bind(inner_environment, progress)
         self.footpaths = self.inner.footpaths
 
     def _footprint(self) -> int:
@@ -281,8 +318,12 @@ class ULTRA(TimetablePlanner):
         sees it. There are a handful per journey, over a graph of stops.
         """
         compiled = self._bound()
+        outer_of = self._outer_of
         legs: "List[Leg]" = []
         for trip, tail, head, departs, arrives in itinerary.legs():
+            # The technique answers in the transit network's numbering; every
+            # leg is told against the environment the caller handed in.
+            tail, head = outer_of[tail], outer_of[head]
             if trip is not None:
                 legs.append(
                     _leg(compiled, _edge_between(compiled, tail, head, "timetable"),
@@ -329,7 +370,10 @@ class ULTRA(TimetablePlanner):
         # transfers that beat it. Two bucket scans over a hierarchy's search
         # space, not two searches of the network.
         found = self.buckets.endpoints(list(starts.items()), target)
-        out = dict(found.to_stops)
+        # Into the transit network's own numbering, which is what the wrapped
+        # technique was bound to.
+        inner_of = self._inner_of
+        out = {inner_of[stop]: cost for stop, cost in found.to_stops if stop in inner_of}
 
         # A journey that boards nothing: the walk, which needs no vehicle and
         # so is the floor every ride has to beat — and, being the floor, is
@@ -345,11 +389,15 @@ class ULTRA(TimetablePlanner):
             # transfer, and it has nothing to do with where the journey
             # started walking.
             for stop, walk in found.from_stops:
-                reached = result.cost(stop)
+                inner = inner_of.get(stop)
+                reached = None if inner is None else result.cost(inner)
                 if reached is None:
                     continue
                 landed = reached + walk
                 if arrives is None or landed < arrives:
+                    # `alight` is kept in the caller's numbering: it is where
+                    # the final walk starts, and that walk is the transfer
+                    # graph's business rather than the timetable's.
                     arrives, aboard, alight = landed, result, stop
 
         if arrives is None:
@@ -364,7 +412,7 @@ class ULTRA(TimetablePlanner):
                 settled=0,
             )
 
-        itinerary = aboard.itinerary(alight)
+        itinerary = aboard.itinerary(self._inner_of[alight])
         ridden = self._itinerary_legs(itinerary)
         # Where the riding began: the first leg's tail, or the alighting stop
         # itself when the technique found nothing to ride.
@@ -412,15 +460,17 @@ class _Shortcuts:
 
     name = "walks"
 
-    def __init__(self, shortcuts: Any):
+    def __init__(self, shortcuts: Any, slots: "List[int]", stops: int):
         self.shortcuts = shortcuts
+        self.slots = slots
+        self.stops = stops
 
     @classmethod
     def missing_from(cls, compiled: CompiledEnvironment) -> "frozenset[str]":
         return frozenset()
 
     def bind(self, compiled: CompiledEnvironment, progress: Any = None) -> Any:
-        return self.shortcuts.footpaths()
+        return self.shortcuts.footpaths_renumbered(self.slots, self.stops)
 
     def __repr__(self) -> str:
         return "Shortcuts()"

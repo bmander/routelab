@@ -32,6 +32,33 @@ impl Footpaths {
         Footpaths::from_closed(stops, Self::closure(stops, &given))
     }
 
+    /// Build from `(from, to, duration)` triples **without** closing them.
+    ///
+    /// For a set that is already the set a query needs. ULTRA's shortcuts are
+    /// that: each one stands for a whole walk between two stops, and the
+    /// paper's guarantee is that every intermediate transfer a Pareto-optimal
+    /// journey can need is one of them. Chaining them would add every
+    /// composition of two — and unlike a radius's foot-edges, which are a
+    /// scatter of small components, the shortcut graph spans the network, so
+    /// the closure is the quadratic blow-up ULTRA exists to avoid. Twenty-four
+    /// thousand shortcuts over six thousand stops close to two hundred and
+    /// thirty megabytes of walks no journey takes.
+    ///
+    /// Every link is direct, so each is its own `via`.
+    pub fn from_links(
+        stops: usize,
+        links: impl IntoIterator<Item = (NodeId, NodeId, Time)>,
+    ) -> Self {
+        let given: Vec<(NodeId, NodeId, Time, NodeId)> = links
+            .into_iter()
+            .filter(|(from, to, _)| {
+                (*from as usize) < stops && (*to as usize) < stops && from != to
+            })
+            .map(|(from, to, duration)| (from, to, duration, from))
+            .collect();
+        Footpaths::from_closed(stops, given)
+    }
+
     /// Every walk reachable by chaining `given`, at its shortest duration, as
     /// `(from, to, duration, via)`.
     ///

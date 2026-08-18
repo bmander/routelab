@@ -120,6 +120,23 @@ The wrapped technique is unmodified. That is the paper's claim and the reason
 this is worth having: the transfers are a preprocessing problem, solved once,
 and every query technique benefits without being rewritten.
 
+It is bound to the **transit network** rather than to the environment ULTRA was
+given — Algorithm 2's last line runs the black box on `(S ∪ {s,t}, T, R, G̃s)`,
+not on the merged graph. The difference is a technique whose tables are a row
+per stop against one with a row per street corner: on Seattle's pavement with
+King County Metro, 6,313 rows against 560,706, nine rounds of it per query.
+ULTRA translates at that seam, so what goes in and comes out is the caller's
+own labels.
+
+The shortcuts go in **unclosed**, too. Every other transfer set here is closed
+under composition, because a rider who can walk a→b and b→c can walk a→c and a
+model that does not know that answers a query dropped on the wrong corner with
+nothing. ULTRA's shortcuts need no such repair: each already stands for a whole
+walk between two stops, and the paper's guarantee is that every intermediate
+transfer a Pareto-optimal journey can need is one of them. Closing them anyway
+would rebuild, one composition at a time, exactly the blow-up ULTRA exists to
+avoid.
+
 ## What it refuses
 
 A wrapped technique must keep a label per stop, because ULTRA's query has to
@@ -146,17 +163,17 @@ planner = rl.ULTRA(rl.RAPTOR()).bind(env)     # minutes of preprocessing
 planner.route(doorstep, office, departing=time(8, 30))
 ```
 
-This is the corner of the design space where you pay up front: fourteen minutes
-of preprocessing and 374 MB, for a query over a transfer set with no radius in
-it anywhere. [LabelConstrained](label-constrained.md) is the opposite corner —
-nothing precomputed, the whole network searched — and [UCCH](ucch.md) is the
-middle one.
+This is the corner of the design space where you pay up front: ten minutes of
+preprocessing and 149 MB — a core contraction, the shortcut search over it, and
+a second full contraction for the buckets — for a query over a transfer set
+with no radius in it anywhere. [LabelConstrained](label-constrained.md) is the
+opposite corner, nothing precomputed and the whole network searched, and
+[UCCH](ucch.md) is the middle one.
 
-What that buys, and what it does not, is on the
-[trade-offs page](../tradeoffs.md): 126 ms on this instance, of which 8 ms is
-the Bucket-CH above and the rest is the wrapped RAPTOR, seeded with the
-thousands of stops that genuinely are within walking distance when walking the
-whole way would take nine hours.
+What that buys is on the [trade-offs page](../tradeoffs.md): **11.4 ms** on
+this instance, against 34.8 for UCCH and 106.7 for searching the network. The
+paper reports 12.5 ms for ULTRA-RAPTOR on Switzerland, which is the right
+company to be in.
 
 ## What is not here
 

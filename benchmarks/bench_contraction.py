@@ -19,6 +19,7 @@ at all. The settled-nodes column is where that shows.
 from __future__ import annotations
 
 import argparse
+import gc
 import random
 import statistics
 import time
@@ -35,6 +36,18 @@ TECHNIQUES = [
     ("Contraction hierarchy", rl.ContractionHierarchy()),
 ]
 
+
+
+def isolated() -> None:
+    """Start a technique's measurement from a heap the last one has left.
+
+    Techniques are timed in one process so that they can be held to each
+    other's answers, which means one row's footprint can tax the next: the row
+    after PTL's gigabyte used to read about half a millisecond slow, purely for
+    having followed it. Dropping the planner and collecting before the next
+    bind is what makes a row a measurement of its own technique.
+    """
+    gc.collect()
 
 def megabytes(byte_count: int) -> str:
     return "-" if byte_count == 0 else f"{byte_count / 1e6:.0f} MB"
@@ -80,6 +93,7 @@ def main() -> int:
 
     truth: "dict[tuple, int]" = {}
     for name, technique in TECHNIQUES:
+        isolated()
         began = time.perf_counter()
         planner = technique.bind(environment)
         preprocess = time.perf_counter() - began
@@ -103,6 +117,7 @@ def main() -> int:
             f"{statistics.mean(settled):>10,.0f} "
             f"{statistics.median(times):>8.3f}ms"
         )
+        del planner
     return 0
 
 

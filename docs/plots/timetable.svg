@@ -25,18 +25,20 @@
 <rect width="760" height="430" class="surface"/>
 <text x="28" y="24" class="title">Timetables: what preprocessing buys</text>
 <text x="28" y="40" class="subtitle">King County Metro, one Monday — 6,313 stops, 421,604 connections, 25 random pairs</text>
-<line x1="68" y1="354.7" x2="730" y2="354.7" class="grid"/>
-<text x="62" y="358.7" class="tick end">0.5 ms</text>
-<line x1="68" y1="299.2" x2="730" y2="299.2" class="grid"/>
-<text x="62" y="303.2" class="tick end">1 ms</text>
-<line x1="68" y1="243.7" x2="730" y2="243.7" class="grid"/>
-<text x="62" y="247.7" class="tick end">2 ms</text>
-<line x1="68" y1="170.3" x2="730" y2="170.3" class="grid"/>
-<text x="62" y="174.3" class="tick end">5 ms</text>
-<line x1="68" y1="114.8" x2="730" y2="114.8" class="grid"/>
-<text x="62" y="118.8" class="tick end">10 ms</text>
-<line x1="68" y1="59.3" x2="730" y2="59.3" class="grid"/>
-<text x="62" y="63.3" class="tick end">20 ms</text>
+<line x1="68" y1="357.2" x2="730" y2="357.2" class="grid"/>
+<text x="62" y="361.2" class="tick end">0.2 ms</text>
+<line x1="68" y1="297.4" x2="730" y2="297.4" class="grid"/>
+<text x="62" y="301.4" class="tick end">0.5 ms</text>
+<line x1="68" y1="252.2" x2="730" y2="252.2" class="grid"/>
+<text x="62" y="256.2" class="tick end">1 ms</text>
+<line x1="68" y1="207.0" x2="730" y2="207.0" class="grid"/>
+<text x="62" y="211.0" class="tick end">2 ms</text>
+<line x1="68" y1="147.2" x2="730" y2="147.2" class="grid"/>
+<text x="62" y="151.2" class="tick end">5 ms</text>
+<line x1="68" y1="102.0" x2="730" y2="102.0" class="grid"/>
+<text x="62" y="106.0" class="tick end">10 ms</text>
+<line x1="68" y1="56.8" x2="730" y2="56.8" class="grid"/>
+<text x="62" y="60.8" class="tick end">20 ms</text>
 <line x1="90.6" y1="46" x2="90.6" y2="368" class="grid"/>
 <text x="90.6" y="388" class="tick mid">0.2 s</text>
 <line x1="182.4" y1="46" x2="182.4" y2="368" class="grid"/>
@@ -58,38 +60,38 @@
 <text x="402.0" y="414" class="axis mid">preprocessing, once per network →</text>
 <text transform="translate(18,207.0) rotate(-90)" class="axis mid">← median query</text>
 <g class='mark'>
-<title>TimeDependent: 0.3 s preprocessing, 1.941 ms per query</title>
-<circle cx="131.2" cy="246.1" r="5.5" class="dot"/>
-<text x="142.2" y="250.1" class="label start">TimeDependent</text>
+<title>TimeDependent: 0.6 s preprocessing, 3.874 ms per query</title>
+<circle cx="200.7" cy="163.9" r="5.5" class="dot"/>
+<text x="211.7" y="167.9" class="label start">TimeDependent</text>
 </g>
 <g class='mark'>
-<title>TimeExpanded: 1.2 s preprocessing, 16.062 ms per query</title>
-<circle cx="270.2" cy="76.8" r="5.5" class="dot"/>
-<text x="281.2" y="80.8" class="label start">TimeExpanded</text>
+<title>TimeExpanded: 1.4 s preprocessing, 14.785 ms per query</title>
+<circle cx="285.6" cy="76.5" r="5.5" class="dot"/>
+<text x="296.6" y="80.5" class="label start">TimeExpanded</text>
 </g>
 <g class='mark'>
-<title>RAPTOR: 0.4 s preprocessing, 1.968 ms per query</title>
-<circle cx="160.1" cy="245.0" r="5.5" class="dot"/>
-<text x="171.1" y="249.0" class="label start">RAPTOR</text>
+<title>RAPTOR: 0.4 s preprocessing, 1.192 ms per query</title>
+<circle cx="160.1" cy="240.8" r="5.5" class="dot"/>
+<text x="171.1" y="244.8" class="label start">RAPTOR</text>
 </g>
 <g class='mark'>
-<title>CSA: 0.4 s preprocessing, 0.671 ms per query</title>
-<circle cx="160.1" cy="331.2" r="5.5" class="dot"/>
-<text x="171.1" y="335.2" class="label start">CSA</text>
+<title>CSA: 0.4 s preprocessing, 0.668 ms per query</title>
+<circle cx="160.1" cy="278.5" r="5.5" class="dot"/>
+<text x="171.1" y="282.5" class="label start">CSA</text>
 </g>
 <g class='mark'>
-<title>TripBased: 10.5 s preprocessing, 1.236 ms per query</title>
-<circle cx="487.5" cy="282.2" r="5.5" class="dot"/>
-<text x="498.5" y="286.2" class="label start">TripBased</text>
+<title>TripBased: 14.5 s preprocessing, 1.050 ms per query</title>
+<circle cx="519.9" cy="249.0" r="5.5" class="dot"/>
+<text x="530.9" y="253.0" class="label start">TripBased</text>
 </g>
 <g class='mark'>
-<title>PTL: 68.6 s preprocessing, 0.602 ms per query</title>
-<circle cx="675.6" cy="339.9" r="5.5" class="dot"/>
-<text x="664.6" y="343.9" class="label end">PTL</text>
+<title>PTL: 61.3 s preprocessing, 0.495 ms per query</title>
+<circle cx="664.4" cy="298.1" r="5.5" class="dot"/>
+<text x="653.4" y="302.1" class="label end">PTL</text>
 </g>
 <g class='mark'>
-<title>ULTRA(RAPTOR): 21.8 s preprocessing, 3.582 ms per query — over the feed's own footpaths, not a street network</title>
-<circle cx="560.8" cy="197.0" r="5.5" class="dot"/>
-<text x="571.8" y="201.0" class="label start">ULTRA(RAPTOR)</text>
+<title>ULTRA(RAPTOR): 29.2 s preprocessing, 1.917 ms per query — over the feed's own footpaths, not a street network</title>
+<circle cx="590.0" cy="209.8" r="5.5" class="dot"/>
+<text x="579.0" y="213.8" class="label end">ULTRA(RAPTOR)</text>
 </g>
 </svg>

@@ -79,6 +79,13 @@ impl PyUltra {
         PyFootpaths::from(self.inner.footpaths(self.vertices))
     }
 
+    /// The same shortcuts in another numbering — what the wrapped technique
+    /// reads when it is bound to the transit network rather than the merged
+    /// one. `slot_of` is indexed by this graph's vertices.
+    fn footpaths_renumbered(&self, slot_of: Vec<NodeId>, stops: usize) -> PyFootpaths {
+        PyFootpaths::from(self.inner.footpaths_renumbered(&slot_of, stops))
+    }
+
     fn __len__(&self) -> usize {
         self.inner.len()
     }

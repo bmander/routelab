@@ -22,28 +22,28 @@
         {
           "technique": "Dijkstra",
           "preprocess_s": 0.0,
-          "query_ms": 19.777,
+          "query_ms": 15.931,
           "memory_bytes": 0,
           "settled": 115698
         },
         {
           "technique": "A* euclidean",
           "preprocess_s": 0.2,
-          "query_ms": 10.887,
+          "query_ms": 11.261,
           "memory_bytes": 4000000,
           "settled": 55250
         },
         {
           "technique": "A* 16 landmarks",
-          "preprocess_s": 1.2,
-          "query_ms": 3.629,
+          "preprocess_s": 1.3,
+          "query_ms": 2.626,
           "memory_bytes": 29000000,
           "settled": 9370
         },
         {
           "technique": "Contraction hierarchy",
-          "preprocess_s": 7.3,
-          "query_ms": 0.253,
+          "preprocess_s": 6.4,
+          "query_ms": 0.171,
           "memory_bytes": 17000000,
           "settled": 247
         }
@@ -56,52 +56,52 @@
       "techniques": [
         {
           "technique": "TimeDependent",
-          "preprocess_s": 0.3,
-          "query_ms": 1.941,
+          "preprocess_s": 0.6,
+          "query_ms": 3.874,
           "memory_bytes": 11000000,
           "settled": 3256
         },
         {
           "technique": "TimeExpanded",
-          "preprocess_s": 1.2,
-          "query_ms": 16.062,
+          "preprocess_s": 1.4,
+          "query_ms": 14.785,
           "memory_bytes": 150000000,
           "settled": 66447
         },
         {
           "technique": "RAPTOR",
           "preprocess_s": 0.4,
-          "query_ms": 1.968,
+          "query_ms": 1.192,
           "memory_bytes": 16000000,
           "settled": 4126
         },
         {
           "technique": "CSA",
           "preprocess_s": 0.4,
-          "query_ms": 0.671,
+          "query_ms": 0.668,
           "memory_bytes": 25000000,
           "settled": 3411
         },
         {
           "technique": "TripBased",
-          "preprocess_s": 10.5,
-          "query_ms": 1.236,
+          "preprocess_s": 14.5,
+          "query_ms": 1.05,
           "memory_bytes": 28000000,
           "settled": 8455
         },
         {
           "technique": "PTL",
-          "preprocess_s": 68.6,
-          "query_ms": 0.602,
+          "preprocess_s": 61.3,
+          "query_ms": 0.495,
           "memory_bytes": 1165000000,
           "settled": 12973
         },
         {
           "technique": "ULTRA(RAPTOR)",
-          "preprocess_s": 21.8,
-          "query_ms": 3.582,
-          "memory_bytes": 16000000,
-          "settled": 6184,
+          "preprocess_s": 29.2,
+          "query_ms": 1.917,
+          "memory_bytes": 15000000,
+          "settled": 6179,
           "note": " \u2014 over the feed's own footpaths, not a street network"
         }
       ]
@@ -113,21 +113,21 @@
       "techniques": [
         {
           "technique": "LabelConstrained",
-          "preprocess_s": 0.6,
-          "query_ms": 161.551,
+          "preprocess_s": 0.4,
+          "query_ms": 106.724,
           "memory_bytes": 14000000
         },
         {
           "technique": "UCCH",
-          "preprocess_s": 260.7,
-          "query_ms": 33.554,
+          "preprocess_s": 189.3,
+          "query_ms": 34.791,
           "memory_bytes": 66000000
         },
         {
           "technique": "ULTRA(RAPTOR)",
-          "preprocess_s": 836.9,
-          "query_ms": 126.301,
-          "memory_bytes": 374000000
+          "preprocess_s": 612.6,
+          "query_ms": 11.445,
+          "memory_bytes": 149000000
         }
       ]
     }

@@ -363,7 +363,31 @@ impl Ultra {
     /// transfer graph's count rather than the timetable's: a shortcut runs
     /// between stops, but they are numbered among the graph's vertices.
     pub fn footpaths(&self, stops: usize) -> Footpaths {
-        Footpaths::new(stops, self.shortcuts.iter().copied())
+        Footpaths::from_links(stops, self.shortcuts.iter().copied())
+    }
+
+    /// The same shortcuts, renumbered into another vertex space.
+    ///
+    /// Algorithm 2 runs the wrapped technique on the *public transit network*
+    /// rather than on the merged one, so the technique numbers stops among
+    /// themselves — a few thousand — while these shortcuts were computed in
+    /// the transfer graph's numbering, which counts every street corner too.
+    /// `slot_of` maps the latter to the former; a shortcut whose either end
+    /// has no slot is dropped, which cannot happen for a shortcut, both of
+    /// whose ends are stops by construction.
+    pub fn footpaths_renumbered(&self, slot_of: &[NodeId], stops: usize) -> Footpaths {
+        let slot = |node: NodeId| -> Option<NodeId> {
+            match slot_of.get(node as usize).copied() {
+                Some(NO_NODE) | None => None,
+                Some(slot) => Some(slot),
+            }
+        };
+        Footpaths::from_links(
+            stops,
+            self.shortcuts
+                .iter()
+                .filter_map(|&(from, to, walk)| Some((slot(from)?, slot(to)?, walk))),
+        )
     }
 
     /// Bytes held, as every other preprocessed structure here reports it.

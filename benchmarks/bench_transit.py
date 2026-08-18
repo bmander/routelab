@@ -26,6 +26,7 @@ per query. The settled column is where that shows — read it against the
 from __future__ import annotations
 
 import argparse
+import gc
 import datetime
 import random
 import statistics
@@ -44,6 +45,18 @@ TECHNIQUES = [
     ("ULTRA", rl.ULTRA(rl.RAPTOR())),
 ]
 
+
+
+def isolated() -> None:
+    """Start a technique's measurement from a heap the last one has left.
+
+    Techniques are timed in one process so that they can be held to each
+    other's answers, which means one row's footprint can tax the next: the row
+    after PTL's gigabyte used to read about half a millisecond slow, purely for
+    having followed it. Dropping the planner and collecting before the next
+    bind is what makes a row a measurement of its own technique.
+    """
+    gc.collect()
 
 def megabytes(byte_count: int) -> str:
     return "-" if byte_count == 0 else f"{byte_count / 1e6:.0f} MB"
@@ -93,6 +106,7 @@ def main() -> int:
 
     truth: "dict[tuple, int | None]" = {}
     for name, technique in TECHNIQUES:
+        isolated()
         began = time.perf_counter()
         planner = technique.bind(environment)
         bound = time.perf_counter() - began
@@ -117,6 +131,7 @@ def main() -> int:
             f"{name:<14} {count:>9,} {noun:<6} {bound:>6.1f}s {megabytes(planner.footprint):>8} "
             f"{statistics.mean(settled):>9,.0f} {statistics.median(times):>8.3f}ms"
         )
+        del planner
     print(f"\n{len(pairs)} pairs, all {len(TECHNIQUES)} agree")
     return 0
 

@@ -177,3 +177,45 @@ def test_the_streets_are_contracted_away_before_the_shortcuts(multimodal):
     assert transfers.core.num_edges <= transfers.graph.num_edges
     for stop in ("A", "B", "C"):
         assert transfers.contraction.is_core(planner.node_id(stop))
+
+
+# --- the seam between two numberings ---------------------------------------
+#
+# `multimodal` above is the case ULTRA has to think about: corners no vehicle
+# calls at, so the transit network and the environment are neither the same
+# size nor the same numbering. The wrapped technique is bound to the stops
+# alone, and everything crossing that seam is renumbered.
+
+
+def test_the_technique_underneath_is_bound_to_the_stops_alone(multimodal):
+    planner = rl.ULTRA(rl.RAPTOR()).bind(multimodal)
+    # Algorithm 2 runs the black box on the transit network, not the merged
+    # one: the stops the feed serves, and not a corner among them. Sized to
+    # the environment instead, its tables would be a row per street corner —
+    # which on a city is a hundred times the rows, nine rounds a query.
+    noun, count = planner.inner.searches
+    assert (noun, count) == ("stops", 3)
+    assert len(multimodal.compile()) == 7, "three stops and four corners"
+
+
+def test_it_answers_as_the_search_that_walks_the_whole_network_does(multimodal):
+    # The oracle is LabelConstrained, which precomputes nothing and searches
+    # every arc, so it cannot have dropped a walk and any disagreement is
+    # ULTRA's. Across a morning and every pair, so a renumbering that is wrong
+    # for one stop and right for the rest has nowhere to hide.
+    ultra = rl.ULTRA(rl.RAPTOR()).bind(multimodal)
+    oracle = rl.LabelConstrained().bind(multimodal)
+    places = ("doorstep", "corner-A", "corner-C", "A", "B", "C")
+    for minute in range(0, 90, 5):
+        departing = 7 * 3600 + 30 * 60 + minute * 60
+        for origin in places:
+            for destination in places:
+                mine = ultra.route(origin, destination, departing=departing)
+                truth = oracle.route(origin, destination, departing=departing)
+                assert (mine is None) == (truth is None), (
+                    f"{origin} -> {destination} leaving {departing}"
+                )
+                if truth is not None:
+                    assert mine.arrives == truth.arrives, (
+                        f"{origin} -> {destination} leaving {departing}"
+                    )

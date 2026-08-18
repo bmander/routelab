@@ -21,6 +21,7 @@ got faster by getting a different answer fails here rather than looking good.
 from __future__ import annotations
 
 import argparse
+import gc
 import datetime
 import json
 import random
@@ -36,6 +37,18 @@ TECHNIQUES = [
     ("ULTRA(RAPTOR)", rl.ULTRA(rl.RAPTOR())),
 ]
 
+
+
+def isolated() -> None:
+    """Start a technique's measurement from a heap the last one has left.
+
+    Techniques are timed in one process so that they can be held to each
+    other's answers, which means one row's footprint can tax the next: the row
+    after PTL's gigabyte used to read about half a millisecond slow, purely for
+    having followed it. Dropping the planner and collecting before the next
+    bind is what makes a row a measurement of its own technique.
+    """
+    gc.collect()
 
 def megabytes(byte_count: int) -> str:
     return "-" if byte_count == 0 else f"{byte_count / 1e6:.0f} MB"
@@ -95,6 +108,7 @@ def main() -> int:
     truth: "dict[tuple, int | None]" = {}
     rows = []
     for name, technique in TECHNIQUES:
+        isolated()
         began = time.perf_counter()
         planner = technique.bind(environment)
         bound = time.perf_counter() - began
@@ -116,6 +130,7 @@ def main() -> int:
         rows.append({"technique": name, "preprocess_s": bound, "query_ms": query,
                      "memory_bytes": planner.footprint})
         print(f"{name:<18} {bound:>9.1f}s {megabytes(planner.footprint):>8} {query:>9.3f}ms")
+        del planner
 
     print(f"\n{len(pairs)} trips, all {len(TECHNIQUES)} agree")
     if arguments.json:
