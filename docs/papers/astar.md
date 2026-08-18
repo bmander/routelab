@@ -168,4 +168,5 @@ it, which is what [landmarks](landmarks.md) do.
 - [Dijkstra](dijkstra.md) — the same search with `h = 0`.
 - [Contraction hierarchies](contraction-hierarchies.md) — not guiding the
   search but removing most of it.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

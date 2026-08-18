@@ -189,6 +189,21 @@ pre code {
   font-size: 0.83rem;
 }
 
+/* Figures: the charts are SVG, and carry their own light and dark palettes.
+   Markdown wraps a lone image in a paragraph, which the prose measure would
+   otherwise squeeze to 34rem — so a paragraph holding one gives that up. */
+main > p:has(img) { max-width: none; }
+
+main img {
+  display: block;
+  width: 100%;
+  max-width: 46rem;
+  height: auto;
+  margin: 0 0 1.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
 table {
   border-collapse: collapse;
   margin: 0 0 1.5rem;
@@ -215,9 +230,9 @@ th {
 }
 
 /* Numeric columns the Markdown right-aligns come through as inline styles,
-   which win on their own; this only takes back the padding that would push
-   them off the column edge. */
-th[style*="right"], td[style*="right"] { padding-right: 0; }
+   which win on their own. The padding has to swap sides with the text, or
+   right-aligned neighbours end up with no gutter between them at all. */
+th[style*="right"], td[style*="right"] { padding-right: 0; padding-left: 1.2rem; }
 
 li { margin: 0.25rem 0; }
 

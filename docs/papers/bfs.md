@@ -110,4 +110,5 @@ cannot honour it.
 
 - [Dijkstra](dijkstra.md) — the same search when edges have costs, and the
   control every technique here is measured against.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

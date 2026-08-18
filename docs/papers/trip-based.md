@@ -168,4 +168,5 @@ a rider is on.
 - [CSA](csa.md) — labels on stops, one array of connections, and the other
   `profile` here.
 - [ULTRA](ultra.md) — `ULTRA(TripBased())`, which removes the footpath radius.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

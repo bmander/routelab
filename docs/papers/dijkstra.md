@@ -193,4 +193,5 @@ benchmark an algorithm, not to route over a real network.
   same answer without searching the city.
 - `rl.BFS()` — Moore's breadth-first search: the same question by hop count,
   when every edge costs the same.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

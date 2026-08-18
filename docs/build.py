@@ -66,7 +66,9 @@ def nav_from_index(index: str) -> "List[Tuple[str, List[Entry]]]":
         if heading:
             groups.append((heading.group(1).strip(), []))
             continue
-        for title, href in re.findall(r"\[([^\]]+)\]\((papers/[^)]+\.md)\)", line):
+        # Pages of the site, which are the links that stay inside docs/ — a
+        # `../README.md` is a reference, not an entry in the shelf.
+        for title, href in re.findall(r"\[([^\]]+)\]\(((?:papers/)?[\w.-]+\.md)\)", line):
             if groups:
                 groups[-1][1].append(Entry(title, href[:-3] + ".html"))
     return [(name, entries) for name, entries in groups if entries]
@@ -163,6 +165,10 @@ def build(out: Path) -> int:
 
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy(DOCS / "style.css", out / "style.css")
+    # The figures are committed SVGs rather than something built here, because
+    # these pages are read as Markdown on GitHub too — see docs/plot.py.
+    if (DOCS / "plots").is_dir():
+        shutil.copytree(DOCS / "plots", out / "plots", dirs_exist_ok=True)
 
     for page in pages:
         text = page.read_text(encoding="utf-8")

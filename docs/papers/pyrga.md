@@ -143,4 +143,5 @@ this literature was about.
 - [CSA](csa.md) — one array of connections, scanned once.
 - [Public transit labeling](ptl.md) — the biggest graph of all, searched once at
   bind time and never again.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

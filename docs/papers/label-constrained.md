@@ -144,4 +144,5 @@ is the reason the other two multimodal techniques exist:
   language still a query input.
 - [ULTRA](ultra.md) — the other end: precompute the transfers, then run a stock
   timetable technique.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

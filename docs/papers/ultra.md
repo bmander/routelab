@@ -132,4 +132,5 @@ and the three query techniques it feeds.
   no preprocessing at all.
 - [UCCH](ucch.md) — the middle corner: contract the walking, keep the language
   a query input.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

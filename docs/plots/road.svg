@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 430" width="760" height="430" role="img" aria-label="Road networks: what preprocessing buys. Seattle, driving — 230,104 nodes, 525,251 edges, 25 random trips">
+<title>Road networks: what preprocessing buys</title>
+<style>
+  .surface { fill: #fdfdfc; }
+  .title { font: 600 15px system-ui, sans-serif; fill: #1a1a18; }
+  .subtitle { font: 12px system-ui, sans-serif; fill: #6a6a64; }
+  .tick { font: 11px system-ui, sans-serif; fill: #6a6a64; }
+  .axis { font: 11px system-ui, sans-serif; fill: #6a6a64; }
+  .label { font: 12px system-ui, sans-serif; fill: #1a1a18; }
+  .grid { stroke: #e2e1dc; stroke-width: 1; }
+  .break { stroke: #e2e1dc; stroke-width: 1.5; fill: none; }
+  .dot { fill: #2a78d6; stroke: #fdfdfc; stroke-width: 2; }
+  .end { text-anchor: end; }
+  .mid { text-anchor: middle; }
+  .start { text-anchor: start; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #16171a; }
+    .title { fill: #e6e5e0; }
+    .subtitle, .tick, .axis { fill: #9a998f; }
+    .label { fill: #e6e5e0; }
+    .grid, .break { stroke: #2c2e33; }
+    .dot { fill: #3987e5; stroke: #16171a; }
+  }
+</style>
+<rect width="760" height="430" class="surface"/>
+<text x="28" y="24" class="title">Road networks: what preprocessing buys</text>
+<text x="28" y="40" class="subtitle">Seattle, driving — 230,104 nodes, 525,251 edges, 25 random trips</text>
+<line x1="68" y1="357.2" x2="730" y2="357.2" class="grid"/>
+<text x="62" y="361.2" class="tick end">0.2 ms</text>
+<line x1="68" y1="297.4" x2="730" y2="297.4" class="grid"/>
+<text x="62" y="301.4" class="tick end">0.5 ms</text>
+<line x1="68" y1="252.2" x2="730" y2="252.2" class="grid"/>
+<text x="62" y="256.2" class="tick end">1 ms</text>
+<line x1="68" y1="207.0" x2="730" y2="207.0" class="grid"/>
+<text x="62" y="211.0" class="tick end">2 ms</text>
+<line x1="68" y1="147.2" x2="730" y2="147.2" class="grid"/>
+<text x="62" y="151.2" class="tick end">5 ms</text>
+<line x1="68" y1="102.0" x2="730" y2="102.0" class="grid"/>
+<text x="62" y="106.0" class="tick end">10 ms</text>
+<line x1="68" y1="56.8" x2="730" y2="56.8" class="grid"/>
+<text x="62" y="60.8" class="tick end">20 ms</text>
+<line x1="174.5" y1="46" x2="174.5" y2="368" class="grid"/>
+<text x="174.5" y="388" class="tick mid">0.2 s</text>
+<line x1="299.4" y1="46" x2="299.4" y2="368" class="grid"/>
+<text x="299.4" y="388" class="tick mid">0.5 s</text>
+<line x1="393.8" y1="46" x2="393.8" y2="368" class="grid"/>
+<text x="393.8" y="388" class="tick mid">1 s</text>
+<line x1="488.2" y1="46" x2="488.2" y2="368" class="grid"/>
+<text x="488.2" y="388" class="tick mid">2 s</text>
+<line x1="613.0" y1="46" x2="613.0" y2="368" class="grid"/>
+<text x="613.0" y="388" class="tick mid">5 s</text>
+<line x1="707.5" y1="46" x2="707.5" y2="368" class="grid"/>
+<text x="707.5" y="388" class="tick mid">10 s</text>
+<text x="100.0" y="388" class="tick mid">none</text>
+<path d="M135.0,373 l8,-10 M140.0,373 l8,-10" class="break"/>
+<text x="441.0" y="414" class="axis mid">preprocessing, once per network →</text>
+<text transform="translate(18,207.0) rotate(-90)" class="axis mid">← median query</text>
+<g class='mark'>
+<title>Dijkstra: none preprocessing, 19.777 ms per query</title>
+<circle cx="100.0" cy="57.5" r="5.5" class="dot"/>
+<text x="111.0" y="61.5" class="label start">Dijkstra</text>
+</g>
+<g class='mark'>
+<title>A* euclidean: 0.2 s preprocessing, 10.887 ms per query</title>
+<circle cx="174.5" cy="96.5" r="5.5" class="dot"/>
+<text x="185.5" y="100.5" class="label start">A* euclidean</text>
+</g>
+<g class='mark'>
+<title>A* 16 landmarks: 1.2 s preprocessing, 3.629 ms per query</title>
+<circle cx="418.6" cy="168.1" r="5.5" class="dot"/>
+<text x="429.6" y="172.1" class="label start">A* 16 landmarks</text>
+</g>
+<g class='mark'>
+<title>Contraction hierarchy: 7.3 s preprocessing, 0.253 ms per query</title>
+<circle cx="664.6" cy="341.9" r="5.5" class="dot"/>
+<text x="653.6" y="345.9" class="label end">Contraction hierarchy</text>
+</g>
+</svg>

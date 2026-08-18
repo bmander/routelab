@@ -121,4 +121,5 @@ The three multimodal techniques are three corners of one trade:
 - [Contraction hierarchies](contraction-hierarchies.md) — the same contraction
   idea on a network with only one mode in it.
 - [ULTRA](ultra.md) — the third corner.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

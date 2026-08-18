@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 430" width="760" height="430" role="img" aria-label="Multimodal: what preprocessing buys. Seattle's pavements + King County Metro — 560,706 nodes, 10 random pavement-to-pavement trips">
+<title>Multimodal: what preprocessing buys</title>
+<style>
+  .surface { fill: #fdfdfc; }
+  .title { font: 600 15px system-ui, sans-serif; fill: #1a1a18; }
+  .subtitle { font: 12px system-ui, sans-serif; fill: #6a6a64; }
+  .tick { font: 11px system-ui, sans-serif; fill: #6a6a64; }
+  .axis { font: 11px system-ui, sans-serif; fill: #6a6a64; }
+  .label { font: 12px system-ui, sans-serif; fill: #1a1a18; }
+  .grid { stroke: #e2e1dc; stroke-width: 1; }
+  .break { stroke: #e2e1dc; stroke-width: 1.5; fill: none; }
+  .dot { fill: #2a78d6; stroke: #fdfdfc; stroke-width: 2; }
+  .end { text-anchor: end; }
+  .mid { text-anchor: middle; }
+  .start { text-anchor: start; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #16171a; }
+    .title { fill: #e6e5e0; }
+    .subtitle, .tick, .axis { fill: #9a998f; }
+    .label { fill: #e6e5e0; }
+    .grid, .break { stroke: #2c2e33; }
+    .dot { fill: #3987e5; stroke: #16171a; }
+  }
+</style>
+<rect width="760" height="430" class="surface"/>
+<text x="28" y="24" class="title">Multimodal: what preprocessing buys</text>
+<text x="28" y="40" class="subtitle">Seattle's pavements + King County Metro — 560,706 nodes, 10 random pavement-to-pavement trips</text>
+<line x1="68" y1="355.4" x2="730" y2="355.4" class="grid"/>
+<text x="62" y="359.4" class="tick end">20 ms</text>
+<line x1="68" y1="285.9" x2="730" y2="285.9" class="grid"/>
+<text x="62" y="289.9" class="tick end">50 ms</text>
+<line x1="68" y1="233.3" x2="730" y2="233.3" class="grid"/>
+<text x="62" y="237.3" class="tick end">100 ms</text>
+<line x1="68" y1="180.7" x2="730" y2="180.7" class="grid"/>
+<text x="62" y="184.7" class="tick end">200 ms</text>
+<line x1="68" y1="111.2" x2="730" y2="111.2" class="grid"/>
+<text x="62" y="115.2" class="tick end">500 ms</text>
+<line x1="68" y1="58.6" x2="730" y2="58.6" class="grid"/>
+<text x="62" y="62.6" class="tick end">1000 ms</text>
+<line x1="86.3" y1="46" x2="86.3" y2="368" class="grid"/>
+<text x="86.3" y="388" class="tick mid">0.2 s</text>
+<line x1="154.2" y1="46" x2="154.2" y2="368" class="grid"/>
+<text x="154.2" y="388" class="tick mid">0.5 s</text>
+<line x1="205.6" y1="46" x2="205.6" y2="368" class="grid"/>
+<text x="205.6" y="388" class="tick mid">1 s</text>
+<line x1="257.0" y1="46" x2="257.0" y2="368" class="grid"/>
+<text x="257.0" y="388" class="tick mid">2 s</text>
+<line x1="324.9" y1="46" x2="324.9" y2="368" class="grid"/>
+<text x="324.9" y="388" class="tick mid">5 s</text>
+<line x1="376.3" y1="46" x2="376.3" y2="368" class="grid"/>
+<text x="376.3" y="388" class="tick mid">10 s</text>
+<line x1="427.7" y1="46" x2="427.7" y2="368" class="grid"/>
+<text x="427.7" y="388" class="tick mid">20 s</text>
+<line x1="495.6" y1="46" x2="495.6" y2="368" class="grid"/>
+<text x="495.6" y="388" class="tick mid">50 s</text>
+<line x1="547.0" y1="46" x2="547.0" y2="368" class="grid"/>
+<text x="547.0" y="388" class="tick mid">100 s</text>
+<line x1="598.4" y1="46" x2="598.4" y2="368" class="grid"/>
+<text x="598.4" y="388" class="tick mid">200 s</text>
+<line x1="666.3" y1="46" x2="666.3" y2="368" class="grid"/>
+<text x="666.3" y="388" class="tick mid">500 s</text>
+<line x1="717.7" y1="46" x2="717.7" y2="368" class="grid"/>
+<text x="717.7" y="388" class="tick mid">1000 s</text>
+<text x="402.0" y="414" class="axis mid">preprocessing, once per network →</text>
+<text transform="translate(18,207.0) rotate(-90)" class="axis mid">← median query</text>
+<g class='mark'>
+<title>LabelConstrained: 0.4 s preprocessing, 109.790 ms per query</title>
+<circle cx="136.5" cy="226.2" r="5.5" class="dot"/>
+<text x="147.5" y="230.2" class="label start">LabelConstrained</text>
+</g>
+<g class='mark'>
+<title>UCCH: 202.8 s preprocessing, 36.797 ms per query</title>
+<circle cx="599.4" cy="309.2" r="5.5" class="dot"/>
+<text x="588.4" y="313.2" class="label end">UCCH</text>
+</g>
+<g class='mark'>
+<title>ULTRA(RAPTOR): 617.5 s preprocessing, 849.041 ms per query — its query walks the 560,706-node street graph without a bound</title>
+<circle cx="682.0" cy="71.0" r="5.5" class="dot"/>
+<text x="671.0" y="75.0" class="label end">ULTRA(RAPTOR)</text>
+</g>
+</svg>

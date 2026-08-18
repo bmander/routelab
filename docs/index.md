@@ -41,6 +41,12 @@ The shelf's *to do* list — Delling, Pajor & Wagner (2009), Geisberger (2010),
 transfer patterns (2010) — appears in the [README](../README.md); those papers
 have no page because they have no implementation.
 
+## Side by side
+
+- [What preprocessing buys](tradeoffs.md) — every technique in each class as one
+  point: what it paid at bind time against what a query cost, measured on the
+  same instance and checked to agree before it was timed.
+
 ## The shape every page shares
 
 Three steps, the same for a road network and a timetable.

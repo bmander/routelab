@@ -168,4 +168,5 @@ four are.
 - [Trip-based routing](trip-based.md) — the other answer to "what should carry
   the label", and the other `profile` here.
 - [ULTRA](ultra.md) — `ULTRA(CSA())`, which removes the footpath radius.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

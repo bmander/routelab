@@ -238,4 +238,5 @@ best arrival is the answer rather than the search, and lives on the result:
   RAPTOR is arguing with — a node per departure event, or a node per stop with
   edges that depend on when you arrive.
 - [Dijkstra](dijkstra.md) — the same three steps on a road network.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

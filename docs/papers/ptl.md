@@ -109,4 +109,5 @@ knows every answer in advance is the one that cannot enumerate them.
   linear scan per query.
 - [Trip-based routing](trip-based.md) — preprocessing in between, spent on
   transfers rather than labels.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

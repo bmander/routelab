@@ -172,4 +172,5 @@ where the witness searches do their real work.
 - [UCCH](ucch.md) — this idea on a multimodal network, contracting each mode
   separately so no shortcut can cross between them.
 - [Dijkstra](dijkstra.md) — the control every distance here is held to.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

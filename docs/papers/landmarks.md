@@ -134,4 +134,5 @@ and a measured bound has no such problem.
   bound it is arguing with.
 - [Contraction hierarchies](contraction-hierarchies.md) — more preprocessing
   again, and a query that stops searching the city altogether.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

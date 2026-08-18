@@ -160,4 +160,5 @@ rl.TimeDependentDijkstra().bind(env)      # gathers every layer's windows
 - [Dijkstra](dijkstra.md) — the same algorithm on a network that is always open.
 - [Pyrga et al.](pyrga.md) — the other thing "the clock matters" can mean: not
   an edge that is sometimes shut, but a vehicle that leaves at 08:15.
+- [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.
