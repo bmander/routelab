@@ -143,6 +143,10 @@ body.collapsed #grip { display: none; }
   position: relative; height: var(--port-row); display: flex; align-items: center;
   font-size: 11px; color: #aab0b9; padding: 0 9px;
 }
+/* A `display` of its own beats the `hidden` attribute's, so a port the board
+   has decided is not an input in this role would draw anyway. Says it once,
+   for anything the board hides. */
+[hidden] { display: none !important; }
 .port.out { justify-content: flex-end; }
 .port .dot {
   position: absolute; width: 11px; height: 11px; border-radius: 50%;

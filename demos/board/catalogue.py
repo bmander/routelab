@@ -83,6 +83,14 @@ NODES: "dict[str, dict]" = {
     },
     # A technique that wraps a technique: ULTRA works out the transfers and
     # the one wired into it does the routing, which is the paper's own shape.
+    #
+    # The wired technique arrives as a *specification*, not as a planner —
+    # `ULTRA(RAPTOR())` — and ULTRA binds it itself, to the transit network
+    # derived from this node's environment rather than to that environment.
+    # Which is why the board stops drawing that technique's own environment
+    # socket once it is wired in here: there is nothing to choose, and this
+    # board draws a wire iff it is a choice. See `Board.specification` in
+    # `static/board.js`, the other half of this entry.
     "ULTRA": {
         "kind": "planner",
         "inputs": {"environment": "environment", "technique": "planner"},

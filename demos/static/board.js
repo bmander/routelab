@@ -229,6 +229,14 @@ class Board {
     this.links = this.links.filter(l =>
       !(l.to === to && l.toPort === toPort && (!many || l.from === from)));
     this.links.push({from, fromPort, to, toPort});
+    // A technique that has just become another technique's argument has no
+    // environment any more, so a wire into one cannot mean anything. Cut it
+    // rather than leave it live behind a socket that is no longer drawn.
+    if (this.specification(from)) {
+      const inputs = TYPES[this.nodes.get(from).type].inputs || {};
+      this.links = this.links.filter(link =>
+        !(link.to === from && inputs[link.toPort] === 'environment'));
+    }
     this.draw();
     this.onchange(true);
     return true;
@@ -428,16 +436,65 @@ class Board {
     for (const node of this.nodes.values()) {
       seen.add(node.id);
       let element = this.layer.querySelector(`[data-id="${node.id}"]`);
+      // A preset reuses ids — the node called `technique` is AStar in one and
+      // ULTRA in the next — so an element found by id may be drawn as the type
+      // this node no longer is. Its title, ports and fields all come from the
+      // type, so the only repair is to draw it again.
+      if (element && element.dataset.type !== node.type) {
+        element.remove();
+        element = null;
+      }
       if (!element) {
         element = this.renderNode(node);
         this.layer.append(element);
       }
       element.style.left = node.x + 'px';
       element.style.top = node.y + 'px';
+      this.showPorts(node, element);
       this.showFields(node, element);
     }
     for (const element of [...this.layer.children]) {
       if (!seen.has(element.dataset.id)) { element.remove(); }
+    }
+  }
+
+  /** Is this node wired in as a *specification* rather than as a planner?
+   *
+   * A planner feeding a query is a planner: bound to an environment, and the
+   * query asks it something. A planner feeding another *planner* is that
+   * planner's argument — `ULTRA(RAPTOR())` — a technique nobody has bound,
+   * exactly as `Landmarks()` is a heuristic nobody has bound. The wrapper
+   * decides what that technique binds to, which is why `_unbound` in
+   * `board/router.py` reaches past the built value and configures the node
+   * again rather than using it.
+   */
+  specification(id) {
+    return this.links.some(link => {
+      if (link.from !== id) { return false; }
+      const target = TYPES[this.nodes.get(link.to)?.type];
+      return Boolean(target) && target.kind === 'planner' &&
+        (target.inputs || {})[link.toPort] === 'planner';
+    });
+  }
+
+  /** Hide the ports the node's wiring leaves without a meaning.
+   *
+   * One so far: a technique used as another technique's argument takes no
+   * environment. ULTRA binds it to the transit network derived from ULTRA's
+   * own environment, so there is nothing to choose and a socket would promise
+   * a wire that could change nothing — decoration, by this board's own rule,
+   * and worse than decoration because every other empty input here is a
+   * missing argument that turns its node red.
+   *
+   * Ports sit above the fields, so hiding one moves the sockets below it;
+   * `drawWires` runs after this and reads their positions fresh.
+   */
+  showPorts(node, element) {
+    const specification = this.specification(node.id);
+    for (const [port, kind] of ports(node.type, 'in')) {
+      if (kind !== 'environment') { continue; }
+      const row = element.querySelector(`.port.in[data-port="${port}"]`);
+      if (row) { row.hidden = specification; }
     }
   }
 
@@ -463,6 +520,7 @@ class Board {
     const element = document.createElement('div');
     element.className = 'node';
     element.dataset.id = node.id;
+    element.dataset.type = node.type;
     element.dataset.kind = spec.kind;
 
     const header = document.createElement('header');
