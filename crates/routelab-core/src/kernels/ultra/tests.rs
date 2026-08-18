@@ -581,3 +581,129 @@ fn canonical_mr_breaks_a_tie_by_route_index() {
         "both sides of a route tie were kept: {walks:?}"
     );
 }
+
+// --- Bucket-CH: the initial and final transfers ----------------------------
+//
+// The oracle is again the thing it replaces: a plain Dijkstra over the whole
+// transfer graph, which is what this kernel did before §4.1's one-to-many
+// searches were implemented. Same distances, or the buckets have dropped a
+// walk some journey needed.
+
+use super::Buckets;
+use crate::util::progress::Progress;
+
+/// Every stop, its distance from `source`, by the search the paper replaced.
+fn walked(graph: &Graph, source: NodeId, stops: &[NodeId]) -> Vec<u32> {
+    let found = dijkstra(graph, &[(source, 0)], &SearchOptions::default()).expect("a search");
+    stops
+        .iter()
+        .map(|&stop| found.cost(stop).unwrap_or(UNREACHABLE))
+        .collect()
+}
+
+#[test]
+fn buckets_answer_what_a_dijkstra_answers() {
+    for seed in 0..8u64 {
+        let graph = random_transfers(seed, 90, 320);
+        let mut rng = Rng::new(seed ^ 0xbeef);
+        let stops: Vec<NodeId> = (0..12).map(|_| rng.below(90) as NodeId).collect();
+        let buckets = Buckets::build(&graph, &stops, &Progress::new()).expect("buckets");
+        let reversed = graph.reversed();
+
+        for _ in 0..12 {
+            let source = rng.below(90) as NodeId;
+            let target = rng.below(90) as NodeId;
+            let found = buckets
+                .endpoints(&[(source, 0)], target)
+                .expect("endpoints");
+
+            // The direct walk, which is also the bound both scans pruned by.
+            let direct = dijkstra(&graph, &[(source, 0)], &SearchOptions::default())
+                .expect("a search")
+                .cost(target);
+            assert_eq!(
+                found.direct, direct,
+                "seed {seed}: direct {source} -> {target}"
+            );
+
+            let limit = direct.unwrap_or(UNREACHABLE);
+            let truth_out = walked(&graph, source, buckets.stops());
+            let truth_home = walked(&reversed, target, buckets.stops());
+
+            for (index, &stop) in buckets.stops().iter().enumerate() {
+                // A transfer the direct walk already beats is pruned rather
+                // than reported, so the claim is agreement *below the bound*.
+                let expected_out = if truth_out[index] < limit {
+                    truth_out[index]
+                } else {
+                    UNREACHABLE
+                };
+                assert_eq!(
+                    found.to_stop[index], expected_out,
+                    "seed {seed}: {source} -> stop {stop}"
+                );
+                let expected_home = if truth_home[index] < limit {
+                    truth_home[index]
+                } else {
+                    UNREACHABLE
+                };
+                assert_eq!(
+                    found.from_stop[index], expected_home,
+                    "seed {seed}: stop {stop} -> {target}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn several_sources_each_carry_a_head_start() {
+    let graph = random_transfers(3, 60, 200);
+    let stops: Vec<NodeId> = (0..8).map(|index: NodeId| index * 7).collect();
+    let buckets = Buckets::build(&graph, &stops, &Progress::new()).expect("buckets");
+
+    let sources: [(NodeId, u32); 2] = [(1, 5), (2, 40)];
+    let found = buckets.endpoints(&sources, 9).expect("endpoints");
+    let limit = found.direct.unwrap_or(UNREACHABLE);
+
+    let truth = dijkstra(&graph, &[(1, 5), (2, 40)], &SearchOptions::default()).expect("a search");
+    for (index, &stop) in buckets.stops().iter().enumerate() {
+        let expected = truth.cost(stop).unwrap_or(UNREACHABLE);
+        let expected = if expected < limit {
+            expected
+        } else {
+            UNREACHABLE
+        };
+        assert_eq!(
+            found.to_stop[index], expected,
+            "stop {stop} with a head start"
+        );
+    }
+}
+
+#[test]
+fn a_path_comes_back_in_the_graphs_own_edges() {
+    let graph = random_transfers(11, 70, 260);
+    let stops: Vec<NodeId> = (0..6).map(|index: NodeId| index * 11).collect();
+    let buckets = Buckets::build(&graph, &stops, &Progress::new()).expect("buckets");
+
+    let mut rng = Rng::new(0x9e3);
+    for _ in 0..20 {
+        let from = rng.below(70) as NodeId;
+        let to = rng.below(70) as NodeId;
+        let truth = dijkstra(&graph, &[(from, 0)], &SearchOptions::default())
+            .expect("a search")
+            .cost(to);
+        let path = buckets.path(&[(from, 0)], to).expect("a query");
+        match (truth, path) {
+            (None, path) => assert!(path.is_none(), "no walk {from} -> {to}"),
+            (Some(cost), Some((started, edges))) => {
+                assert_eq!(started, from, "one source is where it started");
+                let (landed, walked) = graph.walk(from, &edges).expect("a walkable path");
+                assert_eq!(landed, to, "the path lands where it was asked to");
+                assert_eq!(walked, cost, "and costs what the search said");
+            }
+            (Some(_), None) => panic!("a distance implies a path, {from} -> {to}"),
+        }
+    }
+}

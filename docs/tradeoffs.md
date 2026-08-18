@@ -84,7 +84,10 @@ against time; on memory PTL is forty times its nearest neighbour.
 was measured in the same run, but it is solving a harder problem than the rows
 around it: unlimited walking transfers rather than transfers within a fixed
 radius. Read it as the cost of a capability, not as a slower RAPTOR — the
-comparison it belongs in is the multimodal one below.
+comparison it belongs in is the multimodal one below. Its walking network here
+is the feed's own footpaths, 21,020 edges, which is small enough that the
+Bucket-CH its query uses costs a little more than the plain search it replaced;
+the structure earns its keep on a city's pavement, which is the next chart.
 
 ## Multimodal
 
@@ -92,36 +95,55 @@ comparison it belongs in is the multimodal one below.
 
 | technique | preprocessing | memory | median query |
 |---|---:|---:|---:|
-| [LabelConstrained](papers/label-constrained.md) | 0.4 s | 14 MB | 109.790 ms |
-| [UCCH](papers/ucch.md) | 202.8 s | 66 MB | 36.797 ms |
-| [ULTRA(RAPTOR)](papers/ultra.md) | 617.5 s | 239 MB | 849.041 ms |
+| [LabelConstrained](papers/label-constrained.md) | 0.6 s | 14 MB | 161.551 ms |
+| [UCCH](papers/ucch.md) | 260.7 s | 66 MB | 33.554 ms |
+| [ULTRA(RAPTOR)](papers/ultra.md) | 836.9 s | 374 MB | 126.301 ms |
 
 A harder instance than the two above: 560,706 nodes of pavement and timetable
 joined by link arcs, and every trip starts and ends on the street rather than
 at a stop. All three return the same arrivals on all ten trips.
 
-**UCCH does what it claims.** Three and a half minutes of contracting the
-pavement buys a query **3.0× faster** than searching the whole network — close
-to the ~3.5× the [UCCH page](papers/ucch.md) quotes, and, as that page says,
+**UCCH does what it claims.** Four and a half minutes of contracting the
+pavement buys a query **4.8× faster** than searching the whole network — better
+than the ~3.5× the [UCCH page](papers/ucch.md) quotes, and, as that page says,
 near this technique's ceiling: what remains is the transit search inside the
 core, which UCCH does not touch.
 
-**ULTRA is dominated here, and the reason is on the x-axis of the wrong
-chart.** Ten minutes of preprocessing and a query eight times slower than doing
-no preprocessing at all. This is not the result the paper reports, and it is
-worth being precise about why: on the [timetable chart](#timetables) above,
-`ULTRA(RAPTOR)` answers in 2.3 ms — because there its walking network is the
-feed's own footpaths, a few thousand edges. Here it is Seattle's entire
-pavement, and ULTRA's query has to search that street graph outward from the
-origin and inward to the destination *without a radius* — which is precisely the
-capability it exists to provide. The shortcut set makes the transit half fast;
-the walking legs at either end are what 849 ms is made of. A bound on that
-initial search is what the paper uses and what this implementation does not yet
-expose, so read this point as the cost of an unbounded walk on a city-sized
-street graph rather than as a verdict on the technique.
+**ULTRA is still behind UCCH here, and the reason has moved.** It used to be
+that ULTRA's query ran two unbounded Dijkstras over the whole street graph,
+which cost 849 ms. That was this implementation's shortcoming rather than the
+paper's: §4.1 answers the walks at either end with **Bucket-CH**, and it is
+now implemented, which took the query to 126 ms. Where the remaining time goes,
+measured phase by phase on one binding:
 
-That caveat is the reason to keep the chart rather than quietly drop the row.
-A trade-off plot is only honest if it also shows the trades that went badly.
+| phase | median |
+|---|---:|
+| Bucket-CH: the direct walk and both transfer sets | 8.0 ms |
+| the wrapped RAPTOR | 164.1 ms |
+| reading the best place to get off | 5.2 ms |
+
+(A separate run from the table above, so the totals differ by the usual
+machine-to-machine slack; the proportions are the point.)
+
+The query is now dominated by the technique ULTRA wraps, and the reason is
+visible in the paper's own pruning rule. An initial transfer is worth keeping
+only if it beats *walking the whole way* — and on a trip across Seattle,
+walking the whole way takes between three and nine hours. Almost every stop in
+the city beats that, so RAPTOR is seeded with two to five thousand of them
+rather than a handful. The paper says as much: the pruning "drastically
+improves local queries", and the one genuinely local trip in the sample, whose
+direct walk is 44 minutes, has 104 initial transfers rather than 5,166.
+
+So ULTRA's cost here is the cost of the capability, honestly measured: walking
+without a radius means thousands of stops really are reachable on foot, and
+something has to route from all of them. What it is *not* any more is two
+half-million-vertex Dijkstras per query.
+
+The preprocessing went the other way — 617 s to 837 s, and 239 MB to 374 MB —
+because Bucket-CH is a third preprocessing step, a full contraction of the
+street graph plus 9.0 million bucket entries. That is the trade the paper
+describes, and it is why this row sits where it does rather than at the bottom
+of the chart.
 
 ## Reproducing these
 

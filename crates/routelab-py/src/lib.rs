@@ -91,6 +91,8 @@ fn _routelab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTripBasedProfile>()?;
     m.add_class::<PyTripBasedSearch>()?;
     m.add_class::<PyUltra>()?;
+    m.add_class::<PyBuckets>()?;
+    m.add_class::<PyEndpoints>()?;
     m.add_function(wrap_pyfunction!(astar, m)?)?;
     m.add_function(wrap_pyfunction!(time_dependent_dijkstra, m)?)?;
     m.add_function(wrap_pyfunction!(load_gtfs, m)?)?;

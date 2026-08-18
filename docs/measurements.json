@@ -3,12 +3,12 @@
     "What each technique paid at bind time and what a query cost, measured by",
     "the scripts under benchmarks/. Every row within a class comes from one run",
     "on one instance, and every run checks that all its techniques return the same",
-    "answers before reporting a time — a row that got faster by getting a",
+    "answers before reporting a time \u2014 a row that got faster by getting a",
     "different answer fails the benchmark rather than landing here.",
     "Rerun docs/plot.py after changing anything in this file."
   ],
   "measured": {
-    "on": "2026-08-17",
+    "on": "2026-08-18",
     "machine": "Intel Core i9-8950HK @ 2.90GHz, macOS 15.7.4",
     "routelab": "0.1.0",
     "python": "3.14.2"
@@ -16,37 +16,119 @@
   "classes": {
     "road": {
       "title": "Road networks: what preprocessing buys",
-      "instance": "Seattle, driving — 230,104 nodes, 525,251 edges, 25 random trips",
+      "instance": "Seattle, driving \u2014 230,104 nodes, 525,251 edges, 25 random trips",
       "command": "python benchmarks/bench_contraction.py data/Seattle.osm.pbf --trips 25",
       "techniques": [
-        {"technique": "Dijkstra", "preprocess_s": 0.0, "query_ms": 19.777, "memory_bytes": 0, "settled": 115698},
-        {"technique": "A* euclidean", "preprocess_s": 0.2, "query_ms": 10.887, "memory_bytes": 4000000, "settled": 55250},
-        {"technique": "A* 16 landmarks", "preprocess_s": 1.2, "query_ms": 3.629, "memory_bytes": 29000000, "settled": 9370},
-        {"technique": "Contraction hierarchy", "preprocess_s": 7.3, "query_ms": 0.253, "memory_bytes": 17000000, "settled": 247}
+        {
+          "technique": "Dijkstra",
+          "preprocess_s": 0.0,
+          "query_ms": 19.777,
+          "memory_bytes": 0,
+          "settled": 115698
+        },
+        {
+          "technique": "A* euclidean",
+          "preprocess_s": 0.2,
+          "query_ms": 10.887,
+          "memory_bytes": 4000000,
+          "settled": 55250
+        },
+        {
+          "technique": "A* 16 landmarks",
+          "preprocess_s": 1.2,
+          "query_ms": 3.629,
+          "memory_bytes": 29000000,
+          "settled": 9370
+        },
+        {
+          "technique": "Contraction hierarchy",
+          "preprocess_s": 7.3,
+          "query_ms": 0.253,
+          "memory_bytes": 17000000,
+          "settled": 247
+        }
       ]
     },
     "timetable": {
       "title": "Timetables: what preprocessing buys",
-      "instance": "King County Metro, one Monday — 6,313 stops, 421,604 connections, 25 random pairs",
+      "instance": "King County Metro, one Monday \u2014 6,313 stops, 421,604 connections, 25 random pairs",
       "command": "python benchmarks/bench_transit.py data/kcm.zip --date 2026-08-17 --pairs 25",
       "techniques": [
-        {"technique": "TimeDependent", "preprocess_s": 0.4, "query_ms": 2.099, "memory_bytes": 11000000, "settled": 3256},
-        {"technique": "TimeExpanded", "preprocess_s": 1.2, "query_ms": 15.264, "memory_bytes": 150000000, "settled": 66447},
-        {"technique": "RAPTOR", "preprocess_s": 0.4, "query_ms": 1.515, "memory_bytes": 16000000, "settled": 4126},
-        {"technique": "CSA", "preprocess_s": 0.4, "query_ms": 0.602, "memory_bytes": 25000000, "settled": 3411},
-        {"technique": "TripBased", "preprocess_s": 12.2, "query_ms": 0.940, "memory_bytes": 28000000, "settled": 8455},
-        {"technique": "PTL", "preprocess_s": 58.1, "query_ms": 0.343, "memory_bytes": 1165000000, "settled": 12973},
-        {"technique": "ULTRA(RAPTOR)", "preprocess_s": 15.6, "query_ms": 2.259, "memory_bytes": 15000000, "settled": 6184, "note": " — over the feed's own footpaths, not a street network"}
+        {
+          "technique": "TimeDependent",
+          "preprocess_s": 0.3,
+          "query_ms": 1.941,
+          "memory_bytes": 11000000,
+          "settled": 3256
+        },
+        {
+          "technique": "TimeExpanded",
+          "preprocess_s": 1.2,
+          "query_ms": 16.062,
+          "memory_bytes": 150000000,
+          "settled": 66447
+        },
+        {
+          "technique": "RAPTOR",
+          "preprocess_s": 0.4,
+          "query_ms": 1.968,
+          "memory_bytes": 16000000,
+          "settled": 4126
+        },
+        {
+          "technique": "CSA",
+          "preprocess_s": 0.4,
+          "query_ms": 0.671,
+          "memory_bytes": 25000000,
+          "settled": 3411
+        },
+        {
+          "technique": "TripBased",
+          "preprocess_s": 10.5,
+          "query_ms": 1.236,
+          "memory_bytes": 28000000,
+          "settled": 8455
+        },
+        {
+          "technique": "PTL",
+          "preprocess_s": 68.6,
+          "query_ms": 0.602,
+          "memory_bytes": 1165000000,
+          "settled": 12973
+        },
+        {
+          "technique": "ULTRA(RAPTOR)",
+          "preprocess_s": 21.8,
+          "query_ms": 3.582,
+          "memory_bytes": 16000000,
+          "settled": 6184,
+          "note": " \u2014 over the feed's own footpaths, not a street network"
+        }
       ]
     },
     "multimodal": {
       "title": "Multimodal: what preprocessing buys",
-      "instance": "Seattle's pavements + King County Metro — 560,706 nodes, 10 random pavement-to-pavement trips",
+      "instance": "Seattle's pavements + King County Metro \u2014 560,706 nodes, 10 random pavement-to-pavement trips",
       "command": "python benchmarks/bench_multimodal.py data/Seattle.osm.pbf data/kcm.zip --date 2026-08-17 --pairs 10",
       "techniques": [
-        {"technique": "LabelConstrained", "preprocess_s": 0.394, "query_ms": 109.790, "memory_bytes": 13887506},
-        {"technique": "UCCH", "preprocess_s": 202.796, "query_ms": 36.797, "memory_bytes": 66349050},
-        {"technique": "ULTRA(RAPTOR)", "preprocess_s": 617.491, "query_ms": 849.041, "memory_bytes": 239399996, "note": " — its query walks the 560,706-node street graph without a bound"}
+        {
+          "technique": "LabelConstrained",
+          "preprocess_s": 0.6,
+          "query_ms": 161.551,
+          "memory_bytes": 14000000
+        },
+        {
+          "technique": "UCCH",
+          "preprocess_s": 260.7,
+          "query_ms": 33.554,
+          "memory_bytes": 66000000
+        },
+        {
+          "technique": "ULTRA(RAPTOR)",
+          "preprocess_s": 836.9,
+          "query_ms": 126.301,
+          "memory_bytes": 374000000
+        }
       ]
     }
   }

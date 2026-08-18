@@ -101,12 +101,6 @@ class Transfers:
             links.append((tail, head, weight))
             self.edges.append(edge)
         self.graph = _routelab.Graph(len(compiled), links)
-        # Built from the same list reversed rather than from `graph.reversed()`,
-        # so that a position means the same edge in both and one side-table
-        # tells a walk in the caller's edges whichever way it was found.
-        self.backward = _routelab.Graph(
-            len(compiled), [(head, tail, weight) for tail, head, weight in links]
-        )
 
         # The core, and why there are two graphs. ULTRA's preprocessing
         # searches this once per departure event, so a city's pavements are out
@@ -134,11 +128,16 @@ class Transfers:
             self.core = self.graph
         return self
 
-    def compiled_edge(self, edge: int, backward: bool = False) -> int:
+    def compiled_edge(self, edge: int) -> int:
         """The compiled environment's edge behind one of this graph's — which
-        is what makes a walk found here tellable as legs."""
-        graph = self.backward if backward else self.graph
-        return self.edges[graph.input_index(edge)]
+        is what makes a walk found here tellable as legs.
+
+        One direction only: every walk a query tells comes back from the
+        hierarchy already pointing the way it is travelled, so the reversed
+        copy this used to keep — a second graph the size of the pavement —
+        went with the backward search that needed it.
+        """
+        return self.edges[self.graph.input_index(edge)]
 
     def __len__(self) -> int:
         return len(self.edges)
@@ -163,11 +162,13 @@ class ULTRA(TimetablePlanner):
     vehicles — and those go into the wrapped technique unchanged. It walks
     without a radius and the technique underneath does not know.
 
-    The walks at either end of a journey are not shortcuts and are not meant to
-    be: the paper leaves them to the query, which is why this one searches the
-    transfer graph out of the origin and into the target every time it is
-    asked, and why those searches are what a journey's first and last legs come
-    from.
+    The walks at either end of a journey are not shortcuts and cannot be: one
+    endpoint of each is the query's own source or target, which preprocessing
+    has never seen. The paper's §4.1 answers them with two one-to-many searches
+    at query time, accelerated by **Bucket-CH** over the transfer graph — which
+    is the third thing :meth:`preprocess` builds, and why a query over a city's
+    pavement costs milliseconds rather than the two half-million-vertex
+    Dijkstras the same question asked directly would.
 
     Only a technique that keeps a label per stop can be wrapped, since the
     query has to read every stop's arrival to find the best place to get off.
@@ -206,6 +207,13 @@ class ULTRA(TimetablePlanner):
         self.timetable = Departures().bind(compiled, progress)
         self.transfers = Transfers().bind(compiled, progress)
         self.shortcuts = _routelab.Ultra.compute(self.timetable, self.transfers.core, progress)
+        # The third of the paper's three preprocessing steps (§4.1): a core
+        # graph, the shortcuts computed over it, and Bucket-CH over the
+        # *original* transfer graph, which is what answers the walks at either
+        # end of a journey.
+        self.buckets = _routelab.Buckets.build(
+            self.transfers.graph, self.transfers.stops, progress
+        )
         # The technique underneath reads the shortcuts rather than a closure,
         # which is the whole of the integration: `walks()` is the seam.
         inner = copy.copy(self.technique)
@@ -214,7 +222,7 @@ class ULTRA(TimetablePlanner):
         self.footpaths = self.inner.footpaths
 
     def _footprint(self) -> int:
-        return self.inner.footprint + self.shortcuts.footprint
+        return self.inner.footprint + self.shortcuts.footprint + self.buckets.footprint
 
     @property
     def num_shortcuts(self) -> int:
@@ -229,38 +237,19 @@ class ULTRA(TimetablePlanner):
 
     # --- the query ----------------------------------------------------------
 
-    def _reachable(self, starts: "Dict[int, int]") -> "Tuple[Dict[int, int], Any]":
-        """Every stop the origins can walk to, and the search that found it.
-
-        The paper's *initial transfer*, searched when the query is asked
-        because a walk at the start of a journey is common enough that
-        precomputing them all would be the closure again. Several origins,
-        each already some seconds along, is one multi-source search — the
-        same query every technique here takes, asked of the walking.
-        """
-        search = _routelab.dijkstra(self.transfers.graph, list(starts.items()))
-        # `reached()` rather than every node: on a street network the two agree
-        # in the end but the walk is over what was settled, not over the
-        # numbering, and the numbering is half a million long.
-        costs = search.costs
-        walk = {stop: costs[stop] for stop in search.reached()}
-        return {stop: cost for stop, cost in walk.items() if cost is not None}, search
-
-    def _walk_legs(self, search: Any, forward: bool, at: int, to: int) -> "List[Leg]":
+    def _walk_legs(self, path: "List[int]", at: int) -> "List[Leg]":
         """A walk through the transfer graph, told as the caller's own edges.
 
         A shortcut, and an access or egress walk, is a *path* of hops rather
         than one edge — so each hop becomes a leg, with the layer it came from
         and the shape it follows, the way a hierarchy unpacks its shortcuts
-        before anyone sees them.
+        before anyone sees them. ``path`` is what
+        :meth:`~routelab._routelab.Buckets.path` unpacked, already in order.
         """
         compiled = self._bound()
-        path = search.edge_path(to)
         if not path:
             return []
-        hops = [self.transfers.compiled_edge(edge, not forward) for edge in path]
-        if not forward:
-            hops.reverse()
+        hops = [self.transfers.compiled_edge(edge) for edge in path]
         legs: "List[Leg]" = []
         clock = at
         for edge in hops:
@@ -300,8 +289,8 @@ class ULTRA(TimetablePlanner):
                          departs, arrives, trip)
                 )
                 continue
-            walk = _routelab.dijkstra(self.transfers.graph, [(tail, 0)], targets=[head])
-            legs.extend(self._walk_legs(walk, True, departs, head))
+            found = self.buckets.path([(tail, 0)], head)
+            legs.extend(self._walk_legs([] if found is None else found[1], departs))
         return legs
 
     def _search(self, starts: "Dict[int, int]", **options: Any) -> Result:
@@ -320,10 +309,12 @@ class ULTRA(TimetablePlanner):
     ) -> Optional[Journey]:
         """The earliest arrival at ``destination``, walking without a radius.
 
-        Three steps, which is what ULTRA's shortcuts covering only the middle
-        of a journey costs at query time: walk out of the origin, run the
-        wrapped technique from every stop that reached, and walk into the
-        target from wherever it is best to get off.
+        The paper's Algorithm 2. One hierarchy query gives the direct walk
+        from origin to destination and the two search spaces; scanning the
+        buckets of those spaces gives every initial and final transfer worth
+        having, which is every one that beats walking the whole way. The
+        wrapped technique then runs on the stops that survived, and the best
+        place to get off is read from the final transfers.
         """
         options = self._options(options)
         # The technique underneath has the last word on the knobs: this one
@@ -334,27 +325,27 @@ class ULTRA(TimetablePlanner):
         target = self.node_id(destination)
         starts = self._origin_ids(origin)
 
-        out, outward = self._reachable(starts)
-        home = _routelab.dijkstra(self.transfers.backward, [(target, 0)])
+        # Algorithm 2, lines 1-3: the direct walk, and the initial and final
+        # transfers that beat it. Two bucket scans over a hierarchy's search
+        # space, not two searches of the network.
+        found = self.buckets.endpoints(list(starts.items()), target)
+        out = dict(found.to_stops)
 
         # A journey that boards nothing: the walk, which needs no vehicle and
-        # so is the floor every ride has to beat.
-        walked = out.get(target)
-        arrives = None if walked is None else at + walked
+        # so is the floor every ride has to beat — and, being the floor, is
+        # also what the two scans above pruned themselves by.
+        arrives = None if found.direct is None else at + found.direct
         aboard: "Optional[Any]" = None
         alight: "Optional[int]" = None
 
         if out:
-            result = self.inner._search(dict(out), **options)  # noqa: SLF001
-            # Where to get off: any stop that walks to the target. That is the
-            # final transfer, and it has nothing to do with where the journey
-            # started walking. Over what the timetable reached rather than over
-            # the numbering — on a street network those are a few thousand
-            # stops against half a million corners.
-            walks = home.costs
-            for stop in self.transfers.stops:
-                walk = walks[stop]
-                reached = None if walk is None else result.cost(stop)
+            result = self.inner._search(out, **options)  # noqa: SLF001
+            # Where to get off: any stop that walks to the target sooner than
+            # the target can be walked to directly. That is the final
+            # transfer, and it has nothing to do with where the journey
+            # started walking.
+            for stop, walk in found.from_stops:
+                reached = result.cost(stop)
                 if reached is None:
                     continue
                 landed = reached + walk
@@ -364,9 +355,9 @@ class ULTRA(TimetablePlanner):
         if arrives is None:
             return None
         if aboard is None:
-            legs = self._access(outward, at, target)
+            source, legs = self._access(starts, at, target)
             return Journey(
-                origin=compiled.label(outward.path(target)[0]),
+                origin=compiled.label(source),
                 destination=destination,
                 cost=arrives - at,
                 legs=tuple(legs),
@@ -378,26 +369,32 @@ class ULTRA(TimetablePlanner):
         # Where the riding began: the first leg's tail, or the alighting stop
         # itself when the technique found nothing to ride.
         boarded = compiled.node_id(ridden[0].tail) if ridden else alight
-        legs = self._access(outward, at, boarded)
+        source, legs = self._access(starts, at, boarded)
         legs += ridden
-        legs += self._walk_legs(home, False, itinerary.arrives, alight)
+        egress = self.buckets.path([(alight, 0)], target)
+        legs += self._walk_legs([] if egress is None else egress[1], itinerary.arrives)
         return Journey(
-            origin=compiled.label(outward.path(boarded)[0]),
+            origin=compiled.label(source),
             destination=destination,
             cost=arrives - at,
             legs=tuple(legs),
             settled=itinerary.settled,
         )
 
-    def _access(self, outward: Any, at: int, to: int) -> "List[Leg]":
-        """The walk that starts a journey, told in the caller's edges.
+    def _access(
+        self, starts: "Dict[int, int]", at: int, to: int
+    ) -> "Tuple[int, List[Leg]]":
+        """Where the walk that starts a journey left from, and its legs.
 
-        A query may stand at several stops, each already some seconds along,
-        so the walk leaves when the origin it actually left from was reached —
-        which is that origin's own head start.
+        A query may stand at several places, each already some seconds along,
+        so the hierarchy is asked which one it was worth leaving from, and the
+        walk departs at that origin's own head start.
         """
-        source = outward.path(to)[0]
-        return self._walk_legs(outward, True, at + (outward.cost(source) or 0), to)
+        found = self.buckets.path(list(starts.items()), to)
+        if found is None:
+            return to, []
+        source, path = found
+        return source, self._walk_legs(path, at + starts.get(source, 0))
 
     # No `explored`: ULTRA keeps no table of its own, since the search whose
     # space could be drawn is the wrapped technique's and is bracketed by two

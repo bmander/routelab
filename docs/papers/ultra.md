@@ -44,6 +44,41 @@ long walk is a path of short hops rather than an edge somebody had to write
 down in advance. What comes out is a small set of transfer shortcuts, and the
 query is then a stock timetable technique that never knows the difference.
 
+## The walks at either end
+
+Shortcuts cover the walk *between two vehicles*. The walks at the ends of a
+journey cannot be precomputed, because one end of each is the query's own
+source or target. §4.1 answers them with two one-to-many searches, accelerated
+by **Bucket-CH** — which is why ULTRA has three preprocessing steps rather than
+one:
+
+```
+preprocessing:
+    core graph (Core-CH)          → what the shortcut search runs on
+    transfer shortcuts            → the intermediate transfers
+    Bucket-CH over the whole graph → the initial and final ones
+
+    for each stop w:                        # filing the buckets
+        upward search from w; file (w, distance) at every vertex it settles
+
+query (Algorithm 2):
+    τ(s,t), Vs, Vt ← one bidirectional CH query for the direct walk
+    for v in Vs:  scan v's forward bucket   → τ(s, ·) for every stop
+    for v in Vt:  scan v's backward bucket  → τ(·, t) for every stop
+    keep only the transfers with τ(s,v) < τ(s,t) and τ(v,t) < τ(s,t)
+    run the wrapped technique from those stops
+```
+
+The pruning is the paper's, and it is what makes a short query quick: a walk to
+a stop that takes longer than walking the whole way to the target can never be
+part of a better journey, so it is never considered. Bucket entries are sorted
+by distance, so a scan stops at the first one that cannot beat the direct walk.
+
+A hierarchy's search space is a property of its ranks rather than of the
+distance, so `Vs` and `Vt` are a few hundred vertices however far apart the two
+ends are — which is the difference between reading a few thousand bucket
+entries and searching a city.
+
 That is why this is a **wrapper**, not a technique: `ULTRA(RAPTOR())`,
 `ULTRA(CSA())`, `ULTRA(TripBased())`.
 
@@ -111,12 +146,17 @@ planner = rl.ULTRA(rl.RAPTOR()).bind(env)     # minutes of preprocessing
 planner.route(doorstep, office, departing=time(8, 30))
 ```
 
-This is the corner of the design space where you pay up front and are rewarded
-at query time: minutes of preprocessing, then millisecond queries over a
-transfer set with no radius in it anywhere.
-[LabelConstrained](label-constrained.md) is the opposite corner — nothing
-precomputed, the whole network searched — and [UCCH](ucch.md) is the middle
-one.
+This is the corner of the design space where you pay up front: fourteen minutes
+of preprocessing and 374 MB, for a query over a transfer set with no radius in
+it anywhere. [LabelConstrained](label-constrained.md) is the opposite corner —
+nothing precomputed, the whole network searched — and [UCCH](ucch.md) is the
+middle one.
+
+What that buys, and what it does not, is on the
+[trade-offs page](../tradeoffs.md): 126 ms on this instance, of which 8 ms is
+the Bucket-CH above and the rest is the wrapped RAPTOR, seeded with the
+thousands of stops that genuinely are within walking distance when walking the
+whole way would take nine hours.
 
 ## What is not here
 

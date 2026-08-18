@@ -152,8 +152,12 @@
 //! computes shortcuts between stop events rather than stops and is what a
 //! trip-based query wants, and the two pieces named above.
 
+mod buckets;
+
 #[cfg(test)]
 mod tests;
+
+pub use buckets::{Buckets, Endpoints};
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
