@@ -14,7 +14,7 @@ from ..util.clock import Departure
 from .csa import CSA
 from .departures import Departures
 from .planner import Origins, Planner, TimetablePlanner, TimetableTechnique
-from .raptor import RAPTOR
+from .raptor import RAPTOR, RAPTORPlanner
 
 __all__ = ["ULTRA", "ULTRAPlanner", "Transfers"]
 
@@ -169,10 +169,17 @@ class _StopTable(Protocol):
         self,
         sources: "List[Tuple[int, int]]",
         departing: int,
-        max_transfers: Optional[int],
+        *,
         target: Optional[int] = None,
     ) -> StopResult:
-        """The table, from stops already on the service-day clock."""
+        """The table, from stops already on the service-day clock.
+
+        No cap on changes here: one of the two techniques that satisfy this
+        counts changes and the other does not, so a cap is something a
+        technique offers on top of the seam rather than part of it. See
+        :meth:`ULTRAPlanner.route`, which is where a cap meets the technique
+        that can or cannot honour it.
+        """
         ...
 
     @property
@@ -440,11 +447,22 @@ class ULTRAPlanner(TimetablePlanner):
         if out:
             # The seam: the technique underneath is handed the stops the two
             # bucket scans found, already on the service-day clock, and hands
-            # back its table over them. `max_transfers` goes with them because
-            # the cap is the wrapped technique's to honour or to refuse.
-            result = self.inner._search_stops(  # noqa: SLF001 - the seam this technique is
-                sources, at, max_transfers
-            )
+            # back its table over them. A cap on changes goes with them only
+            # to a technique that counts changes — this one wrapped it, so
+            # this one is what knows whether it can.
+            inner = self.inner
+            if max_transfers is None:
+                result = inner._search_stops(sources, at)  # noqa: SLF001 - the seam this technique is
+            elif isinstance(inner, RAPTORPlanner):
+                result = inner._search_stops(  # noqa: SLF001 - the seam this technique is
+                    sources, at, max_transfers=max_transfers
+                )
+            else:
+                raise TypeError(
+                    f"{self.technique!r} tells journeys apart by when they arrive "
+                    f"and counts no changes, so it has no max_transfers to cap. "
+                    f"Wrap RAPTOR() to count them."
+                )
             # Where to get off: any stop that walks to the target sooner than
             # the target can be walked to directly. That is the final
             # transfer, and it has nothing to do with where the journey

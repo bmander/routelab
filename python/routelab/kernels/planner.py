@@ -40,6 +40,7 @@ from __future__ import annotations
 import copy
 from typing import (
     Any,
+    Generic,
     Dict,
     Hashable,
     Iterable,
@@ -65,6 +66,7 @@ __all__ = [
     "GraphPlanner",
     "Origins",
     "Planner",
+    "Tabled",
     "Technique",
     "TimetablePlanner",
     "TimetableTechnique",
@@ -77,6 +79,11 @@ __all__ = [
 #: of labels to the cost of already being there. Tuples and strings are single
 #: labels — a label may itself be a tuple, so iterability cannot decide this.
 Origins = Union[Hashable, Iterable[Hashable], Mapping[Hashable, int]]
+
+#: What a kept search is, for the techniques that keep one. Bound to
+#: :class:`~routelab.model.search.StopResult` because reading a journey off a
+#: search means asking it for an itinerary and when the query left.
+_Result = TypeVar("_Result", bound=StopResult)
 
 #: A technique, as itself: what :meth:`TimetableTechnique._with_walks` hands
 #: back, so that a copy of a `RAPTOR` is still a `RAPTOR` and its `bind` still
@@ -375,7 +382,13 @@ class TimetablePlanner(Planner):
     @property
     def footprint(self) -> int:
         """The timetable and the walks, in kernel form: what every model holds
-        before it builds anything of its own."""
+        before it builds anything of its own.
+
+        A model that goes on to build a kernel counts the walks *there* rather
+        than here, because the kernel keeps its own copy of them — see
+        :meth:`~routelab.kernels.RAPTORPlanner.footprint`. Counting both would
+        report one structure twice.
+        """
         return self.timetable.footprint + self.footpaths.footprint
 
     @property
@@ -450,26 +463,6 @@ class TimetablePlanner(Planner):
             )
         return int(max_transfers)
 
-    def journey(self, result: StopResult, destination: Hashable) -> Optional[Journey]:
-        """The earliest arrival at ``destination`` a kept search holds.
-
-        A timetable technique that keeps a table — a label per stop, however
-        it got there — reads an *itinerary* off it rather than an edge path,
-        which is why this is the family's and not :class:`GraphPlanner`'s: the
-        result knows which vehicles were ridden, and a leg is one of those.
-        """
-        itinerary = result.itinerary(self.node_id(destination))
-        if itinerary is None:
-            return None
-        return Journey.from_itinerary(
-            self.compiled, itinerary, destination, result.departing
-        )
-
-    def _answer(self, result: StopResult, destination: Hashable) -> Answer:
-        """The routes a kept search holds, and the search."""
-        journey = self.journey(result, destination)
-        return Answer(self, destination, [] if journey is None else [journey], result)
-
     def _answer_itinerary(
         self,
         itinerary: "Optional[_routelab.Itinerary]",
@@ -490,7 +483,47 @@ class TimetablePlanner(Planner):
         return Answer(self, destination, [] if journey is None else [journey], None)
 
 
-class Front(TimetablePlanner):
+class Tabled(TimetablePlanner, Generic[_Result]):
+    """A timetable technique that keeps a label per stop, and can be read.
+
+    Three of the nine do — :class:`~routelab.RAPTOR`,
+    :class:`~routelab.CSA` and :class:`~routelab.TripBased`. The rest answer a
+    pair of stops and keep nothing, which is why ``journey`` is here and not on
+    :class:`TimetablePlanner`: a base that offered it would be promising a verb
+    to five techniques that have no table to read it off, and
+    :meth:`~TimetablePlanner._answer_itinerary` is what they have instead.
+
+    The same line the kernels are split along —
+    ``Reads`` for a technique with a search to read, ``EarliestArrival`` for
+    one that answers and keeps nothing — so the two halves of the library
+    disagree about nothing.
+
+    Generic in what the search is, so that :class:`Front` can say its own
+    result kept more without narrowing a parameter its base had widened.
+    """
+
+    def journey(self, result: _Result, destination: Hashable) -> Optional[Journey]:
+        """The earliest arrival at ``destination`` a kept search holds.
+
+        A timetable technique that keeps a table — a label per stop, however
+        it got there — reads an *itinerary* off it rather than an edge path,
+        which is why this is not :class:`GraphPlanner`'s: the result knows
+        which vehicles were ridden, and a leg is one of those.
+        """
+        itinerary = result.itinerary(self.node_id(destination))
+        if itinerary is None:
+            return None
+        return Journey.from_itinerary(
+            self.compiled, itinerary, destination, result.departing
+        )
+
+    def _answer(self, result: _Result, destination: Hashable) -> Answer:
+        """The routes a kept search holds, and the search."""
+        journey = self.journey(result, destination)
+        return Answer(self, destination, [] if journey is None else [journey], result)
+
+
+class Front(Tabled[FrontResult]):
     """Answers with a front of more than one, where most techniques answer one.
 
     Every query here answers with a Pareto set — the journeys no other journey
@@ -526,7 +559,7 @@ class Front(TimetablePlanner):
             for itinerary in result.itineraries(target)
         ]
 
-    def _answer_front(self, result: FrontResult, destination: Hashable) -> Answer:
+    def _answer(self, result: FrontResult, destination: Hashable) -> Answer:
         """The front, best first — which is the order an answer promises and
         the reverse of the order a search produces it in.
 
@@ -535,11 +568,6 @@ class Front(TimetablePlanner):
         technique here would have returned, so `routes[0]` means the same thing
         whatever was asked, and each entry after it trades arrival time for one
         fewer change.
-
-        A verb of its own rather than an override of
-        :meth:`TimetablePlanner._answer`: what it takes is a result that kept a
-        front, which is less than the family's answer promises to accept, and a
-        narrower argument is not the same method.
         """
         routes = list(reversed(self.journeys(result, destination)))
         return Answer(self, destination, routes, result)

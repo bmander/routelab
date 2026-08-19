@@ -43,15 +43,21 @@ def test_it_wraps_a_technique_that_keeps_a_table(walkable):
     assert isinstance(rl.ULTRA().technique, rl.kernels.TimetableTechnique)
 
 
-def test_the_wrapped_technique_has_the_last_word_on_the_knobs(walkable):
-    # ULTRA takes what any of its two techniques takes; only the one
-    # underneath knows which, so the cap is handed down and refused there.
+def test_ultra_answers_for_the_knobs_of_what_it_wrapped(walkable):
+    # ULTRA takes what either of its two techniques takes, so its signature
+    # has the cap and the refusal is ULTRA's own: it knows what it wrapped,
+    # and a scan counts no changes. The technique underneath never sees a cap
+    # it could not honour.
     capped = rl.ULTRA(rl.RAPTOR()).bind(walkable)
     assert capped.route("A", "C", departing=time(8, 0), max_transfers=0).routes != []
-    with pytest.raises(TypeError, match="max_transfers"):
+    with pytest.raises(TypeError, match=r"ULTRA\(CSA\(\)\).*max_transfers"):
         rl.ULTRA(rl.CSA()).bind(walkable).route(
             "A", "C", departing=time(8, 0), max_transfers=1
-        ).routes[0]
+        )
+    # And with no cap to hand down, the scan answers as it always would.
+    assert rl.ULTRA(rl.CSA()).bind(walkable).route(
+        "A", "C", departing=time(8, 0)
+    ).routes != []
 
 
 def test_a_transfer_graph_of_islands_is_the_plain_model(env):

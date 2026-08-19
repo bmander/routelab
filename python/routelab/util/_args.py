@@ -20,8 +20,11 @@ def normalize_sources(sources: Sources) -> "list[tuple[int, int]]":
     if isinstance(sources, int):
         return [(sources, 0)]
     if isinstance(sources, Mapping):
-        items: Iterable[Any] = sources.items()
-        return [(int(node), int(cost)) for node, cost in items]
+        # Annotated loosely on purpose: a mapping is also an iterable, so
+        # narrowing the union above leaves the key and value types ambiguous,
+        # and this function's whole job is to accept the loose spellings.
+        pairs: Mapping[Any, Any] = sources
+        return [(int(node), int(cost)) for node, cost in pairs.items()]
 
     normalized: "list[tuple[int, int]]" = []
     for item in sources:

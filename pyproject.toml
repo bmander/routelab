@@ -19,7 +19,7 @@ classifiers = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "maturin>=1.7,<2.0"]
+dev = ["pytest>=7", "maturin>=1.7,<2.0", "pyright>=1.1.390"]
 
 [project.urls]
 Repository = "https://github.com/bmander/routelab"
@@ -46,7 +46,13 @@ addopts = "--doctest-modules"
 [tool.pyright]
 # The veneer's whole contract is its signatures: a query option a technique
 # does not take should be an error a caller sees before running anything,
-# which is only true if this is what CI checks. 3.9 because that is the floor
-# the package declares and the lower half of the CI matrix.
+# which is only true if this is what CI checks — so CI runs it. 3.9 because
+# that is the floor the package declares and the lower half of the test matrix.
+#
+# The library only, for now. The callers under tests/, demos/ and benchmarks/
+# are what actually pass query options, so checking them would catch more —
+# but they are written loosely on purpose in places (a test that hands a
+# planner the wrong thing to watch it refuse), and sorting that out is its own
+# piece of work rather than a condition of this one.
 include = ["python"]
 pythonVersion = "3.9"

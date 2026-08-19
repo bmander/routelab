@@ -108,7 +108,9 @@ class GTFS(EdgeSource):
         :attr:`cost_per_distance` stays ``None``. Transit's cost is the
         timetable's, not the ground's.
         """
-        positions: "Dict[Hashable, Tuple[float, float]]" = dict(self.coordinates())
+        positions: "Dict[Hashable, Tuple[float, float]]" = {
+            stop: place for stop, place in self.coordinates().items()
+        }
         return positions
 
     def coordinates(self) -> "Mapping[str, Tuple[float, float]]":

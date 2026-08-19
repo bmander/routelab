@@ -30,7 +30,7 @@ from collections import defaultdict
 from typing import Dict, Hashable, Iterator, List, Mapping, Optional, Tuple
 
 from .. import _routelab
-from ..model.environment import EdgeSource, LabelledEdge
+from ..model.environment import EdgeSource, LabelledEdge, Located
 
 __all__ = ["Footpaths"]
 
@@ -57,7 +57,7 @@ class Footpaths(EdgeSource):
 
     cost_model = "scalar"
 
-    def __init__(self, stops: EdgeSource, within: float = 200.0, speed: float = 1.4):
+    def __init__(self, stops: Located, within: float = 200.0, speed: float = 1.4):
         if within <= 0:
             raise ValueError(f"within must be a positive distance in metres, got {within}")
         if speed <= 0:
@@ -75,7 +75,7 @@ class Footpaths(EdgeSource):
     #: Seconds per metre at the walking speed, so a distance bound priced
     #: against this layer knows how slowly it moves.
     @property
-    def cost_per_distance(self) -> float:  # type: ignore[override]
+    def cost_per_distance(self) -> float:
         return 1.0 / self.speed
 
     def load(self) -> "Footpaths":
