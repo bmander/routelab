@@ -22,28 +22,43 @@ pub mod kernels;
 pub mod model;
 pub mod util;
 
-pub use kernels::astar::astar;
-pub use kernels::bfs::bfs;
+pub use kernels::astar::{astar, AStar, AStarQuery};
+pub use kernels::bfs::{bfs, Bfs, BfsTechnique};
 pub use kernels::contraction::{
-    ContractionHierarchy, CoreHierarchy, Expansion, Half, MeetingSearch, Ordering, Policy,
+    ContractionHierarchy, ContractionTechnique, CoreHierarchy, Expansion, Half, MeetingSearch,
+    Ordering, Policy,
 };
-pub use kernels::csa::{ConnectionScan, ScanProfile, ScanSearch};
-pub use kernels::dijkstra::dijkstra;
+pub use kernels::csa::{
+    ConnectionScan, ConnectionScanTechnique, ScanProfile, ScanQuery, ScanSearch,
+};
+pub use kernels::dijkstra::{dijkstra, Dijkstra, DijkstraTechnique};
 pub use kernels::heuristics::{HeuristicError, StandardHeuristic};
 pub use kernels::landmark::{Landmarks, Selection};
-pub use kernels::lcspp::{label_constrained, Modes, Multimodal};
-pub use kernels::ptl::PublicTransitLabeling;
-pub use kernels::raptor::{Raptor, RaptorSearch};
-pub use kernels::timedep::{
-    time_dependent_dijkstra, Calendar, Clock, Departure, Waiting, Window, WEEK,
+pub use kernels::lcspp::ucch::{Ucch, UcchInputs, UcchPlanner, UcchTechnique};
+pub use kernels::lcspp::{
+    label_constrained, LabelConstrained, LabelConstrainedTechnique, Modes, Multimodal,
 };
-pub use kernels::timetable::TimeExpanded;
-pub use kernels::tripbased::{TripBased, TripBasedProfile, TripBasedSearch};
+pub use kernels::ptl::{PtlTechnique, PublicTransitLabeling};
+pub use kernels::raptor::{Raptor, RaptorQuery, RaptorSearch, RaptorTechnique};
+pub use kernels::timedep::{
+    time_dependent_dijkstra, Calendar, Clock, Departure, TimeDependentDijkstra,
+    TimeDependentDijkstraTechnique, TimeDependentInputs, TimeDependentQuery, Waiting, Window, WEEK,
+};
+pub use kernels::timetable::{
+    TimeDependent, TimeDependentTechnique, TimeExpanded, TimeExpandedTechnique,
+};
+pub use kernels::tripbased::{
+    TripBased, TripBasedProfile, TripBasedQuery, TripBasedSearch, TripBasedTechnique,
+};
 pub use kernels::ultra::Ultra;
 pub use model::graph::{EdgeId, Graph, GraphError, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
 pub use model::heuristic::Heuristic;
 pub use model::lines::{Lines, StopTime};
 pub use model::search::{SearchError, SearchOptions, SearchResult};
+pub use model::technique::{
+    BindError, Distance, Distances, EarliestArrival, Explored, Footprint, Front, Profiled, Reads,
+    Searches, Technique, TransitNetwork, Unpacks,
+};
 pub use model::timetable::{
     Connection, Footpaths, Itinerary, Leg, Ride, Timetable, Transfer, TripId, Walk,
 };

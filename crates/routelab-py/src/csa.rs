@@ -5,12 +5,12 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 
 use routelab_core::kernels::csa::{
-    ConnectionScan as CoreConnectionScan, ScanProfile as CoreScanProfile,
-    ScanSearch as CoreScanSearch,
+    ConnectionScan as CoreConnectionScan, ConnectionScanTechnique, ScanProfile as CoreScanProfile,
+    ScanQuery, ScanSearch as CoreScanSearch,
 };
-use routelab_core::model::timetable::Transfer;
-use routelab_core::NodeId;
+use routelab_core::{NodeId, Progress, Technique};
 
+use crate::built;
 use crate::timetable::*;
 
 /// A timetable laid out as one array of connections in departure order.
@@ -28,8 +28,12 @@ impl PyConnectionScan {
     fn build(py: Python<'_>, timetable: &PyTimetable, footpaths: Option<&PyFootpaths>) -> Self {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
-        let scan =
-            py.detach(|| CoreConnectionScan::build(&timetable, Transfer::instant(), &footpaths));
+        let scan = py.detach(|| {
+            built(
+                ConnectionScanTechnique
+                    .bind(transit_network(&timetable, &footpaths), &Progress::new()),
+            )
+        });
         PyConnectionScan {
             inner: Arc::new(scan),
         }
@@ -62,7 +66,7 @@ impl PyConnectionScan {
     ///
     /// `departing` is what an elapsed cost is measured from; defaults to the
     /// earliest source.
-    #[pyo3(signature = (sources, target = None, departing = None))]
+    #[pyo3(signature = (sources, *, target = None, departing = None))]
     fn search(
         &self,
         py: Python<'_>,
@@ -71,7 +75,8 @@ impl PyConnectionScan {
         departing: Option<u32>,
     ) -> PyScanSearch {
         let scan = Arc::clone(&self.inner);
-        let search = py.detach(|| scan.search(&sources, target, departing));
+        let query = ScanQuery { target, departing };
+        let search = py.detach(|| scan.search(&sources, &query));
         PyScanSearch {
             scan: Arc::clone(&self.inner),
             inner: Arc::new(search),

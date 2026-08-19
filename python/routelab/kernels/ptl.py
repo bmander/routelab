@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Hashable, List, Optional, Tuple
+from typing import Hashable, List, Optional, Tuple
 
 from .. import _routelab
+from ..model.answer import Answer
+from ..model.environment import CompiledEnvironment, Environment
 from ..model.journey import Journey
-from .planner import Origins, TimetablePlanner
+from ..util.clock import Departure
+from .planner import Origins, TimetablePlanner, TimetableTechnique
 
-__all__ = ["PTL"]
+__all__ = ["PTL", "PTLPlanner"]
 
 
-class PTL(TimetablePlanner):
+class PTL(TimetableTechnique):
     """Public transit labeling (Delling, Dibbelt, Pajor & Werneck, 2015).
 
         PTL().bind(env).route(origin, target, departing=time(8, 30))
@@ -42,41 +45,51 @@ class PTL(TimetablePlanner):
     labels are larger and every query is the paper's own. What is not here:
     its multicriteria labels (``max_transfers`` names RAPTOR), and a minimum
     change time, which no timetable technique here honours yet. Like the two
-    Pyrga models, PTL keeps no table, so :meth:`search` and :meth:`explored`
-    say so and point at the techniques that do.
+    Pyrga models, PTL keeps no table, so it has neither a ``search`` nor an
+    ``explored`` to offer.
     """
 
-    options = frozenset({"departing"})
-    #: ``until`` is real, but it is :meth:`profile`'s and not :meth:`route`'s —
-    #: declared so the refusal a route() with one earns can say so itself.
-    verbs = {"until": "profile"}
+    def bind(
+        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "PTLPlanner":
+        return PTLPlanner(self, environment, self._compile(environment), progress)
 
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        super().preprocess(progress)
-        self._ptl = _routelab.PublicTransitLabeling.build(self.timetable, self.footpaths, progress)
 
-    def _footprint(self) -> int:
-        return super()._footprint() + self._ptl.footprint
+class PTLPlanner(TimetablePlanner):
+    """:class:`PTL` over one feed, its hub labels already computed."""
+
+    def __init__(
+        self,
+        technique: PTL,
+        environment: Environment,
+        compiled: CompiledEnvironment,
+        progress: "Optional[_routelab.Progress]" = None,
+    ):
+        super().__init__(technique, environment, compiled, progress)
+        self._ptl = _routelab.PublicTransitLabeling.build(
+            self.timetable, self.footpaths, progress
+        )
+
+    @property
+    def footprint(self) -> int:
+        return super().footprint + self._ptl.footprint
 
     @property
     def num_events(self) -> int:
         """Vertices of the event graph the labels are over: distinct
         (stop, time) pairs."""
-        self._bound()
         return self._ptl.num_events
 
     @property
     def num_hubs(self) -> int:
         """Entries in the event labels, both directions — the size of the
         labeling, and the number a query's work is a share of."""
-        self._bound()
         return self._ptl.num_hubs
 
     @property
     def hubs_per_label(self) -> float:
         """Average hubs per event label — the paper's own figure of merit
         for a labeling."""
-        self._bound()
         return self._ptl.hubs_per_label
 
     @property
@@ -92,23 +105,26 @@ class PTL(TimetablePlanner):
         """
         return ("hubs", self.num_hubs)
 
-    def _earliest_arrival(
-        self, sources: "List[Tuple[int, int]]", target: int, options: "Dict[str, Any]"
-    ) -> "Optional[_routelab.Itinerary]":
-        return self._ptl.earliest_arrival(sources, target)
+    def route(
+        self, origin: Origins, destination: Hashable, *, departing: Departure
+    ) -> Answer:
+        """The earliest arrival at ``destination``, from the event labels."""
+        sources, at = self._sources(self._origin_ids(origin), departing)
+        itinerary = self._ptl.earliest_arrival(sources, self.node_id(destination))
+        return self._answer_itinerary(itinerary, destination, at)
 
     def profile(
         self,
         origin: Origins,
         destination: Hashable,
         *,
-        departing: Any = None,
-        until: Any = None,
+        departing: Departure,
+        until: Departure,
     ) -> "List[Journey]":
         """Every journey worth leaving on between ``departing`` and ``until``:
         one per Pareto-optimal pair of departure and arrival, earliest
         departure first, none dominated by another — the same answer
-        :meth:`CSA.profile` gives, from the stop labels instead of a scan.
+        :meth:`CSAPlanner.profile` gives, from the stop labels instead of a scan.
 
         A departure is the *latest* moment you can leave and still make that
         arrival. Several origins with head starts are read out each on their
@@ -117,7 +133,6 @@ class PTL(TimetablePlanner):
         do and a profile of pairs cannot hold it.
         """
         opens, closes = self._window(departing, until)
-        self._bound()
         starts = self._origin_ids(origin)
         target = self.node_id(destination)
         found: "List[Tuple[int, _routelab.Itinerary]]" = []

@@ -150,14 +150,15 @@ a one-to-all search that gives an isochrone; on a point-to-point one it says
 
 ```
 
-A technique refuses options it does not take, and names the technique they
-belong to:
+Each planner's `route` declares exactly the options its own algorithm
+understands, so an option it does not take is refused by name — by Python
+itself, and by a type checker before that:
 
 ```python
 >>> planner.route("home", "work", max_transfers=1).routes[0]      # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
-ValueError: Dijkstra takes no max_transfers; a cap on changes belongs to RAPTOR(), ...
+TypeError: ...route() got an unexpected keyword argument 'max_transfers'
 
 ```
 

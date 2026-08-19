@@ -379,7 +379,7 @@ class Rounds(SearchSpace):
     A stop's arrival here is the one its own round achieved, not the best the
     search ended up with — see :class:`Reach`. That is what makes this a
     frontier rather than a table of answers: the planner's answer for a stop
-    is :meth:`~routelab.kernels.Planner.journey`, and may be a later round's.
+    is :meth:`~routelab.kernels.TimetablePlanner.journey`, and may be a later round's.
     """
 
     kind = "rounds"

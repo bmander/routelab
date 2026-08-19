@@ -88,7 +88,7 @@ def test_a_measured_bound_beats_a_geometric_one_on_mixed_speeds():
         ("landmarks", rl.Landmarks(2)),
     ]:
         planner = rl.AStar(heuristic).bind(env)
-        result = planner.search(origin, targets=[planner.node_id(destination)])
+        result = planner.search(origin, target=planner.node_id(destination))
         settled[name] = len(result.order)
         costs[name] = planner.route(origin, destination).routes[0].cost
 
@@ -141,6 +141,6 @@ def test_the_search_space_is_still_a_tree(ring):
     # Whatever the heuristic, A* explores by growing a tree — so a landmark
     # planner reports the same shape and the demo needs no special case.
     planner = rl.AStar(rl.Landmarks(2)).bind(ring)
-    tree = planner.explored(planner.search("a", targets=[planner.node_id("c")]))
+    tree = planner.explored(planner.search("a", target=planner.node_id("c")))
     assert tree.kind == "shortest-path-tree"
     assert len(tree) >= 1

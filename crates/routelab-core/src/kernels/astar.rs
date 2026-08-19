@@ -3,9 +3,84 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use crate::model::graph::{Graph, NodeId, Weight, UNREACHABLE};
+use crate::model::graph::{EdgeId, Graph, NodeId, Weight, UNREACHABLE};
 use crate::model::heuristic::Heuristic;
 use crate::model::search::{check_sources, SearchError, SearchOptions, SearchResult};
+use crate::model::technique::{Distance, Footprint, Searches, Unpacks};
+
+/// What an A* query takes: the one target it aims at, and a bound on cost.
+///
+/// The target is not optional and there is no list of them — a heuristic
+/// estimates the distance to *somewhere*, and one somewhere is what it has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AStarQuery {
+    pub target: NodeId,
+    pub max_cost: Option<Weight>,
+}
+
+impl AStarQuery {
+    /// A query aimed at `target` with no bound.
+    pub fn to(target: NodeId) -> Self {
+        AStarQuery {
+            target,
+            max_cost: None,
+        }
+    }
+}
+
+/// A* bound to a graph and the heuristic it will steer by. Borrows both: the
+/// heuristic may hold a table (landmarks), but building it is the
+/// heuristic's own preprocessing, done before this exists.
+#[derive(Debug, Clone, Copy)]
+pub struct AStar<'a, H: Heuristic> {
+    pub graph: &'a Graph,
+    pub heuristic: &'a H,
+}
+
+impl<H: Heuristic> Footprint for AStar<'_, H> {
+    fn footprint(&self) -> usize {
+        self.heuristic.footprint()
+    }
+
+    fn searches(&self) -> (&'static str, usize) {
+        ("nodes", self.graph.num_nodes())
+    }
+}
+
+impl<H: Heuristic> Searches for AStar<'_, H> {
+    type Source = (NodeId, Weight);
+    type Query = AStarQuery;
+    type Search = SearchResult;
+    type Error = SearchError;
+
+    fn search(
+        &self,
+        sources: &[(NodeId, Weight)],
+        query: &AStarQuery,
+    ) -> Result<SearchResult, SearchError> {
+        let options = SearchOptions {
+            max_cost: query.max_cost,
+            ..SearchOptions::default()
+        };
+        astar(self.graph, sources, query.target, self.heuristic, &options)
+    }
+}
+
+impl<H: Heuristic> Unpacks for AStar<'_, H> {
+    fn edge_path(&self, search: &SearchResult, to: NodeId) -> Option<Vec<EdgeId>> {
+        search.edge_path(to)
+    }
+}
+
+impl<H: Heuristic> Distance for AStar<'_, H> {
+    fn distance(
+        &self,
+        sources: &[(NodeId, Weight)],
+        to: NodeId,
+    ) -> Result<Option<Weight>, SearchError> {
+        Ok(self.search(sources, &AStarQuery::to(to))?.cost(to))
+    }
+}
 
 /// Cheapest path from one or more sources to `target`, guided by `heuristic`.
 ///

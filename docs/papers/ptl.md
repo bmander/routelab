@@ -79,13 +79,13 @@ during the query out of the neighbouring stops' labels rather than stored.
 ## What it refuses
 
 PTL keeps labels, not a table of costs, so — like the two [Pyrga
-models](pyrga.md) — it has no search space and says so:
+models](pyrga.md) — it has no one-to-all search at all:
 
 ```python
 >>> planner.search("A", departing=time(8, 0))     # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
-NotImplementedError: PTL answers with a journey rather than a cost per node ...
+AttributeError: 'PTLPlanner' object has no attribute 'search'...
 
 ```
 

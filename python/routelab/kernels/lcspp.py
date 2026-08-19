@@ -5,14 +5,22 @@ Wagner give it in *User-Constrained Multi-Modal Route Planning* (ALENEX 2012)
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Dict, Hashable, List, NamedTuple, Optional, Sequence, Tuple
 
 from .. import _routelab
-from ..model.environment import CompiledEnvironment
-from .planner import TimetablePlanner
+from ..model.answer import Answer
+from ..model.environment import CompiledEnvironment, Environment
+from ..util.clock import Departure
+from .planner import Origins, TimetablePlanner, TimetableTechnique
 from .ultra import Transfers
 
-__all__ = ["Modes", "LabelConstrained", "UCCH"]
+__all__ = [
+    "Modes",
+    "LabelConstrained",
+    "LabelConstrainedPlanner",
+    "UCCH",
+    "UCCHPlanner",
+]
 
 
 class Language(NamedTuple):
@@ -208,7 +216,7 @@ class _NoWalks:
         return "NoWalks()"
 
 
-class LabelConstrained(TimetablePlanner):
+class LabelConstrained(TimetableTechnique):
     """The best journey whose sequence of transport modes you allow.
 
         LabelConstrained().bind(env).route(doorstep, office, departing=time(8, 30))
@@ -237,9 +245,6 @@ class LabelConstrained(TimetablePlanner):
             environment — see :class:`Modes`.
     """
 
-    options = frozenset({"departing"})
-    required = frozenset({"departing"})
-
     def __init__(self, modes: Optional[Modes] = None):
         self.modes = modes if modes is not None else Modes()
 
@@ -248,42 +253,63 @@ class LabelConstrained(TimetablePlanner):
 
     def walks(self) -> Any:
         """None: this reads the arcs, not a closure of them — see
-        :meth:`TimetablePlanner.walks`."""
+        :meth:`TimetableTechnique.walks`."""
         return _NoWalks()
 
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
+    def bind(
+        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "LabelConstrainedPlanner":
+        return LabelConstrainedPlanner(
+            self, environment, self._compile(environment), progress
+        )
+
+
+class LabelConstrainedPlanner(TimetablePlanner):
+    """:class:`LabelConstrained` over one environment: a byte per arc and an
+    automaton, and nothing else built."""
+
+    def __init__(
+        self,
+        technique: LabelConstrained,
+        environment: Environment,
+        compiled: CompiledEnvironment,
+        progress: "Optional[_routelab.Progress]" = None,
+    ):
         """Read the layers, label the arcs, build the automaton. No search."""
-        super().preprocess(progress)
-        compiled = self._bound()
+        super().__init__(technique, environment, compiled, progress)
         #: The language read against this environment, kept because UCCH builds
         #: its hierarchy from the same labels and compiling twice is a byte
         #: written per arc twice — and two objects that must agree.
-        self.language = self.modes.compile(compiled)
-        language = self.language
-        self.automaton = language.automaton
+        self.language = technique.modes.compile(compiled)
+        self.automaton = self.language.automaton
         if self.automaton.is_empty:
             raise ValueError(
                 "this language admits no journey at all: it names no state to "
                 "begin in, or none to end in"
             )
         self.network = _routelab.Multimodal(
-            compiled.graph, language.labels, self.timetable, language.riding
+            compiled.graph, self.language.labels, self.timetable, self.language.riding
         )
 
-    def _footprint(self) -> int:
-        return super()._footprint() + self.network.footprint
+    @property
+    def footprint(self) -> int:
+        return super().footprint + self.network.footprint
 
     @property
     def searches(self) -> "Tuple[str, int]":
         """Product vertices — a stop per state, which is what the search is
         over and the number this model is judged on."""
-        self._bound()
-        return ("states", len(self._bound()) * self.automaton.num_states)
+        return ("states", len(self.compiled) * self.automaton.num_states)
 
-    def _earliest_arrival(
-        self, sources: "List[Tuple[int, int]]", target: int, options: "Dict[str, Any]"
-    ) -> "Optional[_routelab.Itinerary]":
-        return self.network.earliest_arrival(self.automaton, sources, target)
+    def route(
+        self, origin: Origins, destination: Hashable, *, departing: Departure
+    ) -> Answer:
+        """The best journey to ``destination`` whose modes the language allows."""
+        sources, at = self._sources(self._origin_ids(origin), departing)
+        itinerary = self.network.earliest_arrival(
+            self.automaton, sources, self.node_id(destination)
+        )
+        return self._answer_itinerary(itinerary, destination, at)
 
 
 def _served(compiled: CompiledEnvironment) -> "List[int]":
@@ -349,11 +375,25 @@ class UCCH(LabelConstrained):
             inside.append(f"max_degree={self.max_degree:g}")
         return self._describe(*inside)
 
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
+    def bind(
+        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "UCCHPlanner":
+        return UCCHPlanner(self, environment, self._compile(environment), progress)
+
+
+class UCCHPlanner(LabelConstrainedPlanner):
+    """:class:`UCCH` over one environment, its walking already contracted."""
+
+    def __init__(
+        self,
+        technique: UCCH,
+        environment: Environment,
+        compiled: CompiledEnvironment,
+        progress: "Optional[_routelab.Progress]" = None,
+    ):
         """Contract the walking network around the vertices where it meets the
         rest. Minutes on a city, paid once."""
-        super().preprocess(progress)
-        compiled = self._bound()
+        super().__init__(technique, environment, compiled, progress)
         language = self.language
         # An environment with nothing to contract — no streets, or nothing
         # joining them to the feed — is the plain model rather than a refusal,
@@ -366,34 +406,39 @@ class UCCH(LabelConstrained):
         # it here would hand the whole timetable to the contractor as a walking
         # network.
         walking = language.symbol_of.get("foot", _NO_MODE)
-        link = language.symbol_of.get(self.modes.link, _NO_MODE)
+        named = technique.modes.link
+        link = _NO_MODE if named is None else language.symbol_of.get(named, _NO_MODE)
         self.hierarchy = _routelab.Ucch.build(
             compiled.graph,
             language.labels,
             walking,
             link,
             _served(compiled),
-            self.max_degree,
+            technique.max_degree,
             progress=progress,
         )
 
-    def _footprint(self) -> int:
-        return super()._footprint() + self.hierarchy.footprint
+    @property
+    def footprint(self) -> int:
+        return super().footprint + self.hierarchy.footprint
 
     @property
     def searches(self) -> "Tuple[str, int]":
         """Core vertices, times the automaton's states — what a query is over,
         and a fraction of what :class:`LabelConstrained` searches."""
-        self._bound()
         return ("states", self.hierarchy.num_core * self.automaton.num_states)
 
     @property
     def num_core(self) -> int:
         """Vertices the contraction left standing."""
-        self._bound()
         return self.hierarchy.num_core
 
-    def _earliest_arrival(
-        self, sources: "List[Tuple[int, int]]", target: int, options: "Dict[str, Any]"
-    ) -> "Optional[_routelab.Itinerary]":
-        return self.hierarchy.earliest_arrival(self.network, self.automaton, sources, target)
+    def route(
+        self, origin: Origins, destination: Hashable, *, departing: Departure
+    ) -> Answer:
+        """The same answer :class:`LabelConstrainedPlanner` gives, over the core."""
+        sources, at = self._sources(self._origin_ids(origin), departing)
+        itinerary = self.hierarchy.earliest_arrival(
+            self.network, self.automaton, sources, self.node_id(destination)
+        )
+        return self._answer_itinerary(itinerary, destination, at)

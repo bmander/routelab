@@ -77,8 +77,8 @@ def test_an_unknown_measure_says_what_it_expected(forked):
 def test_every_planner_reports_a_space(forked):
     for planner in (rl.Dijkstra().bind(forked), rl.BFS().bind(forked), rl.AStar(rl.Zero()).bind(forked)):
         result = (
-            planner.search("a", targets=[planner.node_id("e")])
-            if isinstance(planner, rl.AStar)
+            planner.search("a", target=planner.node_id("e"))
+            if isinstance(planner, rl.AStarPlanner)
             else planner.search("a")
         )
         space = planner.explored(result)
@@ -94,7 +94,7 @@ def test_guidance_shows_up_as_a_smaller_tree():
     guided = rl.AStar(rl.Euclidean()).bind(env)
     plain = rl.Dijkstra().bind(env)
 
-    guided_tree = guided.explored(guided.search(1, targets=[target]))
+    guided_tree = guided.explored(guided.search(1, target=target))
     plain_tree = plain.explored(plain.search(1, targets=[target]))
     assert len(guided_tree) <= len(plain_tree)
 

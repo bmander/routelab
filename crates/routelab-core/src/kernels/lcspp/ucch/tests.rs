@@ -5,13 +5,15 @@
 //! they differ the hierarchy has lost something — a shortcut that should have
 //! stood in for a path, or a modal transfer the core forgot it could make.
 
-use super::super::{label_constrained, Modes, Multimodal};
-use super::Ucch;
+use super::super::{label_constrained, LabelConstrainedTechnique, Modes, Multimodal};
+use super::{Ucch, UcchInputs, UcchTechnique};
 use crate::kernels::contraction::Ordering;
 use crate::kernels::dijkstra::dijkstra;
 use crate::model::graph::{Graph, NodeId, UNREACHABLE};
 use crate::model::search::SearchOptions;
+use crate::model::technique::{EarliestArrival, Footprint, Technique};
 use crate::model::timetable::{Time, Timetable};
+use crate::util::progress::Progress;
 
 /// The pavements alone, the whole scalar network, its labels, the link arcs, and
 /// the schedule.
@@ -123,6 +125,60 @@ fn it_answers_as_the_search_it_accelerates() {
                         let (plain, fast) = both(&modes, from, at, to, degree);
                         assert_eq!(fast, plain, "degree {degree}: {from} -> {to} at {at}");
                     }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn bound_through_the_trait_it_still_answers_as_the_search_it_accelerates() {
+    // The same claim, asked the way a caller generic over techniques asks it:
+    // configure, bind, and hold both planners to one trait.
+    let (pavement, scalar, labels, links, timetable) = corridor();
+    let network = Multimodal {
+        scalar: &scalar,
+        labels: &labels,
+        timetable: &timetable,
+        riding: RAIL as u8,
+    };
+    let progress = Progress::new();
+    for modes in [on_foot(), foot_and_rail()] {
+        let plain = LabelConstrainedTechnique {
+            modes: modes.clone(),
+        }
+        .bind(network, &progress)
+        .unwrap();
+        let fast = UcchTechnique {
+            modes,
+            walking: FOOT as u8,
+            link_label: LINK as u8,
+            ordering: Ordering::default(),
+            max_degree: 2.0,
+        }
+        .bind(
+            UcchInputs {
+                network,
+                walkable: &pavement,
+                links: &links,
+                served: &[10, 11],
+            },
+            &progress,
+        )
+        .unwrap();
+        assert_eq!(plain.searches().0, "states");
+        assert!(
+            fast.searches().1 < plain.searches().1,
+            "the core is smaller"
+        );
+        for from in 0..12u32 {
+            for to in 0..12u32 {
+                for at in [0, 900, 1250, 2000] {
+                    assert_eq!(
+                        fast.earliest_arrival(&[(from, at)], to).map(|j| j.arrives),
+                        plain.earliest_arrival(&[(from, at)], to).map(|j| j.arrives),
+                        "{from} -> {to} at {at}"
+                    );
                 }
             }
         }

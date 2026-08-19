@@ -69,11 +69,15 @@
 mod tests;
 pub mod ucch;
 
+use std::convert::Infallible;
+
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use crate::model::graph::{Graph, NodeId, UNREACHABLE};
+use crate::model::technique::{EarliestArrival, Footprint, Technique};
 use crate::model::timetable::{Itinerary, Leg, Time, Timetable, Walk};
+use crate::util::progress::Progress;
 
 /// The states an automaton may be in at once, one bit each.
 pub(crate) type StateSet = u32;
@@ -185,6 +189,7 @@ impl Modes {
 /// `scalar` and `timetable` share one numbering — the merged environment's —
 /// which is what makes the two relaxations parts of one search rather than two
 /// searches to stitch.
+#[derive(Clone, Copy)]
 pub struct Multimodal<'a> {
     /// Arcs with a duration: pavements, roads, and the link arcs between
     /// networks.
@@ -205,6 +210,56 @@ impl Multimodal<'_> {
     /// How many vertices the product is built over.
     fn vertices(&self) -> usize {
         self.scalar.num_nodes().max(self.timetable.num_stops())
+    }
+}
+
+/// The label-constrained search as a configuration: the language it will
+/// admit. Binding it to a [`Multimodal`] network builds nothing — the product
+/// is searched, never materialised — so the planner borrows the network.
+#[derive(Debug, Clone)]
+pub struct LabelConstrainedTechnique {
+    pub modes: Modes,
+}
+
+impl<'a> Technique<'a> for LabelConstrainedTechnique {
+    type Inputs = Multimodal<'a>;
+    type Planner = LabelConstrained<'a>;
+    type Error = Infallible;
+
+    fn bind(
+        &self,
+        network: Multimodal<'a>,
+        _progress: &Progress,
+    ) -> Result<LabelConstrained<'a>, Infallible> {
+        Ok(LabelConstrained {
+            network,
+            modes: self.modes.clone(),
+        })
+    }
+}
+
+/// The label-constrained search, bound: a network and the language to
+/// search it under.
+#[derive(Clone)]
+pub struct LabelConstrained<'a> {
+    pub network: Multimodal<'a>,
+    pub modes: Modes,
+}
+
+impl Footprint for LabelConstrained<'_> {
+    fn footprint(&self) -> usize {
+        0
+    }
+
+    /// The product's vertices: every network vertex in every state.
+    fn searches(&self) -> (&'static str, usize) {
+        ("states", self.network.vertices() * self.modes.num_states())
+    }
+}
+
+impl EarliestArrival for LabelConstrained<'_> {
+    fn earliest_arrival(&self, sources: &[(NodeId, Time)], to: NodeId) -> Option<Itinerary> {
+        label_constrained(&self.network, &self.modes, sources, to)
     }
 }
 

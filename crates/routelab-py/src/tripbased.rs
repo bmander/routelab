@@ -5,12 +5,12 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 
 use routelab_core::kernels::tripbased::{
-    TripBased as CoreTripBased, TripBasedProfile as CoreTripBasedProfile,
-    TripBasedSearch as CoreTripBasedSearch,
+    TripBased as CoreTripBased, TripBasedProfile as CoreTripBasedProfile, TripBasedQuery,
+    TripBasedSearch as CoreTripBasedSearch, TripBasedTechnique,
 };
-use routelab_core::model::timetable::Transfer;
-use routelab_core::NodeId;
+use routelab_core::{NodeId, Technique};
 
+use crate::built;
 use crate::progress::*;
 use crate::timetable::*;
 
@@ -37,17 +37,14 @@ impl PyTripBased {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
         let counter = counter(progress);
-        let built = py.detach(|| {
-            CoreTripBased::build_reporting(
-                &timetable,
-                Transfer::instant(),
-                &footpaths,
-                reduce,
-                &counter,
+        let kernel = py.detach(|| {
+            built(
+                TripBasedTechnique { reduce }
+                    .bind(transit_network(&timetable, &footpaths), &counter),
             )
         });
         PyTripBased {
-            inner: Arc::new(built),
+            inner: Arc::new(kernel),
         }
     }
 
@@ -91,7 +88,7 @@ impl PyTripBased {
     ///
     /// `departing` is what an elapsed cost is measured from; defaults to the
     /// earliest source.
-    #[pyo3(signature = (sources, target, max_transfers = None, departing = None))]
+    #[pyo3(signature = (sources, target, *, max_transfers = None, departing = None))]
     fn search(
         &self,
         py: Python<'_>,
@@ -101,7 +98,12 @@ impl PyTripBased {
         departing: Option<u32>,
     ) -> PyTripBasedSearch {
         let kernel = Arc::clone(&self.inner);
-        let search = py.detach(|| kernel.search(&sources, target, max_transfers, departing));
+        let query = TripBasedQuery {
+            target,
+            max_transfers,
+            departing,
+        };
+        let search = py.detach(|| kernel.search(&sources, &query));
         PyTripBasedSearch {
             kernel: Arc::clone(&self.inner),
             inner: Arc::new(search),

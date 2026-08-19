@@ -34,21 +34,21 @@ def test_hello_world(walkable):
 
 def test_it_wraps_a_technique_that_keeps_a_table(walkable):
     # The query has to read every stop's arrival to know where to get off, so
-    # a technique that answers only with a journey cannot be wrapped — and is
-    # refused by name, from the shelf rather than from a list.
-    with pytest.raises(TypeError, match=r"keeps none.*Wrap CSA\(\), RAPTOR\(\) or TripBased\(\)"):
-        rl.ULTRA(rl.TimeDependent())
+    # a technique that answers only with a journey cannot be wrapped. The type
+    # is the contract; this is what an untyped caller runs into.
+    with pytest.raises(TypeError, match=r"keeps none.*Wrap RAPTOR\(\) or CSA\(\)"):
+        rl.ULTRA(rl.TimeDependent())  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="keeps none"):
-        rl.ULTRA(rl.PTL())
-    assert isinstance(rl.ULTRA().technique, rl.kernels.TimetablePlanner)
+        rl.ULTRA(rl.PTL())  # type: ignore[arg-type]
+    assert isinstance(rl.ULTRA().technique, rl.kernels.TimetableTechnique)
 
 
 def test_the_wrapped_technique_has_the_last_word_on_the_knobs(walkable):
-    # ULTRA advertises what any of its techniques takes; only the one
-    # underneath knows which, so it is asked.
+    # ULTRA takes what any of its two techniques takes; only the one
+    # underneath knows which, so the cap is handed down and refused there.
     capped = rl.ULTRA(rl.RAPTOR()).bind(walkable)
     assert capped.route("A", "C", departing=time(8, 0), max_transfers=0).routes != []
-    with pytest.raises(ValueError, match="CSA takes no max_transfers"):
+    with pytest.raises(TypeError, match="max_transfers"):
         rl.ULTRA(rl.CSA()).bind(walkable).route(
             "A", "C", departing=time(8, 0), max_transfers=1
         ).routes[0]
@@ -66,14 +66,18 @@ def test_a_transfer_graph_of_islands_is_the_plain_model(env):
 def test_it_needs_a_timetable_and_a_departure(walkable):
     plain = rl.Environment(rl.ScalarEdges(("a", "b", 1)))
     assert rl.ULTRA(rl.RAPTOR()).missing_from(plain.compile()) == frozenset({"timetable"})
-    with pytest.raises(ValueError, match="needs a departure time"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'departing'"):
         rl.ULTRA(rl.RAPTOR()).bind(walkable).route("A", "C").routes[0]
 
 
 def test_a_search_is_the_wrapped_technique_s_and_says_so(walkable):
+    # ULTRA brackets its technique's search with two walks of its own, so
+    # there is no one table to hand back — and no `search` to ask for one.
     planner = rl.ULTRA(rl.RAPTOR()).bind(walkable)
-    with pytest.raises(NotImplementedError, match="brackets its technique's search"):
-        planner.search("A", departing=time(8, 0))
+    assert not hasattr(planner, "search")
+    answer = planner.route("A", "C", departing=time(8, 0))
+    with pytest.raises(NotImplementedError, match="keeps no search space"):
+        answer.searchspace()
 
 
 def test_every_leg_is_an_edge_of_this_environment(walkable):

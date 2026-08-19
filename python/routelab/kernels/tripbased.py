@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Hashable, List, Optional, Tuple
+from typing import Dict, Hashable, List, Optional, Tuple
 
 from .. import _routelab
+from ..model.answer import Answer
+from ..model.environment import CompiledEnvironment, Environment
 from ..model.journey import Journey
-from ..model.search import Result
-from ..model.searchspace import SearchSpace, Segments
-from .planner import Front, Origins, Planner, TimetablePlanner
+from ..model.searchspace import Segments
+from ..util.clock import Departure
+from .planner import Front, Origins, TimetablePlanner, TimetableTechnique
 
-__all__ = ["TripBased"]
+__all__ = ["TripBased", "TripBasedPlanner"]
 
 
-class TripBased(Front, TimetablePlanner):
+class TripBased(TimetableTechnique):
     """Trip-based public transit routing (Witt, 2015).
 
         TripBased().bind(env).route(origin, target, departing=time(8, 30))
@@ -26,10 +28,11 @@ class TripBased(Front, TimetablePlanner):
     breadth-first sweep over trip segments: round ``n`` scans every trip
     reached with ``n`` changes, checks whether it reaches the target, and
     follows its transfers into round ``n+1``. That is Pareto over arrival
-    and changes by construction, like RAPTOR — :meth:`frontier` hands the
-    front back — and it is point-to-point by construction, so
-    :meth:`search` needs its target and refuses without one; what it keeps
-    to draw is the segments it scanned, by round.
+    and changes by construction, like RAPTOR —
+    :meth:`~routelab.kernels.Front.journeys` hands the front back — and it is
+    point-to-point by construction, so ``search`` needs its target as a
+    required argument; what it keeps to draw is the segments it scanned, by
+    round.
 
     ``reduce`` is the paper's own control: ``TripBased(reduce=False)`` keeps
     every transfer and answers identically, more slowly. A policy, never a
@@ -37,20 +40,15 @@ class TripBased(Front, TimetablePlanner):
     contraction hierarchy. ``max_transfers`` is a query option, as it is for
     RAPTOR: it bounds one question, not the technique.
 
-    :meth:`profile` runs the same sweep once per moment the origin offers a
-    departure in a window, latest first, keeping the labels between runs
-    (the paper's §3.3), and hands back every journey worth leaving on: one
-    per Pareto-optimal (departure, arrival, changes).
+    :meth:`~TripBasedPlanner.profile` runs the same sweep once per moment the
+    origin offers a departure in a window, latest first, keeping the labels
+    between runs (the paper's §3.3), and hands back every journey worth
+    leaving on: one per Pareto-optimal (departure, arrival, changes).
 
     Changing vehicles is instantaneous, as it is for the four techniques it
     is checked against; a minimum change time is a new kernel ``Transfer``
     constructor and would land in all five at once, so it is not a knob here.
     """
-
-    options = frozenset({"departing", "max_transfers"})
-    #: ``until`` is real, but it is :meth:`profile`'s and not :meth:`route`'s —
-    #: declared so the refusal a route() with one earns can say so itself.
-    verbs = {"until": "profile"}
 
     def __init__(self, reduce: bool = True):
         self.reduce = bool(reduce)
@@ -58,37 +56,49 @@ class TripBased(Front, TimetablePlanner):
     def __repr__(self) -> str:
         return self._describe(*(() if self.reduce else ("reduce=False",)))
 
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        super().preprocess(progress)
+    def bind(
+        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "TripBasedPlanner":
+        return TripBasedPlanner(self, environment, self._compile(environment), progress)
+
+
+class TripBasedPlanner(Front, TimetablePlanner):
+    """:class:`TripBased` over one feed, its transfer set already computed."""
+
+    def __init__(
+        self,
+        technique: TripBased,
+        environment: Environment,
+        compiled: CompiledEnvironment,
+        progress: "Optional[_routelab.Progress]" = None,
+    ):
+        super().__init__(technique, environment, compiled, progress)
         self._trips = _routelab.TripBased.build(
-            self.timetable, self.footpaths, self.reduce, progress
+            self.timetable, self.footpaths, technique.reduce, progress
         )
 
-    def _footprint(self) -> int:
-        return super()._footprint() + self._trips.footprint
+    @property
+    def footprint(self) -> int:
+        return super().footprint + self._trips.footprint
 
     @property
     def num_lines(self) -> int:
         """Lines in the paper's sense — distinct stop sequences whose trips
         never overtake — which is more than a feed's own count of routes."""
-        self._bound()
         return self._trips.num_lines
 
     @property
     def num_trips(self) -> int:
-        self._bound()
         return self._trips.num_trips
 
     @property
     def num_transfers(self) -> int:
         """Transfers kept: the set a query scans."""
-        self._bound()
         return self._trips.num_transfers
 
     @property
     def num_initial_transfers(self) -> int:
         """Transfers computed before reduction dropped the ones never needed."""
-        self._bound()
         return self._trips.num_initial_transfers
 
     @property
@@ -98,26 +108,54 @@ class TripBased(Front, TimetablePlanner):
         stop-labelling techniques."""
         return ("trips", self.num_trips)
 
-    # The query keeps a table — one journey per number of changes at its
-    # target — so `Planner.route`, which searches and reads the journey off
-    # the result, is the whole implementation; the family's `journey` reads
-    # an itinerary off it. The itinerary hook the two Pyrga models need is
-    # not used here.
-    _route = Planner._route
+    def route(
+        self,
+        origin: Origins,
+        destination: Hashable,
+        *,
+        departing: Departure,
+        max_transfers: Optional[int] = None,
+    ) -> Answer:
+        """Every journey worth having to ``destination``, earliest arrival first."""
+        return self._answer_front(
+            self.search(
+                origin,
+                departing=departing,
+                target=self.node_id(destination),
+                max_transfers=max_transfers,
+            ),
+            destination,
+        )
 
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> "_routelab.TripBasedSearch":
-        """Sweep the trip segments toward the one target."""
-        sources, at = self._sources(starts, options)
-        target = self._single_target(options, "TripBased, sweeping trips toward a target,")
-        return self._trips.search(sources, target, self._changes(options.get("max_transfers")), at)
+    def search(
+        self,
+        origins: Origins,
+        *,
+        departing: Departure,
+        target: int,
+        max_transfers: Optional[int] = None,
+    ) -> "_routelab.TripBasedSearch":
+        """Sweep the trip segments toward the one target.
+
+        The sweep is point-to-point by construction — it asks of each trip
+        whether it reaches the target — so the target is a required argument
+        rather than a way to stop early.
+        """
+        sources, at = self._sources(self._origin_ids(origins), departing)
+        return self._trips.search(
+            sources,
+            target,
+            max_transfers=self._changes(max_transfers),
+            departing=at,
+        )
 
     def profile(
         self,
         origin: Origins,
         destination: Hashable,
         *,
-        departing: Any = None,
-        until: Any = None,
+        departing: Departure,
+        until: Departure,
     ) -> "List[Journey]":
         """Every journey worth leaving on between ``departing`` and ``until``:
         one per Pareto-optimal (departure, arrival, changes), earliest
@@ -130,14 +168,17 @@ class TripBased(Front, TimetablePlanner):
         do and a profile of departures cannot hold it.
         """
         opens, closes = self._window(departing, until)
-        compiled = self._bound()
         starts = self._origin_ids(origin)
         target = self.node_id(destination)
         found: "List[Tuple[int, int, int, _routelab.Itinerary]]" = []
         for stop, head_start in starts.items():
-            profile = self._trips.profile(stop, target, opens + head_start, closes + head_start)
+            profile = self._trips.profile(
+                stop, target, opens + head_start, closes + head_start
+            )
             for departs, itinerary in profile.journeys():
-                found.append((departs - head_start, itinerary.arrives, itinerary.transfers, itinerary))
+                found.append(
+                    (departs - head_start, itinerary.arrives, itinerary.transfers, itinerary)
+                )
         # One origin needs no merge: the kernel already answered with a Pareto
         # set, in the order this returns. Several are merged on the query's
         # clock — latest departure first, keeping each journey no
@@ -158,11 +199,10 @@ class TripBased(Front, TimetablePlanner):
         # The journey is built from the survivors only, since building one asks
         # the environment for an edge per leg.
         return [
-            Journey.from_itinerary(compiled, itinerary, destination, left)
+            Journey.from_itinerary(self.compiled, itinerary, destination, left)
             for left, _, _, itinerary in kept
         ]
 
-    def explored(self, result: Result, **options: Any) -> SearchSpace:
+    def explored(self, result: "_routelab.TripBasedSearch") -> Segments:
         """Every trip segment the sweep scanned, by the round it was reached in."""
-        self._no_other(options, "trip segments")
-        return Segments(self._bound(), result)
+        return Segments(self.compiled, result)

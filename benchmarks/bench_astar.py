@@ -71,12 +71,18 @@ def main() -> None:
     print(f"{'planner':<20}{'settled':>10}{'of graph':>10}{'ms':>8}{'cost':>10}")
     baseline = None
     for name, planner in planners:
-        target = [planner.node_id(destination)]
+        target = planner.node_id(destination)
         start = time.perf_counter()
-        result = planner.search(origin, targets=target)
+        # A* aims at the one target it estimates toward; Dijkstra stops once a
+        # set of them is settled.
+        result = (
+            planner.search(origin, target=target)
+            if isinstance(planner, rl.AStarPlanner)
+            else planner.search(origin, targets=[target])
+        )
         elapsed = (time.perf_counter() - start) * 1000
         settled = len(result.order)
-        cost = result.cost(target[0])
+        cost = result.cost(target)
 
         if baseline is None:
             baseline = cost

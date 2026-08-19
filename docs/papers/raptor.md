@@ -178,7 +178,7 @@ A departure time is required, with no default:
 >>> planner.route("A", "C").routes[0]                       # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
-ValueError: RAPTOR needs a departure time: pass departing=time(8, 30), ...
+TypeError: ...route() missing 1 required keyword-only argument: 'departing'
 
 ```
 

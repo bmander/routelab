@@ -34,12 +34,65 @@
 //! [`Transfer::instant`], so the gap is a missing constructor rather than a
 //! parameter that would be quietly ignored.
 
+use std::convert::Infallible;
+
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use crate::model::graph::{NodeId, UNREACHABLE};
-
+use crate::model::technique::{EarliestArrival, Footprint, Technique, TransitNetwork};
 use crate::model::timetable::{Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk};
+use crate::util::progress::Progress;
+
+/// The time-dependent model as a configuration: nothing to set, and nothing
+/// to build — binding it only keeps hold of the network, since this model
+/// spends search rather than nodes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TimeDependentTechnique;
+
+impl<'a> Technique<'a> for TimeDependentTechnique {
+    type Inputs = TransitNetwork<'a>;
+    type Planner = TimeDependent<'a>;
+    type Error = Infallible;
+
+    fn bind(
+        &self,
+        net: TransitNetwork<'a>,
+        _progress: &Progress,
+    ) -> Result<TimeDependent<'a>, Infallible> {
+        Ok(TimeDependent {
+            timetable: net.timetable,
+            transfer: net.transfer,
+            footpaths: net.footpaths,
+        })
+    }
+}
+
+/// The time-dependent model, bound: the timetable it will search and the
+/// footpaths it will walk. Borrowed, because it precomputes nothing — a
+/// zero-size struct would be dishonest about needing the timetable per call.
+#[derive(Debug, Clone, Copy)]
+pub struct TimeDependent<'a> {
+    pub timetable: &'a Timetable,
+    pub transfer: Transfer,
+    pub footpaths: &'a Footpaths,
+}
+
+impl Footprint for TimeDependent<'_> {
+    fn footprint(&self) -> usize {
+        0
+    }
+
+    fn searches(&self) -> (&'static str, usize) {
+        ("stops", self.timetable.num_stops())
+    }
+}
+
+impl EarliestArrival for TimeDependent<'_> {
+    fn earliest_arrival(&self, sources: &[(NodeId, Time)], to: NodeId) -> Option<Itinerary> {
+        earliest_arrival(self.timetable, sources, to, self.transfer, self.footpaths)
+    }
+}
 
 /// Earliest arrival at `to` from `sources` — each a stop and the time you are
 /// standing there — riding `timetable` and walking `footpaths`.

@@ -113,9 +113,10 @@ rl.Dijkstra().bind(env).route({"stop_a": 0, "stop_b": 45}, "home", max_cost=600)
 The same shape holds for every technique, a timetable included:
 `RAPTOR().bind(env).route({"stop_a": 0, "stop_b": 45}, "stop_z", departing=time(8, 30)).routes[0]`
 stands at stop_b forty-five seconds after departing. Options are per technique
-and declared as data — `Dijkstra.options` is `{"max_cost"}` — and a technique
-refuses an option it does not take by name, saying which technique it belongs
-to.
+and live on the signature of its bound planner — `DijkstraPlanner.route` takes
+`max_cost`, `RAPTORPlanner.route` takes `departing` and `max_transfers` — so an
+option a technique does not take is a `TypeError` naming it, and an error a
+type checker reports before anything runs.
 
 Configuring and binding are separate because the middle step gets expensive:
 sixteen landmarks over a city cost a second and 33 MB, and that belongs to a
@@ -362,9 +363,11 @@ counts settled nodes instead. `SearchSpace` is the general promise. An algorithm
 that explores differently reports something else — a contraction hierarchy
 reports two `MeetingTrees`, RAPTOR reports `Rounds` (every stop, by the round
 that first reached it), and the two Pyrga models, which keep no search space,
-refuse `explored()` in so many words — but whatever it explored, you can draw
-it. The identity underneath is the same for every technique that keeps a table:
+have no `explored` at all — but whatever a technique explored, you can draw it.
+The identity underneath is the same for every technique that keeps a table:
 `planner.route(a, b).routes[0] == planner.journey(planner.search(a, targets=[...]), b)`.
+A goal-directed search — A*, a hierarchy, trip-based routing — takes the one
+target it aims at as `target=` instead.
 
 A query answers with all of it, so a caller who wants a route *and* the picture
 behind it searches once:
@@ -670,11 +673,11 @@ The refusals are the library's, as everywhere:
 
 ```python
 planner.route(origin, target).routes[0]
-# ValueError: RAPTOR needs a departure time: pass departing=time(8, 30), ...
+# TypeError: RAPTORPlanner.route() missing 1 required keyword-only argument: 'departing'
 rl.TimeDependent().bind(env).route(origin, target, departing=time(8, 30), max_transfers=1).routes[0]
-# ValueError: TimeDependent takes no max_transfers; a cap on changes belongs to RAPTOR(), which searches by round.
-rl.TimeDependent().bind(env).explored(result)
-# NotImplementedError: TimeDependent answers with a journey and keeps no search space, so there is nothing to draw. The techniques that keep a table report one: ask CSA() or RAPTOR().
+# TypeError: TimeDependentPlanner.route() got an unexpected keyword argument 'max_transfers'
+rl.TimeDependent().bind(env).route(origin, target, departing=time(8, 30)).searchspace()
+# NotImplementedError: TimeDependentPlanner answers with a journey and keeps no search space, so there is nothing to draw.
 ```
 
 Routes here are the paper's — distinct stop sequences, split so that no trip
@@ -779,7 +782,7 @@ planner.route(downtown, juanita, departing=time(8, 30)).routes[0]  # Journey(...
 planner.route(downtown, juanita, departing=time(8, 30)).routes
 # [Journey(1 change, arrives 16:30), Journey(2 changes, 09:38)]     — RAPTOR's front, exactly
 
-result = planner.search(downtown, targets=[planner.node_id(juanita)], departing=time(8, 30))
+result = planner.search(downtown, target=planner.node_id(juanita), departing=time(8, 30))
 result.settled, result.scanned                           # 9,807 trips labelled, 2,533 segments scanned
 planner.explored(result)                                 # Segments(2,533 trip segments, out to round 4)
 ```
@@ -914,12 +917,12 @@ checked by the same `is_valid` as the other five.
 
 Not here: the paper's multicriteria labels (a second, weighted graph whose
 distances count trips, and distance labels over it — 26–88× the preprocessing
-in the paper, its own increment), so `max_transfers` is refused with a
-pointer at RAPTOR; minimum transfer times, which no timetable kernel here
+in the paper, its own increment), so `max_transfers` is not on this planner's
+`route` at all; minimum transfer times, which no timetable kernel here
 honours yet; and the paper's *trimmed* event labels, which it notes break the
 plain earliest-arrival query and answers with stop labels — the event labels
-here are kept whole. Like the two Pyrga models, PTL keeps no table, so
-`search()` and `explored()` say so and point at the techniques that do.
+here are kept whole. Like the two Pyrga models, PTL keeps no table, so it has
+neither `search` nor `explored`.
 
 ### Walking without a radius
 
@@ -1357,7 +1360,8 @@ without Python. The bindings layer stays thin on purpose: sugar is easier to rea
 change, and document in Python.
 
 A new technique is a new file in both `kernels/` directories and nothing else
-moved: it reuses the model, declares the query options it takes, brings its own
+moved: it reuses the model, declares the query options it takes on its planner's
+own signature, brings its own
 derivation of whatever it needs beyond the graph, and is checked against
 something that cannot be wrong in the same direction.
 

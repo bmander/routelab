@@ -34,6 +34,7 @@ mod tests;
 
 use crate::model::graph::{EdgeId, Graph, GraphError, NodeId, Weight};
 use crate::model::search::SearchError;
+use crate::model::technique::{BindError, Distance, Footprint, Searches, Technique, Unpacks};
 use crate::util::progress::Progress;
 use build::Builder;
 
@@ -99,6 +100,31 @@ impl Ordering {
 /// it could have been given, so a search that only ever climbs treats the core
 /// as the top of the hierarchy without needing a special case for it.
 pub const UNRANKED: u32 = u32::MAX;
+
+/// A contraction hierarchy as a configuration: how to order the nodes and how
+/// hard to look for witnesses. Binding it is the contraction.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ContractionTechnique {
+    pub ordering: Ordering,
+}
+
+impl<'a> Technique<'a> for ContractionTechnique {
+    type Inputs = &'a Graph;
+    type Planner = ContractionHierarchy;
+    type Error = BindError;
+
+    fn bind(
+        &self,
+        graph: &'a Graph,
+        progress: &Progress,
+    ) -> Result<ContractionHierarchy, BindError> {
+        Ok(ContractionHierarchy::build_reporting(
+            graph,
+            self.ordering,
+            progress,
+        )?)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ContractionHierarchy {
@@ -225,5 +251,50 @@ impl ContractionHierarchy {
     /// The augmented arc behind an edge of the downward search graph.
     pub fn downward_edge(&self, edge: EdgeId) -> u32 {
         self.down_augmented[self.downward.input_index(edge) as usize]
+    }
+}
+
+impl Footprint for ContractionHierarchy {
+    fn footprint(&self) -> usize {
+        ContractionHierarchy::footprint(self)
+    }
+
+    fn searches(&self) -> (&'static str, usize) {
+        ("nodes", self.num_nodes())
+    }
+}
+
+impl Searches for ContractionHierarchy {
+    type Source = (NodeId, Weight);
+    /// The query is the target and nothing else: a bidirectional search has
+    /// no cost bound worth offering, and needs somewhere to meet.
+    type Query = NodeId;
+    type Search = MeetingSearch;
+    type Error = SearchError;
+
+    fn search(
+        &self,
+        sources: &[(NodeId, Weight)],
+        target: &NodeId,
+    ) -> Result<MeetingSearch, SearchError> {
+        self.query(sources, *target)
+    }
+}
+
+impl Unpacks for ContractionHierarchy {
+    /// The path in the original graph's edges — for the target only, since
+    /// that is the one node a meeting search knows the true distance to.
+    fn edge_path(&self, search: &MeetingSearch, to: NodeId) -> Option<Vec<EdgeId>> {
+        (to == search.target).then(|| self.unpack(search)).flatten()
+    }
+}
+
+impl Distance for ContractionHierarchy {
+    fn distance(
+        &self,
+        sources: &[(NodeId, Weight)],
+        to: NodeId,
+    ) -> Result<Option<Weight>, SearchError> {
+        Ok(self.query(sources, to)?.distance)
     }
 }

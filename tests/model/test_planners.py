@@ -6,6 +6,8 @@ import pytest
 
 import routelab as rl
 
+from conftest import TIMETABLE_MODELS
+
 
 @pytest.fixture
 def env() -> rl.Environment:
@@ -108,7 +110,7 @@ def test_a_technique_is_a_value_you_can_keep(env):
     other = rl.Environment(rl.ScalarEdges(("a", "b", 5), ("b", "c", 5)))
     assert technique.bind(env).route("a", "c").routes[0].cost == 16
     assert technique.bind(other).route("a", "c").routes[0].cost == 10
-    assert technique.environment is None, "binding leaves the technique alone"
+    assert not hasattr(technique, "environment"), "a technique holds no data at all"
 
 
 def test_binding_gives_each_environment_its_own_planner(env):
@@ -118,15 +120,14 @@ def test_binding_gives_each_environment_its_own_planner(env):
     assert first.compiled is second.compiled, "the same world, compiled once"
 
 
-def test_an_unbound_technique_says_what_to_do_about_it(env):
+def test_an_unbound_technique_has_no_verbs_to_call(env):
+    # The contract, as types rather than as a sentence at the bottom of a
+    # stack trace: a technique is configuration, and asking one a question is
+    # not a call that exists.
     technique = rl.Dijkstra()
-    for call in (
-        lambda: technique.route("a", "c").routes[0],
-        lambda: technique.search("a"),
-        lambda: technique.node_id("a"),
-    ):
-        with pytest.raises(ValueError, match="technique, not a planner"):
-            call()
+    for verb in ("route", "search", "explored", "node_id"):
+        assert not hasattr(technique, verb), verb
+    assert hasattr(technique.bind(env), "route")
 
 
 def test_a_technique_reports_what_a_dataset_cannot_give_it(env):
@@ -235,70 +236,89 @@ EVERY_TECHNIQUE = [
 
 def test_every_technique_is_one_of_these():
     # The list above is written by hand, because these are configurations and
-    # some take arguments — so it is checked against the shelf rather than
-    # trusted. A technique that landed without a line here would otherwise be
-    # tested by nothing below.
-    assert {type(technique) for technique in EVERY_TECHNIQUE} == set(rl.kernels.techniques())
+    # some take arguments — so it is checked against what the package exports
+    # rather than trusted. A technique that landed without a line here would
+    # otherwise be tested by nothing below.
+    shelf = {
+        value
+        for value in vars(rl.kernels).values()
+        if isinstance(value, type)
+        and issubclass(value, rl.kernels.Technique)
+        and value not in (rl.kernels.Technique, rl.kernels.TimetableTechnique)
+    }
+    assert {type(technique) for technique in EVERY_TECHNIQUE} == shelf
+
+
+def test_every_timetable_technique_is_in_the_shared_list():
+    # The check the two feed-level test modules rely on: they parametrize over
+    # conftest's TIMETABLE_MODELS, so a timetable technique missing from that
+    # list is one no feed ever reaches. Asked here, where the shelf is already
+    # read, rather than in either of the files that use the list.
+    shelf = {
+        value
+        for value in vars(rl.kernels).values()
+        if isinstance(value, type)
+        and issubclass(value, rl.kernels.TimetableTechnique)
+        and value is not rl.kernels.TimetableTechnique
+    }
+    assert set(TIMETABLE_MODELS) == shelf
 
 
 @pytest.mark.parametrize("technique", EVERY_TECHNIQUE, ids=repr)
-def test_every_technique_declares_what_it_takes(technique):
-    # Data, not discovery: a caller — or a board — can know what a technique
-    # takes before asking it anything, and every technique says.
-    assert isinstance(technique.options, frozenset)
-    assert technique.required <= technique.options
+def test_every_technique_is_a_configuration_and_nothing_more(technique):
+    # What a technique knows is which cost models it can route over, which is
+    # what `missing_from` answers with. What a query takes is the planner's,
+    # on its own signature, so there is no second place for it to be declared.
     assert technique.accepts
+    assert not hasattr(technique, "route")
 
 
 def test_an_option_a_technique_does_not_take_is_refused_by_name(env):
+    # No registry, and nothing to keep in step with the shelf: a knob a
+    # technique does not have is a keyword its `route` never declared, and
+    # Python's own sentence names the method the caller called.
     planner = rl.Dijkstra().bind(env)
-    with pytest.raises(ValueError, match="Dijkstra takes no max_depth; a hop bound belongs to BFS"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'max_depth'"):
         planner.route("a", "c", max_depth=1).routes[0]
-    with pytest.raises(ValueError, match="takes no max_transfers; a cap on changes belongs to RAPTOR"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'max_transfers'"):
         planner.route("a", "c", max_transfers=1).routes[0]
-    with pytest.raises(ValueError, match="takes no nonsense; no technique here takes nonsense"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'nonsense'"):
         planner.route("a", "c", nonsense=True).routes[0]
-    with pytest.raises(ValueError, match=r"BFS takes no max_cost; a cost bound belongs to .*Dijkstra"):
-        rl.BFS().bind(env).route("a", "c", max_cost=5).routes[0]
+    with pytest.raises(TypeError, match="unexpected keyword argument 'max_cost'"):
+        rl.BFS().bind(env).route("a", "c", max_depth=1, max_cost=5).routes[0]
 
 
-def test_a_departure_time_on_an_unscheduled_network_says_so(env):
-    # Nothing here reads a clock, and the refusal says that rather than
-    # naming a technique that could not help either.
-    with pytest.raises(ValueError, match="Nothing in this environment is scheduled"):
+def test_a_departure_time_on_an_unscheduled_network_is_not_an_argument(env):
+    # `Dijkstra` routes the always-open network, which is a question worth
+    # asking; a departure time is not part of it, and never was.
+    with pytest.raises(TypeError, match="unexpected keyword argument 'departing'"):
         rl.Dijkstra().bind(env).route("a", "c", departing=0).routes[0]
-    assert rl.clock_readers(env.compile()) is None
-
-
-def test_who_owns_an_option_is_read_off_the_techniques(env):
-    # Not a table of sentences that goes stale: the refusal names whoever
-    # declares the option, so a new technique joins the sentence by existing.
-    assert rl.kernels.owners("max_transfers") == [rl.RAPTOR, rl.TripBased, rl.ULTRA]
-    assert set(rl.kernels.owners("max_cost")) == {rl.Dijkstra, rl.AStar, rl.TimeDependentDijkstra}
-    assert rl.kernels.names(rl.kernels.owners("max_depth")) == "BFS()"
-    assert rl.kernels.owners("nonsense") == []
-    # And every technique the library exports is one of them.
-    assert set(rl.kernels.techniques()) == {
-        rl.Dijkstra, rl.BFS, rl.AStar, rl.ContractionHierarchy,
-        rl.TimeDependentDijkstra, rl.TimeDependent, rl.TimeExpanded, rl.RAPTOR, rl.CSA,
-        rl.TripBased, rl.PTL, rl.ULTRA, rl.LabelConstrained, rl.UCCH,
-    }
 
 
 def test_the_package_exports_the_whole_onramp():
-    for name in ("RAPTOR", "CSA", "TripBased", "TimetablePlanner", "Rounds", "Reach", "Scan", "Arrival",
+    for name in ("RAPTOR", "CSA", "TripBased", "Technique", "TimetablePlanner",
+                 "RAPTORPlanner", "DijkstraPlanner", "Rounds", "Reach", "Scan", "Arrival",
                  "Segments", "Segment", "Leap", "EdgeResult",
-                 "service_seconds", "clock_readers", "kernels"):
+                 "service_seconds", "kernels"):
         assert hasattr(rl, name), name
 
 
 @pytest.mark.parametrize(
-    "technique", [rl.Dijkstra(), rl.BFS(), rl.AStar(rl.Zero()), rl.ContractionHierarchy()], ids=repr
+    "technique, aim",
+    [
+        (rl.Dijkstra(), "targets"),
+        (rl.BFS(), "targets"),
+        (rl.AStar(rl.Zero()), "target"),
+        (rl.ContractionHierarchy(), "target"),
+    ],
+    ids=lambda value: value if isinstance(value, str) else repr(value),
 )
-def test_route_is_the_journey_a_search_holds(env, technique):
+def test_route_is_the_journey_a_search_holds(env, technique, aim):
     # The identity every technique with a cost table keeps: asking for the
-    # journey is asking for the search and reading it back.
+    # journey is asking for the search and reading it back. A goal-directed
+    # search takes the one target it aims at; the rest stop at a set of them.
     planner = technique.bind(env)
-    result = planner.search("a", targets=[planner.node_id("c")])
+    node = planner.node_id("c")
+    result = planner.search("a", **{aim: node if aim == "target" else [node]})
     assert planner.journey(result, "c") == planner.route("a", "c").routes[0]
     assert planner.journey(result, "d") is None

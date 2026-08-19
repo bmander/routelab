@@ -92,7 +92,7 @@ looked at, each from the stop it was boarded at to the last stop whose
 transfers were followed.
 
 ```python
->>> result = planner.search("A", targets=[planner.node_id("C")], departing=time(8, 0))
+>>> result = planner.search("A", target=planner.node_id("C"), departing=time(8, 0))
 >>> result
 TripBasedSearch(3 trips, 3 segments scanned)
 >>> planner.explored(result)
@@ -141,13 +141,13 @@ Journey('A' → 'B' → 'C', cost=1200)
 ## What it refuses
 
 The sweep prunes against the best arrival at the target, so there has to be
-one:
+one — `target=` is required rather than a way to stop early:
 
 ```python
 >>> planner.search("A", departing=time(8, 0))       # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
-ValueError: TripBased, sweeping trips toward a target, searches toward a single target, ...
+TypeError: ...search() missing 1 required keyword-only argument: 'target'
 
 ```
 
@@ -167,6 +167,7 @@ a rider is on.
   Pareto front.
 - [CSA](csa.md) — labels on stops, one array of connections, and the other
   `profile` here.
-- [ULTRA](ultra.md) — `ULTRA(TripBased())`, which removes the footpath radius.
+- [ULTRA](ultra.md) — the same removal of the footpath radius, for the two
+  techniques that label stops rather than trips.
 - [What preprocessing buys](../tradeoffs.md) — this technique's class, measured side by side.
 - [The shelf](../index.md) — every paper implemented here, and how to install it.

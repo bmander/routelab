@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::kernels::dijkstra::dijkstra;
+use crate::kernels::oracles::random_graph;
 use crate::model::search::SearchOptions;
 use crate::util::rng::Rng;
 
@@ -25,20 +26,6 @@ fn grid(side: u32, seed: u64) -> Graph {
         }
     }
     Graph::from_edges((side * side) as usize, &edges).unwrap()
-}
-
-fn random_graph(num_nodes: u32, density: f64, seed: u64) -> Graph {
-    let mut rng = Rng::new(seed);
-    let edges: Vec<_> = (0..(f64::from(num_nodes) * density) as usize)
-        .map(|_| {
-            (
-                rng.below(u64::from(num_nodes)) as u32,
-                rng.below(u64::from(num_nodes)) as u32,
-                1 + rng.below(50) as u32,
-            )
-        })
-        .collect();
-    Graph::from_edges(num_nodes as usize, &edges).unwrap()
 }
 
 /// Every distance Dijkstra finds, the hierarchy finds too.

@@ -5,14 +5,15 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 
 use routelab_core::kernels::timetable::{
-    earliest_arrival as core_earliest_arrival, TimeExpanded as CoreTimeExpanded,
+    TimeDependentTechnique, TimeExpanded as CoreTimeExpanded, TimeExpandedTechnique,
 };
 use routelab_core::model::timetable::{
     Footpaths as CoreFootpaths, Itinerary as CoreItinerary, Leg, Timetable as CoreTimetable,
     Transfer,
 };
-use routelab_core::NodeId;
+use routelab_core::{EarliestArrival, NodeId, Progress, Technique, TransitNetwork};
 
+use crate::built;
 use crate::graph::*;
 
 /// Departures along one edge, as `(trip, departs, arrives)`.
@@ -83,6 +84,19 @@ pub(crate) fn footpaths_or_none(footpaths: Option<&PyFootpaths>) -> Arc<CoreFoot
     )
 }
 
+/// The inputs every transit technique binds to, with the one transfer
+/// policy that exists today.
+pub(crate) fn transit_network<'a>(
+    timetable: &'a CoreTimetable,
+    footpaths: &'a CoreFootpaths,
+) -> TransitNetwork<'a> {
+    TransitNetwork {
+        timetable,
+        transfer: Transfer::instant(),
+        footpaths,
+    }
+}
+
 /// A day's connections, indexed for a search to read.
 ///
 /// Stops are a graph's nodes, and each connection is filed under the edge it
@@ -149,7 +163,14 @@ impl PyTimetable {
         let timetable = Arc::clone(&self.inner);
         let footpaths = footpaths_or_none(footpaths);
         py.detach(|| {
-            core_earliest_arrival(&timetable, &sources, to, Transfer::instant(), &footpaths)
+            // The time-dependent model precomputes nothing, so binding it is
+            // free — and says which model answers here rather than leaving a
+            // free function to imply it.
+            built(
+                TimeDependentTechnique
+                    .bind(transit_network(&timetable, &footpaths), &Progress::new()),
+            )
+            .earliest_arrival(&sources, to)
         })
         .map(PyItinerary::from)
     }
@@ -178,8 +199,12 @@ impl PyTimeExpanded {
     fn build(py: Python<'_>, timetable: &PyTimetable, footpaths: Option<&PyFootpaths>) -> Self {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
-        let expanded =
-            py.detach(|| CoreTimeExpanded::build(&timetable, Transfer::instant(), &footpaths));
+        let expanded = py.detach(|| {
+            built(
+                TimeExpandedTechnique
+                    .bind(transit_network(&timetable, &footpaths), &Progress::new()),
+            )
+        });
         PyTimeExpanded {
             inner: Arc::new(expanded),
         }

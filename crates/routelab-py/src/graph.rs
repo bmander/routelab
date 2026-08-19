@@ -179,7 +179,7 @@ impl PySearchResult {
     /// between algorithms is actually about.
     #[getter]
     fn settled(&self) -> usize {
-        self.inner.order.len()
+        self.inner.settled()
     }
 
     /// Nodes that were reached, in settle order. (An alias for `order` that reads

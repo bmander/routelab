@@ -16,17 +16,7 @@ import pytest
 import routelab as rl
 from routelab import GTFS
 
-from conftest import TINY_GTFS
-
-#: Every timetable technique, read off the shelf rather than listed. Every
-#: behavioural test runs against each, because "these two agree" is the
-#: paper's thesis and a test that only asked one would not notice the day
-#: they stopped — nor would a list somebody forgot to extend.
-MODELS = [
-    technique
-    for technique in rl.kernels.techniques()
-    if issubclass(technique, rl.TimetablePlanner)
-]
+from conftest import TIMETABLE_MODELS as MODELS, TINY_GTFS
 
 #: The ones that answer with an itinerary and nothing else, so a cost table
 #: and a search space are things they refuse: Pyrga's two; PTL, whose labels
@@ -135,7 +125,10 @@ def test_a_leg_traces_back_to_the_layer_that_supplied_it(
 
 @pytest.mark.parametrize("model", MODELS)
 def test_a_departure_time_is_required(model, env: rl.Environment):
-    with pytest.raises(ValueError, match="needs a departure time"):
+    # No default, for the reason Zero() has to be asked for out loud: a
+    # timetable query without a time is a different question, not this one
+    # with a fallback. Python's own sentence, from the signature.
+    with pytest.raises(TypeError, match="required keyword-only argument: 'departing'"):
         model().bind(env).route("A", "C").routes[0]
 
 
@@ -162,33 +155,30 @@ def test_several_origins_each_carry_a_head_start(model, feed):
 
 @pytest.mark.parametrize("model", ITINERARY_ONLY)
 def test_a_model_without_a_table_answers_with_a_journey_and_nothing_else(model, env: rl.Environment):
-    # No cost table and no search space: said in so many words, and naming
-    # the technique that has both.
+    # No cost table and no search space, and neither is a refusal a caller has
+    # to run into: there is no `search` on the planner at all, so a type
+    # checker says so before anything runs.
     planner = model().bind(env)
-    with pytest.raises(NotImplementedError, match="journey rather than a cost per node"):
-        planner.search("A", departing=time(8, 0))
-    # Who to ask is derived from the shelf, so the test holds the derivation
-    # to naming every kernel that keeps a table — not the sentence around it.
-    with pytest.raises(NotImplementedError, match=r"nothing to draw\..*CSA\(\), RAPTOR\(\) or TripBased\(\)"):
-        planner.explored(None)
+    assert not hasattr(planner, "search")
+    answer = planner.route("A", "C", departing=time(8, 0))
+    assert answer.raw is None
+    with pytest.raises(NotImplementedError, match="keeps no search space"):
+        answer.searchspace()
 
 
 @pytest.mark.parametrize("model", MODELS)
-def test_an_option_a_model_cannot_honour_names_the_one_that_can(model, env: rl.Environment):
+def test_an_option_a_model_cannot_honour_is_not_on_its_signature(model, env: rl.Environment):
+    # A knob a technique does not have is a keyword its `route` never
+    # declared, so Python refuses it by name — no registry, and nothing that
+    # can go stale as the shelf grows.
     planner = model().bind(env)
-    with pytest.raises(ValueError, match="takes no max_cost; a cost bound belongs to"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'max_cost'"):
         planner.route("A", "C", departing=time(8, 0), max_cost=10).routes[0]
     if model not in (rl.RAPTOR, rl.TripBased, rl.ULTRA):
-        with pytest.raises(
-            ValueError,
-            match=r"takes no max_transfers; a cap on changes belongs to RAPTOR\(\), TripBased\(\) or ULTRA\(\)",
-        ):
+        with pytest.raises(TypeError, match="unexpected keyword argument 'max_transfers'"):
             planner.route("A", "C", departing=time(8, 0), max_transfers=1).routes[0]
-    if model not in (rl.CSA, rl.TripBased, rl.PTL):
-        with pytest.raises(
-            ValueError, match=r"takes no until; .*profile\(\) on CSA\(\), PTL\(\) or TripBased\(\)"
-        ):
-            planner.route("A", "C", departing=time(8, 0), until=time(9, 0)).routes[0]
+    with pytest.raises(TypeError, match="unexpected keyword argument 'until'"):
+        planner.route("A", "C", departing=time(8, 0), until=time(9, 0)).routes[0]
 
 
 def test_the_expanded_model_pays_its_size_at_bind_time(env: rl.Environment):

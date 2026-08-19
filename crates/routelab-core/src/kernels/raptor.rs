@@ -41,11 +41,57 @@
 //! is also why it has a search space worth drawing: which round first reached
 //! each stop is the picture in the paper.
 
+use std::convert::Infallible;
+
 use crate::model::graph::{NodeId, UNREACHABLE};
 use crate::model::lines::Lines;
+use crate::model::technique::{
+    Distances, EarliestArrival, Explored, Footprint, Front, Reads, Searches, Technique,
+    TransitNetwork,
+};
 use crate::model::timetable::{
     Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk,
 };
+use crate::util::progress::Progress;
+
+/// What a RAPTOR query takes, beyond where you start.
+///
+/// A knob RAPTOR does not have is a field this struct does not declare — there
+/// is no `max_cost` here, and no way to pass one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RaptorQuery {
+    /// Prune toward this stop; `None` for the one-to-all search.
+    pub target: Option<NodeId>,
+    /// Stop after this many rounds — round `k` allows `k` trips.
+    pub max_rounds: Option<usize>,
+    /// What an elapsed cost is measured from; `None` for the earliest source.
+    pub departing: Option<Time>,
+}
+
+impl RaptorQuery {
+    /// A query aimed at `target`, with everything else at its default.
+    pub fn to(target: NodeId) -> Self {
+        RaptorQuery {
+            target: Some(target),
+            ..RaptorQuery::default()
+        }
+    }
+}
+
+/// RAPTOR as a configuration: nothing to set, so nothing to hold. Binding it
+/// to a [`TransitNetwork`] lays the timetable out as routes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RaptorTechnique;
+
+impl<'a> Technique<'a> for RaptorTechnique {
+    type Inputs = TransitNetwork<'a>;
+    type Planner = Raptor;
+    type Error = Infallible;
+
+    fn bind(&self, net: TransitNetwork<'a>, _progress: &Progress) -> Result<Raptor, Infallible> {
+        Ok(Raptor::build(net.timetable, net.transfer, net.footpaths))
+    }
+}
 
 /// A timetable in the paper's own layout: routes, the trips along each in
 /// departure order, and a time per (trip, position) — the [`Lines`] every
@@ -96,38 +142,32 @@ impl Raptor {
         self.lines.footprint() + self.footpaths.footprint()
     }
 
-    /// Earliest arrival at `to`, leaving `from` no earlier than `at`.
-    pub fn earliest_arrival(&self, from: NodeId, at: Time, to: NodeId) -> Option<Itinerary> {
-        let search = self.search(&[(from, at)], Some(to), None, None);
-        self.itinerary(&search, to)
-    }
-
     /// The Pareto front for `to`: one itinerary per number of changes that
     /// arrives strictly earlier than any journey with fewer, fewest first.
     pub fn pareto(&self, from: NodeId, at: Time, to: NodeId) -> Vec<Itinerary> {
-        let search = self.search(&[(from, at)], Some(to), None, None);
+        let search = self.search(&[(from, at)], &RaptorQuery::to(to));
         self.itineraries(&search, to)
     }
 
     /// Run the rounds from `sources` — each a stop and the time you are
-    /// standing there — pruning toward `target` if one is given, and stopping
-    /// after `max_rounds` rounds (round `k` allows `k` trips) or when a round
-    /// improves nothing.
+    /// standing there — pruning toward the query's target if it has one, and
+    /// stopping after its `max_rounds` (round `k` allows `k` trips) or when a
+    /// round improves nothing.
     ///
     /// Without a target this is the one-to-all search: every stop's earliest
     /// arrival by round. With one, stops that cannot beat the target's best
     /// arrival are not labelled, which is what keeps a query cheap.
     ///
-    /// `departing` is what an elapsed cost is measured from — the moment the
-    /// question was asked, which is not the same as the earliest source when
-    /// every source carries a head start. `None` means the earliest source.
-    pub fn search(
-        &self,
-        sources: &[(NodeId, Time)],
-        target: Option<NodeId>,
-        max_rounds: Option<usize>,
-        departing: Option<Time>,
-    ) -> RaptorSearch {
+    /// The query's `departing` is what an elapsed cost is measured from — the
+    /// moment the question was asked, which is not the same as the earliest
+    /// source when every source carries a head start. `None` means the
+    /// earliest source.
+    pub fn search(&self, sources: &[(NodeId, Time)], query: &RaptorQuery) -> RaptorSearch {
+        let RaptorQuery {
+            target,
+            max_rounds,
+            departing,
+        } = *query;
         let target = target.filter(|&t| (t as usize) < self.num_stops());
         let mut rounds = Rounds::new(self.num_stops());
         let mut earliest_source = UNREACHABLE;
@@ -433,6 +473,58 @@ enum Parent {
     Walk { from: NodeId },
 }
 
+impl Footprint for Raptor {
+    fn footprint(&self) -> usize {
+        Raptor::footprint(self)
+    }
+
+    fn searches(&self) -> (&'static str, usize) {
+        ("stops", self.num_stops())
+    }
+}
+
+impl Searches for Raptor {
+    type Source = (NodeId, Time);
+    type Query = RaptorQuery;
+    type Search = RaptorSearch;
+    type Error = Infallible;
+
+    fn search(
+        &self,
+        sources: &[(NodeId, Time)],
+        query: &RaptorQuery,
+    ) -> Result<RaptorSearch, Infallible> {
+        Ok(Raptor::search(self, sources, query))
+    }
+}
+
+impl Reads for Raptor {
+    fn itinerary(&self, search: &RaptorSearch, to: NodeId) -> Option<Itinerary> {
+        Raptor::itinerary(self, search, to)
+    }
+}
+
+impl Front for Raptor {
+    fn itineraries(&self, search: &RaptorSearch, to: NodeId) -> Vec<Itinerary> {
+        Raptor::itineraries(self, search, to)
+    }
+}
+
+impl Explored for Raptor {
+    type Step = (NodeId, usize, Time);
+
+    fn reached(&self, search: &RaptorSearch) -> Vec<Self::Step> {
+        search.reached()
+    }
+}
+
+impl EarliestArrival for Raptor {
+    fn earliest_arrival(&self, sources: &[(NodeId, Time)], to: NodeId) -> Option<Itinerary> {
+        let search = Raptor::search(self, sources, &RaptorQuery::to(to));
+        Raptor::itinerary(self, &search, to)
+    }
+}
+
 /// What a round-based search found: every stop's earliest arrival by round,
 /// and how each was reached. Plain data; the [`Raptor`] it came from reads a
 /// target's itinerary — or its whole Pareto front — back out of it.
@@ -516,5 +608,15 @@ impl RaptorSearch {
                 Some((stop, round, self.labels[round][s]))
             })
             .collect()
+    }
+}
+
+impl Distances for RaptorSearch {
+    fn cost(&self, stop: NodeId) -> Option<u32> {
+        RaptorSearch::cost(self, stop)
+    }
+
+    fn settled(&self) -> usize {
+        self.settled
     }
 }

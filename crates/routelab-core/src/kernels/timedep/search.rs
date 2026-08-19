@@ -1,5 +1,7 @@
 //! Time-dependent Dijkstra: label-setting with a clock.
 
+use std::convert::Infallible;
+
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -7,8 +9,107 @@ use crate::model::graph::{EdgeId, Graph, NodeId, Weight, UNREACHABLE};
 use crate::model::search::{
     check_sources, SearchError, SearchOptions, SearchResult, TargetTracker,
 };
+use crate::model::technique::{Footprint, Searches, Technique, Unpacks};
+use crate::util::progress::Progress;
 
 use super::{Calendar, Departure, WEEK};
+
+/// What the time-dependent search is built from: a graph and the calendar
+/// that says when each of its edges is open.
+#[derive(Debug, Clone, Copy)]
+pub struct TimeDependentInputs<'a> {
+    pub graph: &'a Graph,
+    pub calendar: &'a Calendar,
+}
+
+/// What a time-dependent query takes: when you leave, on the weekly clock
+/// and with a waiting policy, plus the bounds every Dijkstra takes.
+#[derive(Debug, Clone)]
+pub struct TimeDependentQuery {
+    pub departure: Departure,
+    pub options: SearchOptions,
+}
+
+impl TimeDependentQuery {
+    /// Leaving at `departure`, unbounded and one-to-all.
+    pub fn at(departure: Departure) -> Self {
+        TimeDependentQuery {
+            departure,
+            options: SearchOptions::default(),
+        }
+    }
+}
+
+/// Time-dependent Dijkstra as a configuration: nothing to set. The calendar
+/// is an input, not a setting — it comes with the graph.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TimeDependentDijkstraTechnique;
+
+impl<'a> Technique<'a> for TimeDependentDijkstraTechnique {
+    type Inputs = TimeDependentInputs<'a>;
+    type Planner = TimeDependentDijkstra<'a>;
+    type Error = Infallible;
+
+    fn bind(
+        &self,
+        inputs: TimeDependentInputs<'a>,
+        _progress: &Progress,
+    ) -> Result<TimeDependentDijkstra<'a>, Infallible> {
+        Ok(TimeDependentDijkstra {
+            graph: inputs.graph,
+            calendar: inputs.calendar,
+        })
+    }
+}
+
+/// Time-dependent Dijkstra bound to a graph and its calendar. Borrows both;
+/// nothing is precomputed.
+#[derive(Debug, Clone, Copy)]
+pub struct TimeDependentDijkstra<'a> {
+    pub graph: &'a Graph,
+    pub calendar: &'a Calendar,
+}
+
+impl Footprint for TimeDependentDijkstra<'_> {
+    /// Nothing: this search precomputes nothing, and the calendar it reads is
+    /// an input it borrows rather than bytes it built. Its two siblings that
+    /// also borrow — [`Dijkstra`](crate::Dijkstra) and
+    /// [`TimeDependent`](crate::TimeDependent) — say the same.
+    fn footprint(&self) -> usize {
+        0
+    }
+
+    fn searches(&self) -> (&'static str, usize) {
+        ("nodes", self.graph.num_nodes())
+    }
+}
+
+impl Searches for TimeDependentDijkstra<'_> {
+    type Source = (NodeId, Weight);
+    type Query = TimeDependentQuery;
+    type Search = SearchResult;
+    type Error = SearchError;
+
+    fn search(
+        &self,
+        sources: &[(NodeId, Weight)],
+        query: &TimeDependentQuery,
+    ) -> Result<SearchResult, SearchError> {
+        time_dependent_dijkstra(
+            self.graph,
+            self.calendar,
+            sources,
+            &query.departure,
+            &query.options,
+        )
+    }
+}
+
+impl Unpacks for TimeDependentDijkstra<'_> {
+    fn edge_path(&self, search: &SearchResult, to: NodeId) -> Option<Vec<EdgeId>> {
+        search.edge_path(to)
+    }
+}
 
 /// Follow `edges` from `start`, leaving at `departure`; return where you end up
 /// and how long it took, or `None` if that is not a legal timed walk.

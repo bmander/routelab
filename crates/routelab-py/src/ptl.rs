@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use pyo3::prelude::*;
 
-use routelab_core::kernels::ptl::PublicTransitLabeling as CoreLabeling;
-use routelab_core::model::timetable::Transfer;
-use routelab_core::NodeId;
+use routelab_core::kernels::ptl::{PtlTechnique, PublicTransitLabeling as CoreLabeling};
+use routelab_core::{NodeId, Technique};
 
+use crate::built;
 use crate::progress::*;
 use crate::timetable::*;
 
@@ -34,9 +34,8 @@ impl PyPublicTransitLabeling {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
         let counter = counter(progress);
-        let labeling = py.detach(|| {
-            CoreLabeling::build_reporting(&timetable, Transfer::instant(), &footpaths, &counter)
-        });
+        let labeling = py
+            .detach(|| built(PtlTechnique.bind(transit_network(&timetable, &footpaths), &counter)));
         PyPublicTransitLabeling {
             inner: Arc::new(labeling),
         }

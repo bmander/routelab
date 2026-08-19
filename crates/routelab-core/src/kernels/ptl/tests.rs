@@ -6,11 +6,11 @@
 use super::events::EventGraph;
 use super::labels::{meet, Labels};
 use super::PublicTransitLabeling;
-use crate::kernels::csa::ConnectionScan;
+use crate::kernels::csa::{ConnectionScan, ScanQuery};
 use crate::kernels::oracles::{
     best_by_brute_force, c, profile_by_brute_force, random_footpaths, random_timetable, town,
 };
-use crate::kernels::raptor::Raptor;
+use crate::kernels::raptor::{Raptor, RaptorQuery};
 use crate::kernels::timetable::{earliest_arrival, TimeExpanded};
 use crate::model::timetable::{Footpaths, Timetable, Transfer};
 use crate::util::progress::Progress;
@@ -212,12 +212,12 @@ fn ptl_agrees_with_the_other_four_and_the_oracle() {
                         );
                         assert_eq!(
                             rounds
-                                .itinerary(&rounds.search(&sources, Some(to), None, None), to)
+                                .itinerary(&rounds.search(&sources, &RaptorQuery::to(to)), to)
                                 .map(|i| i.arrives),
                             want
                         );
                         assert_eq!(
-                            scan.itinerary(&scan.search(&sources, Some(to), None), to)
+                            scan.itinerary(&scan.search(&sources, &ScanQuery::to(to)), to)
                                 .map(|i| i.arrives),
                             want
                         );

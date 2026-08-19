@@ -18,7 +18,7 @@ import routelab as rl
 
 
 @pytest.fixture
-def planner(env) -> rl.CSA:
+def planner(env) -> rl.CSAPlanner:
     return rl.CSA().bind(env)
 
 
@@ -42,7 +42,7 @@ def test_a_search_is_one_to_all(planner):
     assert planner.journey(result, "C") == planner.route("A", "C", departing=time(8, 0)).routes[0]
     assert planner.journey(result, "B").arrives == 8 * 3600 + 10 * 60
     # Toward a target the scan stops early: nothing after 08:10 is read.
-    toward = planner.search("A", targets=[planner.node_id("B")], departing=time(8, 0))
+    toward = planner.search("A", target=planner.node_id("B"), departing=time(8, 0))
     assert toward.scanned < result.scanned
 
 
@@ -64,7 +64,7 @@ def test_the_scan_is_a_search_space(planner):
     assert drawn["peak"] == 1200, "the collection carries what `after` is a share of"
     assert len(space.geojson(min_after=600)["features"]) == 2
     assert repr(space) == "Scan(3 stops within 20 min)"
-    with pytest.raises(ValueError, match="a scan has no magnitude"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'magnitude'"):
         planner.explored(result, magnitude="weight")
 
 
@@ -120,11 +120,14 @@ def test_a_walk_beats_the_steps_it_dominates(feed):
 
 
 def test_the_profile_refuses_a_missing_or_backwards_window(planner):
-    with pytest.raises(ValueError, match="needs a departure window"):
+    # A window is two moments: the end is on the signature, so a question that
+    # was not finished is refused before anything is scanned.
+    with pytest.raises(TypeError, match="required keyword-only argument: 'until'"):
         planner.profile("A", "C", departing=time(8, 0))
     with pytest.raises(ValueError, match="cannot close before it opens"):
         planner.profile("A", "C", departing=time(9, 0), until=time(8, 0))
-    with pytest.raises(ValueError, match="takes no until"):
+    # And a window is profile()'s question, not route()'s.
+    with pytest.raises(TypeError, match="unexpected keyword argument 'until'"):
         planner.route("A", "C", departing=time(8, 0), until=time(9, 0)).routes[0]
 
 
@@ -137,7 +140,9 @@ def test_footprint_counts_the_array_on_top_of_the_timetable(env, planner):
 def test_it_needs_a_timetable_and_a_departure(planner):
     plain = rl.Environment(rl.ScalarEdges(("a", "b", 1)))
     assert rl.CSA().missing_from(plain.compile()) == frozenset({"timetable"})
-    with pytest.raises(ValueError, match="needs a departure time"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'departing'"):
         planner.route("A", "C").routes[0]
-    with pytest.raises(ValueError, match="takes no max_transfers; a cap on changes belongs to RAPTOR"):
+    # A scan counts nothing but time, so a cap on changes was never on its
+    # signature to give.
+    with pytest.raises(TypeError, match="unexpected keyword argument 'max_transfers'"):
         planner.route("A", "C", departing=time(8, 0), max_transfers=1).routes[0]

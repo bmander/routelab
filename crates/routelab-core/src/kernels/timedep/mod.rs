@@ -25,7 +25,10 @@ mod search;
 mod tests;
 
 pub use calendar::{Calendar, Window};
-pub use search::{time_dependent_dijkstra, walk};
+pub use search::{
+    time_dependent_dijkstra, walk, TimeDependentDijkstra, TimeDependentDijkstraTechnique,
+    TimeDependentInputs, TimeDependentQuery,
+};
 
 /// A moment, in seconds since Monday 00:00.
 pub type Clock = u32;

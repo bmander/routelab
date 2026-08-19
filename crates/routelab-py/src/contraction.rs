@@ -5,10 +5,10 @@ use std::sync::{Arc, OnceLock};
 use pyo3::prelude::*;
 
 use routelab_core::kernels::contraction::{
-    ContractionHierarchy as CoreHierarchy, MeetingSearch as CoreMeetingSearch,
-    Ordering as CoreOrdering, Policy,
+    ContractionHierarchy as CoreHierarchy, ContractionTechnique,
+    MeetingSearch as CoreMeetingSearch, Ordering as CoreOrdering, Policy,
 };
-use routelab_core::{EdgeId, Graph as CoreGraph, NodeId, Weight};
+use routelab_core::{EdgeId, Graph as CoreGraph, NodeId, Technique, Weight};
 
 use crate::graph::*;
 use crate::progress::*;
@@ -255,7 +255,7 @@ impl PyContractionHierarchy {
         };
         let graph = Arc::clone(&graph.inner);
         let counter = counter(progress);
-        let built = py.detach(|| CoreHierarchy::build_reporting(&graph, ordering, &counter));
+        let built = py.detach(|| ContractionTechnique { ordering }.bind(&graph, &counter));
         Ok(PyContractionHierarchy {
             inner: Arc::new(built.map_err(value_err)?),
             graph,

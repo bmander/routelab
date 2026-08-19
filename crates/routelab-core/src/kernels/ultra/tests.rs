@@ -12,9 +12,10 @@ use super::Ultra;
 use crate::kernels::csa::ConnectionScan;
 use crate::kernels::dijkstra::dijkstra;
 use crate::kernels::oracles::random_timetable;
-use crate::kernels::raptor::Raptor;
+use crate::kernels::raptor::{Raptor, RaptorQuery};
 use crate::model::graph::{Graph, NodeId, UNREACHABLE};
 use crate::model::search::SearchOptions;
+use crate::model::technique::EarliestArrival;
 use crate::model::timetable::{Footpaths, Time, Timetable, Transfer};
 use crate::util::rng::Rng;
 
@@ -162,7 +163,9 @@ fn by_closure(
     to: NodeId,
 ) -> Option<Time> {
     let rounds = Raptor::build(timetable, Transfer::instant(), paths);
-    rounds.earliest_arrival(from, at, to).map(|i| i.arrives)
+    rounds
+        .earliest_arrival(&[(from, at)], to)
+        .map(|i| i.arrives)
 }
 
 /// Earliest arrival walking only ULTRA's shortcuts, with the initial and
@@ -198,7 +201,14 @@ fn by_ultra(
     };
     if !sources.is_empty() {
         let rounds = Raptor::build(timetable, Transfer::instant(), shortcuts);
-        let search = rounds.search(&sources, None, None, Some(at));
+        let search = rounds.search(
+            &sources,
+            &RaptorQuery {
+                target: None,
+                max_rounds: None,
+                departing: Some(at),
+            },
+        );
         // The final transfer: get off anywhere and walk the rest.
         for &v in stops {
             let (Some(arrived), reach) = (search.cost(v), home[v as usize]) else {
@@ -274,8 +284,10 @@ fn a_connection_scan_reads_the_same_shortcuts() {
         for &from in &stops {
             for &to in &stops {
                 for at in [0, 1500] {
-                    let by_scan = scan.earliest_arrival(from, at, to).map(|i| i.arrives);
-                    let by_rounds = rounds.earliest_arrival(from, at, to).map(|i| i.arrives);
+                    let by_scan = scan.earliest_arrival(&[(from, at)], to).map(|i| i.arrives);
+                    let by_rounds = rounds
+                        .earliest_arrival(&[(from, at)], to)
+                        .map(|i| i.arrives);
                     assert_eq!(by_scan, by_rounds, "seed {seed}: {from} -> {to} at {at}");
                 }
             }
@@ -314,7 +326,7 @@ fn a_walk_between_two_vehicles_is_kept() {
     let shortcuts = Footpaths::new(4, ultra.shortcuts().to_vec());
     let rounds = Raptor::build(&table, Transfer::instant(), &shortcuts);
     assert_eq!(
-        rounds.earliest_arrival(0, 0, 3).map(|i| i.arrives),
+        rounds.earliest_arrival(&[(0, 0)], 3).map(|i| i.arrives),
         Some(500)
     );
 }

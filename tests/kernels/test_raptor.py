@@ -18,7 +18,7 @@ import routelab as rl
 
 
 @pytest.fixture
-def planner(env) -> rl.RAPTOR:
+def planner(env) -> rl.RAPTORPlanner:
     return rl.RAPTOR().bind(env)
 
 
@@ -40,7 +40,7 @@ def test_the_routes_are_one_journey_per_number_of_changes(planner):
         (0, 8 * 3600 + 30 * 60),
     ]
     # The kernel's own order is the other way about, and `journeys` reads it.
-    result = planner.search("A", targets=[planner.node_id("C")], departing=time(8, 0))
+    result = planner.search("A", target=planner.node_id("C"), departing=time(8, 0))
     assert planner.journeys(result, "C") == list(reversed(front))
     assert planner.route("A", "C", departing=time(12, 0)).routes == []
 
@@ -88,7 +88,7 @@ def test_the_rounds_are_a_search_space(planner):
     assert {f["properties"]["round"] for f in features} == {0, 1}
     assert drawn["peak"] == 1, "the collection carries what a round is a share of"
     assert repr(space) == "Rounds(3 stops, out to round 1)"
-    with pytest.raises(ValueError, match="rounds has no magnitude"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'magnitude'"):
         planner.explored(result, magnitude="weight")
 
 
@@ -110,5 +110,5 @@ def test_footprint_counts_the_index_on_top_of_the_timetable(env, planner):
 def test_it_needs_a_timetable_and_a_departure(planner):
     plain = rl.Environment(rl.ScalarEdges(("a", "b", 1)))
     assert rl.RAPTOR().missing_from(plain.compile()) == frozenset({"timetable"})
-    with pytest.raises(ValueError, match="needs a departure time"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'departing'"):
         planner.route("A", "C").routes[0]

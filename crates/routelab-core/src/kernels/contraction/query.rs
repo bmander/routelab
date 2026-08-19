@@ -16,7 +16,7 @@ use std::collections::{BinaryHeap, HashMap};
 use super::ContractionHierarchy;
 use crate::model::graph::{EdgeId, Graph, NodeId, Weight, UNREACHABLE};
 use crate::model::search::SearchError;
-
+use crate::model::technique::Distances;
 /// How a node was reached by whichever half reached it.
 #[derive(Debug, Clone, Copy)]
 struct Reached {
@@ -111,6 +111,16 @@ impl MeetingSearch {
     /// turned out to be worth leaving from.
     pub fn origin(&self) -> Option<NodeId> {
         self.forward.root(self.meeting?)
+    }
+}
+
+impl Distances for MeetingSearch {
+    fn cost(&self, node: NodeId) -> Option<u32> {
+        MeetingSearch::cost(self, node)
+    }
+
+    fn settled(&self) -> usize {
+        MeetingSearch::settled(self)
     }
 }
 

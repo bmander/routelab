@@ -44,13 +44,17 @@
 //! answer may still be a little later in the search than that first hit, and
 //! one bounded re-run up to *t + walk* finds it.
 
+use std::convert::Infallible;
+
 use std::collections::{HashMap, HashSet};
 
 use crate::kernels::dijkstra::dijkstra;
 use crate::model::graph::{Graph, NodeId, Weight};
 use crate::model::search::{SearchOptions, SearchResult};
+use crate::model::technique::{EarliestArrival, Footprint, Technique, TransitNetwork};
 
 use crate::model::timetable::{Footpaths, Itinerary, Leg, Ride, Time, Timetable, Transfer, Walk};
+use crate::util::progress::Progress;
 
 /// What an event node stands for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -91,6 +95,29 @@ fn first_departure(
     let list = &departures[stop as usize];
     let entry = list.partition_point(|&node| events[node as usize].time() < at);
     list.get(entry).copied()
+}
+
+/// The time-expanded model as a configuration: nothing to set. Binding it
+/// spends the nodes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TimeExpandedTechnique;
+
+impl<'a> Technique<'a> for TimeExpandedTechnique {
+    type Inputs = TransitNetwork<'a>;
+    type Planner = TimeExpanded;
+    type Error = Infallible;
+
+    fn bind(
+        &self,
+        net: TransitNetwork<'a>,
+        _progress: &Progress,
+    ) -> Result<TimeExpanded, Infallible> {
+        Ok(TimeExpanded::build(
+            net.timetable,
+            net.transfer,
+            net.footpaths,
+        ))
+    }
 }
 
 /// A timetable as a static graph of events.
@@ -461,6 +488,22 @@ impl TimeExpanded {
             walk_in,
             arrives,
         })
+    }
+}
+
+impl Footprint for TimeExpanded {
+    fn footprint(&self) -> usize {
+        TimeExpanded::footprint(self)
+    }
+
+    fn searches(&self) -> (&'static str, usize) {
+        ("events", self.num_events())
+    }
+}
+
+impl EarliestArrival for TimeExpanded {
+    fn earliest_arrival(&self, sources: &[(NodeId, Time)], to: NodeId) -> Option<Itinerary> {
+        TimeExpanded::earliest_arrival(self, sources, to)
     }
 }
 

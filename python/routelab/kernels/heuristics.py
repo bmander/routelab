@@ -177,7 +177,7 @@ class Heuristic:
 
         Empty means it can be bound. Answered without building anything, so
         a study can ask "which of these can I even run here?" before spending
-        preprocessing to find out — the mirror of :attr:`routelab.Planner.accepts`,
+        preprocessing to find out — the mirror of :attr:`routelab.kernels.Technique.accepts`,
         which does the same for cost models. Nothing, for a heuristic that
         measures the graph itself.
         """

@@ -23,6 +23,28 @@ REMEMBERED = 8
 _UNSET = object()
 
 
+def clock_reader(compiled) -> "str | None":
+    """Which technique on this board would read the environment's clock.
+
+    A schedule quietly ignored is the failure nobody can see, so the page says
+    which node to reach for — and the answer depends on what the layers hold: a
+    feed's departures want a technique on the service day, a street schedule one
+    on the weekly clock, and an environment with neither has no clock for
+    anyone to read. Read off the catalogue's own `clock` entries, so a node
+    joins the sentence by existing.
+    """
+    if not rl.Departures.missing_from(compiled):
+        wanted = "day"
+    elif not rl.Schedule.missing_from(compiled):
+        wanted = "week"
+    else:
+        return None
+    named = [f"{kind}()" for kind, spec in NODES.items() if spec.get("clock") == wanted]
+    if len(named) == 1:
+        return named[0]
+    return f"{', '.join(named[:-1])} or {named[-1]}"
+
+
 def rides_transit(planner: rl.Planner) -> bool:
     """Does this technique route a timetable rather than a network?
 
@@ -282,7 +304,7 @@ class Router:
         reaches past the built value to the node and configures it again.
         """
 
-        def resolve(port: str) -> rl.Planner:
+        def resolve(port: str) -> rl.kernels.Technique:
             wires = board.sources(node_id, port)
             if not wires:
                 raise Unwired(
@@ -300,7 +322,7 @@ class Router:
 
         return resolve
 
-    def _technique(self, kind: str, params: dict, one, unbound) -> rl.Planner:
+    def _technique(self, kind: str, params: dict, one, unbound) -> rl.kernels.Technique:
         """The unbound technique a node stands for.
 
         Only the ones that take something get a line: a wire, or a field. The
@@ -316,7 +338,7 @@ class Router:
         if kind == "ULTRA":
             return rl.ULTRA(unbound("technique"))
         try:
-            return TECHNIQUES[kind]()
+            return TECHNIQUES[kind][0]()
         except KeyError:
             raise ValueError(f"no such node type: {kind}") from None
 
@@ -585,7 +607,7 @@ class Router:
             "scheduled_legs": 0
             if calendar is None
             else sum(1 for leg in journey.legs if calendar.is_restricted(leg.edge)),
-            "clock_reader": rl.clock_readers(compiled),
+            "clock_reader": clock_reader(compiled),
         }
 
     def calendar(self, board: Board, planner_id: str) -> "_routelab.Calendar | None":

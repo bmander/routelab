@@ -14,14 +14,8 @@ from datetime import time
 import pytest
 
 import routelab as rl
-#: Every timetable technique, read off the shelf rather than listed: a
-#: technique that nobody added here would silently not be tested, which is
-#: the one thing a list like this must not allow.
-MODELS = [
-    technique
-    for technique in rl.kernels.techniques()
-    if issubclass(technique, rl.TimetablePlanner)
-]
+
+from conftest import TIMETABLE_MODELS as MODELS
 
 
 # --- The layer -----------------------------------------------------------------

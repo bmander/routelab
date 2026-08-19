@@ -79,8 +79,8 @@ distance, so `Vs` and `Vt` are a few hundred vertices however far apart the two
 ends are — which is the difference between reading a few thousand bucket
 entries and searching a city.
 
-That is why this is a **wrapper**, not a technique: `ULTRA(RAPTOR())`,
-`ULTRA(CSA())`, `ULTRA(TripBased())`.
+That is why this is a **wrapper**, not a technique: `ULTRA(RAPTOR())` or
+`ULTRA(CSA())`, which are the two the paper names.
 
 ## Hello world
 
@@ -140,9 +140,9 @@ avoid.
 ## What it refuses
 
 A wrapped technique must keep a label per stop, because ULTRA's query has to
-read every stop's arrival to know where a rider could get off. The two that
-answer with a journey and nothing else are refused by name — from the shelf,
-not from a hand-maintained list:
+read every stop's arrival to know where a rider could get off. `RAPTOR` and
+`CSA` are those, and the argument's type says so; a caller who is not reading
+types runs into the same sentence at the call:
 
 ```python
 >>> rl.ULTRA(rl.TimeDependent())                  # doctest: +ELLIPSIS
@@ -151,6 +151,10 @@ Traceback (most recent call last):
 TypeError: ULTRA works the transfers out for a technique that keeps a label per stop, and TimeDependent() keeps none ...
 
 ```
+
+`TripBased` is not one of them either, for a different reason: its sweep is
+point-to-point by construction, and ULTRA's query is one-to-all over the stops
+that survived its bucket scans.
 
 ## On a real network
 

@@ -86,9 +86,9 @@ def test_the_advantage_grows_with_the_graph():
     def ratio(side: int) -> float:
         env = grid_environment(side)
         plain = rl.Dijkstra().bind(env)
-        target = [plain.node_id((side - 1, side - 1))]
-        settled = rl.ContractionHierarchy().bind(env).search((0, 0), targets=target)
-        return plain.search((0, 0), targets=target).settled / settled.settled
+        target = plain.node_id((side - 1, side - 1))
+        settled = rl.ContractionHierarchy().bind(env).search((0, 0), target=target)
+        return plain.search((0, 0), targets=[target]).settled / settled.settled
 
     assert ratio(9) < ratio(20) < ratio(40)
 
@@ -110,9 +110,10 @@ def test_a_hierarchy_needs_nothing_from_the_environment():
 
 
 def test_what_it_costs_is_reportable_before_and_after_binding(town):
+    # A technique holds no data, so it has nothing to report and no attribute
+    # to report it with — the cost of preprocessing belongs to the planner.
     technique = rl.ContractionHierarchy()
-    with pytest.raises(ValueError, match="is a technique, not a planner"):
-        technique.footprint
+    assert not hasattr(technique, "footprint")
     assert technique.bind(town).footprint > 0
 
 
@@ -120,7 +121,7 @@ def test_its_result_is_one_a_journey_can_be_built_from(town):
     # Not the same class as Dijkstra's — two searches met in the middle — but
     # the same contract, which is what lets everything downstream not care.
     planner = rl.ContractionHierarchy().bind(town)
-    result = planner.search((0, 0), targets=[planner.node_id((8, 8))])
+    result = planner.search((0, 0), target=planner.node_id((8, 8)))
     assert isinstance(result, rl.Result)
     assert isinstance(rl.Dijkstra().bind(town).search((0, 0)), rl.Result)
 
@@ -144,24 +145,24 @@ def test_the_same_query_twice_gives_the_same_path(town):
 def test_it_refuses_options_that_mean_nothing_to_it(town):
     # `magnitude` describes how to weight a tree's branches. There is no tree.
     planner = rl.ContractionHierarchy().bind(town)
-    result = planner.search((0, 0), targets=[planner.node_id((8, 8))])
-    with pytest.raises(ValueError, match="meeting trees has no magnitude"):
+    result = planner.search((0, 0), target=planner.node_id((8, 8)))
+    with pytest.raises(TypeError, match="unexpected keyword argument 'magnitude'"):
         planner.explored(result, magnitude="nodes")
 
 
 def test_it_searches_toward_exactly_one_target(town):
+    # A hierarchy climbs *toward* somewhere, so the target is a required
+    # argument and there is no spelling of this call that hands it two.
     planner = rl.ContractionHierarchy().bind(town)
-    with pytest.raises(ValueError, match="single target, and got no target"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'target'"):
         planner.search((0, 0))
-    with pytest.raises(ValueError, match="got 2 targets"):
-        planner.search((0, 0), targets=[1, 2])
 
 
 def test_it_refuses_bounds_it_cannot_honour(town):
     # max_cost over a contracted graph would cut paths that are still cheap in
-    # the original, so it is refused rather than quietly answered wrong.
+    # the original, so this query never had one to give.
     planner = rl.ContractionHierarchy().bind(town)
-    with pytest.raises(ValueError, match="takes no max_cost; a cost bound belongs to"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'max_cost'"):
         planner.route((0, 0), (8, 8), max_cost=100).routes[0]
 
 
@@ -179,7 +180,7 @@ def test_several_origins_with_access_costs(town):
 
 def test_the_search_space_is_two_trees_that_met(town):
     planner = rl.ContractionHierarchy().bind(town)
-    result = planner.search((0, 0), targets=[planner.node_id((8, 8))])
+    result = planner.search((0, 0), target=planner.node_id((8, 8)))
     space = planner.explored(result)
 
     assert space.kind == "meeting-trees"
@@ -194,7 +195,7 @@ def test_the_search_space_draws_unpacked_road():
     # `ScalarEdges` has positions but no geometry, so it renders to nothing.
     env = rl.Environment(rl.OSM(JUNCTION, rl.Walking()))
     planner = rl.ContractionHierarchy().bind(env)
-    result = planner.search(1, targets=[planner.node_id(5)])
+    result = planner.search(1, target=planner.node_id(5))
     collection = planner.explored(result).geojson()
 
     assert collection["features"], "OSM ways carry geometry"
@@ -209,7 +210,7 @@ def test_the_search_space_draws_unpacked_road():
 
 def test_shortcuts_show_up_as_branches_that_span_many_edges(town):
     planner = rl.ContractionHierarchy().bind(town)
-    result = planner.search((0, 0), targets=[planner.node_id((8, 8))])
+    result = planner.search((0, 0), target=planner.node_id((8, 8)))
     space = planner.explored(result)
     assert space.peak > 1, "a hierarchy that never leaps is not a hierarchy"
     assert list(space.branches(min_span=space.peak)), "the longest branch is reportable"

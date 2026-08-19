@@ -60,11 +60,60 @@
 //! across several trips is the one shape a departure-ordered scan cannot
 //! promise to see in riding order.
 
-use crate::model::graph::{NodeId, UNREACHABLE};
+use std::convert::Infallible;
 
+use crate::model::graph::{NodeId, UNREACHABLE};
+use crate::model::technique::{
+    Distances, EarliestArrival, Explored, Footprint, Profiled, Reads, Searches, Technique,
+    TransitNetwork,
+};
 use crate::model::timetable::{
     Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, TripId, Walk,
 };
+use crate::util::progress::Progress;
+
+/// What a connection scan takes, beyond where you start. No cap on changes:
+/// a scan does not count them, so there is no field to count them with.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScanQuery {
+    /// Stop early once this stop's arrival is settled; `None` labels every stop.
+    pub target: Option<NodeId>,
+    /// What an elapsed cost is measured from; `None` for the earliest source.
+    pub departing: Option<Time>,
+}
+
+impl ScanQuery {
+    /// A query aimed at `target`, with everything else at its default.
+    pub fn to(target: NodeId) -> Self {
+        ScanQuery {
+            target: Some(target),
+            ..ScanQuery::default()
+        }
+    }
+}
+
+/// Connection scan as a configuration: nothing to set. Binding it sorts the
+/// timetable's connections by departure.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ConnectionScanTechnique;
+
+impl<'a> Technique<'a> for ConnectionScanTechnique {
+    type Inputs = TransitNetwork<'a>;
+    type Planner = ConnectionScan;
+    type Error = Infallible;
+
+    fn bind(
+        &self,
+        net: TransitNetwork<'a>,
+        _progress: &Progress,
+    ) -> Result<ConnectionScan, Infallible> {
+        Ok(ConnectionScan::build(
+            net.timetable,
+            net.transfer,
+            net.footpaths,
+        ))
+    }
+}
 
 /// "No connection", in the arrays that index them.
 const NONE: u32 = u32::MAX;
@@ -197,24 +246,15 @@ impl ConnectionScan {
 
     // --- Earliest arrival (§3) ---------------------------------------------
 
-    /// Earliest arrival at `to`, leaving `from` no earlier than `at`.
-    pub fn earliest_arrival(&self, from: NodeId, at: Time, to: NodeId) -> Option<Itinerary> {
-        let search = self.search(&[(from, at)], Some(to), None);
-        self.itinerary(&search, to)
-    }
-
     /// Scan from `sources` — each a stop and the time you are standing there
-    /// — stopping early if `target` is given, else labelling every stop.
+    /// — stopping early if the query names a target, else labelling every stop.
     ///
-    /// `departing` is what an elapsed cost is measured from — the moment the
-    /// question was asked, which is not the same as the earliest source when
-    /// every source carries a head start. `None` means the earliest source.
-    pub fn search(
-        &self,
-        sources: &[(NodeId, Time)],
-        target: Option<NodeId>,
-        departing: Option<Time>,
-    ) -> ScanSearch {
+    /// The query's `departing` is what an elapsed cost is measured from — the
+    /// moment the question was asked, which is not the same as the earliest
+    /// source when every source carries a head start. `None` means the
+    /// earliest source.
+    pub fn search(&self, sources: &[(NodeId, Time)], query: &ScanQuery) -> ScanSearch {
+        let ScanQuery { target, departing } = *query;
         let target = target.filter(|&t| (t as usize) < self.stops);
         let mut earliest = vec![UNREACHABLE; self.stops];
         let mut arrived_by = vec![Parent::Origin; self.stops];
@@ -557,6 +597,67 @@ enum Parent {
     Walk { from: NodeId },
 }
 
+impl Footprint for ConnectionScan {
+    fn footprint(&self) -> usize {
+        ConnectionScan::footprint(self)
+    }
+
+    fn searches(&self) -> (&'static str, usize) {
+        ("stops", self.num_stops())
+    }
+}
+
+impl Searches for ConnectionScan {
+    type Source = (NodeId, Time);
+    type Query = ScanQuery;
+    type Search = ScanSearch;
+    type Error = Infallible;
+
+    fn search(
+        &self,
+        sources: &[(NodeId, Time)],
+        query: &ScanQuery,
+    ) -> Result<ScanSearch, Infallible> {
+        Ok(ConnectionScan::search(self, sources, query))
+    }
+}
+
+impl Reads for ConnectionScan {
+    fn itinerary(&self, search: &ScanSearch, to: NodeId) -> Option<Itinerary> {
+        ConnectionScan::itinerary(self, search, to)
+    }
+}
+
+impl Explored for ConnectionScan {
+    type Step = (NodeId, Time);
+
+    fn reached(&self, search: &ScanSearch) -> Vec<Self::Step> {
+        search.reached()
+    }
+}
+
+impl EarliestArrival for ConnectionScan {
+    fn earliest_arrival(&self, sources: &[(NodeId, Time)], to: NodeId) -> Option<Itinerary> {
+        let search = ConnectionScan::search(self, sources, &ScanQuery::to(to));
+        ConnectionScan::itinerary(self, &search, to)
+    }
+}
+
+impl Profiled for ConnectionScan {
+    /// The one-to-one profile: scanned toward `to`, pruned at `from`, read at
+    /// `from` for the window.
+    fn departures(
+        &self,
+        from: NodeId,
+        to: NodeId,
+        opens: Time,
+        closes: Time,
+    ) -> Vec<(Time, Itinerary)> {
+        let profile = self.profile(to, opens, Some(from));
+        self.journeys(&profile, from, opens, closes)
+    }
+}
+
 /// What an earliest-arrival scan found: every stop's label and how it was
 /// reached, and which connection each trip was entered with. Plain data; the
 /// [`ConnectionScan`] it came from reads any target's itinerary out of it.
@@ -590,6 +691,16 @@ impl ScanSearch {
             .filter(|&(_, &t)| t != UNREACHABLE)
             .map(|(stop, &t)| (stop as NodeId, t))
             .collect()
+    }
+}
+
+impl Distances for ScanSearch {
+    fn cost(&self, stop: NodeId) -> Option<u32> {
+        ScanSearch::cost(self, stop)
+    }
+
+    fn settled(&self) -> usize {
+        self.settled
     }
 }
 

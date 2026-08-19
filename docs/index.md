@@ -81,10 +81,12 @@ can name, put in a dictionary, and point at more than one dataset.
 (what the search looked at) and `raw` (the kernel's own table). All three come
 from the one search, so a route and the picture behind it never cost two.
 
-**A technique takes the options its problem needs**, declared as data, and
-refuses the rest by name, saying which technique they belong to. `Dijkstra`
-takes `max_cost`; `RAPTOR` takes `departing` and `max_transfers`; asking either
-for the other's is an error that tells you where to look.
+**A technique takes the options its problem needs**, on the signature of its
+own bound planner. `DijkstraPlanner.route` takes `max_cost`;
+`RAPTORPlanner.route` takes `departing` and `max_transfers`; asking either for
+the other's is a `TypeError` from Python, and an error a type checker reports
+before anything runs. There is no registry of option names, so nothing can go
+stale as the shelf grows.
 
 ## Reading the code blocks
 

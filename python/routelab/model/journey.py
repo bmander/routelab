@@ -77,7 +77,7 @@ class Journey:
     #: Nodes the search settled finding this, when the planner reports it.
     #:
     #: ``None`` from a static search, and not because the number is unknown —
-    #: :meth:`Planner.explored` answers it from the result, in a form something
+    #: A planner's ``explored`` answers it from the result, in a form something
     #: can draw. A timetable query has no result to hand back, so the one number
     #: worth comparing the two models on travels with the answer instead.
     settled: Optional[int] = None

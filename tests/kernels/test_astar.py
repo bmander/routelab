@@ -32,10 +32,12 @@ def test_hello_world(corridor):
 def test_guidance_skips_what_leads_away(corridor):
     guided = rl.AStar(rl.Euclidean()).bind(corridor)
     plain = rl.Dijkstra().bind(corridor)
-    target = [guided.node_id("d")]
+    target = guided.node_id("d")
 
-    guided_order = guided.search("a", targets=target).order
-    plain_order = plain.search("a", targets=target).order
+    # A* aims at somewhere and takes one target; Dijkstra stops once a set of
+    # them is settled. The signatures say which is which.
+    guided_order = guided.search("a", target=target).order
+    plain_order = plain.search("a", targets=[target]).order
     assert guided.label(guided_order[-1]) == "d"
     assert "spur" not in [guided.label(node) for node in guided_order]
     assert "spur" in [plain.label(node) for node in plain_order]
@@ -129,18 +131,19 @@ def test_an_explicit_rate_overrides_the_layers(corridor):
     weaker = rl.AStar(rl.Euclidean(cost_per_distance=0.0)).bind(corridor)
     assert weaker.route("a", "d").routes[0].cost == 30
     # Priced at zero it estimates nothing, so it degenerates to Dijkstra.
-    target = [weaker.node_id("d")]
-    assert weaker.search("a", targets=target).order == rl.Dijkstra().bind(corridor).search(
-        "a", targets=target
+    target = weaker.node_id("d")
+    assert weaker.search("a", target=target).order == rl.Dijkstra().bind(corridor).search(
+        "a", targets=[target]
     ).order
 
 
 def test_a_star_searches_toward_exactly_one_target(corridor):
+    # The estimate is an estimate *to somewhere*, so the target is a required
+    # argument rather than a way to stop early — and there is no spelling of
+    # this call that could hand it two.
     planner = rl.AStar(rl.Euclidean()).bind(corridor)
-    with pytest.raises(ValueError, match="single target, and got no target"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'target'"):
         planner.search("a")
-    with pytest.raises(ValueError, match="got 2 targets"):
-        planner.search("a", targets=[planner.node_id("c"), planner.node_id("d")])
 
 
 def test_max_cost_bounds_the_real_cost_not_the_estimate(corridor):
@@ -183,9 +186,13 @@ def test_journeys_are_walkable(corridor):
 
 def settled(env, planner, origin, destination):
     """(nodes A*/Dijkstra settled, cost found) for one corner-to-corner query."""
-    target = [planner.node_id(destination)]
-    result = planner.search(origin, targets=target)
-    return len(result.order), result.cost(target[0])
+    target = planner.node_id(destination)
+    result = (
+        planner.search(origin, target=target)
+        if isinstance(planner, rl.AStarPlanner)
+        else planner.search(origin, targets=[target])
+    )
+    return len(result.order), result.cost(target)
 
 
 def test_on_a_grid_it_settles_far_fewer_nodes():

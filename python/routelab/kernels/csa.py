@@ -3,18 +3,20 @@ routing* (2013) — CSA."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Hashable, List, Optional, Tuple
+from typing import Dict, Hashable, List, Optional, Tuple
 
 from .. import _routelab
+from ..model.answer import Answer
+from ..model.environment import CompiledEnvironment, Environment
 from ..model.journey import Journey
-from ..model.search import Result
-from ..model.searchspace import Scan, SearchSpace
-from .planner import Origins, Planner, TimetablePlanner
+from ..model.searchspace import Scan
+from ..util.clock import Departure
+from .planner import Origins, TimetablePlanner, TimetableTechnique
 
-__all__ = ["CSA"]
+__all__ = ["CSA", "CSAPlanner"]
 
 
-class CSA(TimetablePlanner):
+class CSA(TimetableTechnique):
     """Connection scan (Dibbelt, Pajor, Strasser & Wagner, 2013).
 
         CSA().bind(env).route(origin, target, departing=time(8, 30))
@@ -26,64 +28,97 @@ class CSA(TimetablePlanner):
     arrival stop, walks that stop's footpaths. With a target the scan stops
     once the array reaches the target's label; without one every stop holds
     its earliest arrival — which is why, like RAPTOR, this technique has a
-    real :meth:`search` and something to draw.
+    real ``search`` and something to draw.
 
-    The same array read backwards is a **profile**: :meth:`profile` hands
-    back every journey worth leaving on within a window, one per
-    Pareto-optimal (departure, arrival) pair. That is the question a rider with
-    a flexible morning asks, and the one rRAPTOR would answer for the
-    round-based technique; here it is the paper's §4.
+    The same array read backwards is a **profile**:
+    :meth:`~CSAPlanner.profile` hands back every journey worth leaving on
+    within a window, one per Pareto-optimal (departure, arrival) pair. That is
+    the question a rider with a flexible morning asks, and the one rRAPTOR
+    would answer for the round-based technique; here it is the paper's §4.
 
     Changing vehicles is instantaneous, as it is for the four techniques it
     is checked against; a minimum change time is a new kernel ``Transfer``
     constructor and would land in all five at once, so it is not a knob here.
     """
 
-    options = frozenset({"departing"})
-    #: ``until`` is real, but it is :meth:`profile`'s and not :meth:`route`'s —
-    #: declared so the refusal a route() with one earns can say so itself.
-    verbs = {"until": "profile"}
+    def bind(
+        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "CSAPlanner":
+        return CSAPlanner(self, environment, self._compile(environment), progress)
 
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        super().preprocess(progress)
+
+class CSAPlanner(TimetablePlanner):
+    """:class:`CSA` over one feed, its connections already sorted."""
+
+    def __init__(
+        self,
+        technique: CSA,
+        environment: Environment,
+        compiled: CompiledEnvironment,
+        progress: "Optional[_routelab.Progress]" = None,
+    ):
+        super().__init__(technique, environment, compiled, progress)
         self._csa = _routelab.ConnectionScan.build(self.timetable, self.footpaths)
 
-    def _footprint(self) -> int:
-        return super()._footprint() + self._csa.footprint
+    @property
+    def footprint(self) -> int:
+        return super().footprint + self._csa.footprint
 
     @property
     def num_trips(self) -> int:
         """Trips in the paper's sense: one per unbroken chain of connections."""
-        self._bound()
         return self._csa.num_trips
 
     @property
     def num_connections(self) -> int:
         """The length of the array a query scans."""
-        self._bound()
         return self._csa.num_connections
 
-    # CSA keeps a label per stop, so it has a cost table like any graph search
-    # and `Planner.route` — search, then read the journey off the result — is
-    # the whole implementation; the family's `journey` reads an itinerary off
-    # it. The itinerary hook the two Pyrga models need is not used here.
-    _route = Planner._route
+    def route(
+        self, origin: Origins, destination: Hashable, *, departing: Departure
+    ) -> Answer:
+        """The earliest arrival at ``destination``, and the table it came off."""
+        return self._answer(
+            self.search(origin, departing=departing, target=self.node_id(destination)),
+            destination,
+        )
 
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> "_routelab.ScanSearch":
+    def search(
+        self, origins: Origins, *, departing: Departure, target: Optional[int] = None
+    ) -> "_routelab.ScanSearch":
         """Scan — toward one target if given, else to every stop."""
-        sources, at = self._sources(starts, options)
-        target = None
-        if options.get("targets"):
-            target = self._single_target(options, "CSA, stopping at a target,")
-        return self._csa.search(sources, target, at)
+        sources, at = self._sources(self._origin_ids(origins), departing)
+        return self._search_stops(sources, at, None, target)
+
+    def _search_stops(
+        self,
+        sources: "List[Tuple[int, int]]",
+        departing: int,
+        max_transfers: Optional[int],
+        target: Optional[int] = None,
+    ) -> "_routelab.ScanSearch":
+        """The scan, from stops already on the service-day clock.
+
+        The seam :class:`~routelab.ULTRA` reaches through, which is the only
+        way a ``max_transfers`` can arrive here at all — a caller writing
+        ``CSA()`` never sees this argument, because a scan counts nothing but
+        time and would have to ignore it.
+        """
+        if max_transfers is not None:
+            raise TypeError(
+                "CSA tells journeys apart by when they arrive and counts no "
+                "changes, so it has no max_transfers to cap; the round-based "
+                "techniques do — ULTRA(RAPTOR())."
+            )
+        return self._csa.search(sources, target=target, departing=departing)
 
     def profile(
         self,
         origin: Origins,
         destination: Hashable,
         *,
-        departing: Any = None,
-        until: Any = None,
+        departing: Departure,
+        until: Departure,
     ) -> "List[Journey]":
         """Every journey worth leaving on between ``departing`` and ``until``:
         one per Pareto-optimal pair of departure and arrival, earliest
@@ -97,7 +132,6 @@ class CSA(TimetablePlanner):
         do and a profile of pairs cannot hold it.
         """
         opens, closes = self._window(departing, until)
-        self._bound()
         starts = self._origin_ids(origin)
         target = self.node_id(destination)
         # The paper's one-to-one pruning wants the one stop the question is
@@ -107,11 +141,12 @@ class CSA(TimetablePlanner):
         profile = self._csa.profile(target, opens, prune)
         found: "List[Tuple[int, _routelab.Itinerary]]" = []
         for stop, head_start in starts.items():
-            for departs, itinerary in profile.journeys(stop, opens + head_start, closes + head_start):
+            for departs, itinerary in profile.journeys(
+                stop, opens + head_start, closes + head_start
+            ):
                 found.append((departs - head_start, itinerary))
         return self._merge_departures(found, destination)
 
-    def explored(self, result: Result, **options: Any) -> SearchSpace:
+    def explored(self, result: "_routelab.ScanSearch") -> Scan:
         """Every stop the scan labelled, by when it was reached."""
-        self._no_other(options, "a scan")
-        return Scan(self._bound(), result)
+        return Scan(self.compiled, result)

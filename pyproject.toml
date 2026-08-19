@@ -42,3 +42,11 @@ testpaths = ["tests", "python/routelab"]
 # pointing --doctest-glob at them.
 pythonpath = ["tests"]
 addopts = "--doctest-modules"
+
+[tool.pyright]
+# The veneer's whole contract is its signatures: a query option a technique
+# does not take should be an error a caller sees before running anything,
+# which is only true if this is what CI checks. 3.9 because that is the floor
+# the package declares and the lower half of the CI matrix.
+include = ["python"]
+pythonVersion = "3.9"

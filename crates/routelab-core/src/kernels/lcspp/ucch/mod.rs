@@ -74,8 +74,92 @@ use crate::kernels::contraction::{CoreHierarchy, Ordering};
 use crate::kernels::dijkstra::dijkstra;
 use crate::model::graph::{Graph, GraphError, NodeId, Weight, UNREACHABLE};
 use crate::model::search::{SearchOptions, SearchResult};
+use crate::model::technique::{BindError, EarliestArrival, Footprint, Technique};
 use crate::model::timetable::{Itinerary, Leg, Time, Walk};
 use crate::util::progress::Progress;
+
+/// What a UCCH is built from: the uncontracted network every query reads,
+/// plus the pieces of it the contraction works on — one mode's subnetwork,
+/// the link arcs that are never contracted, and the vertices a schedule
+/// serves.
+#[derive(Clone, Copy)]
+pub struct UcchInputs<'a> {
+    pub network: Multimodal<'a>,
+    /// One mode's subnetwork over the whole numbering — the pavements.
+    pub walkable: &'a Graph,
+    /// The arcs that join networks; their endpoints are the core.
+    pub links: &'a [(NodeId, NodeId, Weight)],
+    /// Vertices a schedule serves, kept in the core.
+    pub served: &'a [NodeId],
+}
+
+/// UCCH as a configuration: the language, which mode gets contracted and
+/// which the links count as, and how the contraction is run.
+#[derive(Debug, Clone)]
+pub struct UcchTechnique {
+    pub modes: Modes,
+    pub walking: u8,
+    pub link_label: u8,
+    pub ordering: Ordering,
+    pub max_degree: f64,
+}
+
+impl<'a> Technique<'a> for UcchTechnique {
+    type Inputs = UcchInputs<'a>;
+    type Planner = UcchPlanner<'a>;
+    type Error = BindError;
+
+    fn bind(
+        &self,
+        inputs: UcchInputs<'a>,
+        progress: &Progress,
+    ) -> Result<UcchPlanner<'a>, BindError> {
+        let hierarchy = Ucch::build_reporting(
+            inputs.walkable,
+            self.walking,
+            inputs.links,
+            self.link_label,
+            inputs.served,
+            self.ordering,
+            self.max_degree,
+            progress,
+        )?;
+        Ok(UcchPlanner {
+            hierarchy,
+            network: inputs.network,
+            modes: self.modes.clone(),
+        })
+    }
+}
+
+/// A UCCH bound to the network it was contracted from and the language it
+/// searches under. The [`Ucch`] is the data; this is what answers.
+pub struct UcchPlanner<'a> {
+    pub hierarchy: Ucch,
+    pub network: Multimodal<'a>,
+    pub modes: Modes,
+}
+
+impl Footprint for UcchPlanner<'_> {
+    fn footprint(&self) -> usize {
+        self.hierarchy.footprint()
+    }
+
+    /// The core's product: every core vertex in every state.
+    fn searches(&self) -> (&'static str, usize) {
+        (
+            "states",
+            self.hierarchy.num_core() * self.modes.num_states(),
+        )
+    }
+}
+
+impl EarliestArrival for UcchPlanner<'_> {
+    fn earliest_arrival(&self, sources: &[(NodeId, Time)], to: NodeId) -> Option<Itinerary> {
+        self.hierarchy
+            .earliest_arrival(&self.network, &self.modes, sources, to)
+    }
+}
 
 /// A vertex the contraction retired, so the core has no number for it.
 const NOT_CORE: u32 = u32::MAX;

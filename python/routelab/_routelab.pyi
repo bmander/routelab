@@ -169,6 +169,7 @@ class Raptor:
     def search(
         self,
         sources: Sequence[Tuple[int, int]],
+        *,
         target: Optional[int] = None,
         max_rounds: Optional[int] = None,
         departing: Optional[int] = None,
@@ -204,6 +205,7 @@ class ConnectionScan:
     def search(
         self,
         sources: Sequence[Tuple[int, int]],
+        *,
         target: Optional[int] = None,
         departing: Optional[int] = None,
     ) -> ScanSearch: ...
@@ -256,6 +258,7 @@ class TripBased:
         self,
         sources: Sequence[Tuple[int, int]],
         target: int,
+        *,
         max_transfers: Optional[int] = None,
         departing: Optional[int] = None,
     ) -> TripBasedSearch: ...
@@ -337,6 +340,7 @@ class Ultra:
     def footprint(self) -> int: ...
     def shortcuts(self) -> List[Tuple[int, int, int]]: ...
     def footpaths(self) -> Footpaths: ...
+    def footpaths_renumbered(self, slot_of: Sequence[int], stops: int) -> Footpaths: ...
     def __len__(self) -> int: ...
 
 class Endpoints:

@@ -63,11 +63,39 @@ mod query;
 #[cfg(test)]
 mod tests;
 
-use crate::model::timetable::{Connection, Footpaths, Timetable, Transfer};
+use std::convert::Infallible;
+
+use crate::model::graph::NodeId;
+use crate::model::technique::{EarliestArrival, Footprint, Profiled, Technique, TransitNetwork};
+use crate::model::timetable::{Connection, Footpaths, Itinerary, Time, Timetable, Transfer};
 use crate::util::progress::Progress;
 
 use self::events::EventGraph;
 use self::labels::{Labels, StopLabels};
+
+/// Public transit labeling as a configuration: nothing to set. Binding it is
+/// the labeling, which is the expensive half and reports progress.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PtlTechnique;
+
+impl<'a> Technique<'a> for PtlTechnique {
+    type Inputs = TransitNetwork<'a>;
+    type Planner = PublicTransitLabeling;
+    type Error = Infallible;
+
+    fn bind(
+        &self,
+        net: TransitNetwork<'a>,
+        progress: &Progress,
+    ) -> Result<PublicTransitLabeling, Infallible> {
+        Ok(PublicTransitLabeling::build_reporting(
+            net.timetable,
+            net.transfer,
+            net.footpaths,
+            progress,
+        ))
+    }
+}
 
 /// A timetable as its event graph and the labels over it. Built once, at
 /// some expense, and read by every query.
@@ -160,5 +188,33 @@ impl PublicTransitLabeling {
             + self.connections.len() * std::mem::size_of::<Connection>()
             + self.footpaths.footprint()
             + self.incoming.footprint()
+    }
+}
+
+impl Footprint for PublicTransitLabeling {
+    fn footprint(&self) -> usize {
+        PublicTransitLabeling::footprint(self)
+    }
+
+    fn searches(&self) -> (&'static str, usize) {
+        ("hubs", self.num_hubs())
+    }
+}
+
+impl EarliestArrival for PublicTransitLabeling {
+    fn earliest_arrival(&self, sources: &[(NodeId, Time)], to: NodeId) -> Option<Itinerary> {
+        PublicTransitLabeling::earliest_arrival(self, sources, to)
+    }
+}
+
+impl Profiled for PublicTransitLabeling {
+    fn departures(
+        &self,
+        from: NodeId,
+        to: NodeId,
+        opens: Time,
+        closes: Time,
+    ) -> Vec<(Time, Itinerary)> {
+        self.profile(from, to, opens, closes)
     }
 }

@@ -39,5 +39,5 @@ mod expanded;
 #[cfg(test)]
 mod tests;
 
-pub use dependent::earliest_arrival;
-pub use expanded::TimeExpanded;
+pub use dependent::{earliest_arrival, TimeDependent, TimeDependentTechnique};
+pub use expanded::{TimeExpanded, TimeExpandedTechnique};

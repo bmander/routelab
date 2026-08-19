@@ -102,7 +102,15 @@ def main() -> int:
         for origin, destination in pairs:
             target = planner.node_id(destination)
             began = time.perf_counter()
-            result = planner.search(origin, targets=[target])
+            # The goal-directed pair take the one place they aim at or climb
+            # toward; Dijkstra takes a set of targets to stop at.
+            result = (
+                planner.search(origin, target=target)
+                if isinstance(
+                    planner, (rl.AStarPlanner, rl.ContractionHierarchyPlanner)
+                )
+                else planner.search(origin, targets=[target])
+            )
             times.append((time.perf_counter() - began) * 1000)
             settled.append(result.settled)
             costs.append(result.cost(target))
