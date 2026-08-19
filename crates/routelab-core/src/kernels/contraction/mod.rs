@@ -111,6 +111,7 @@ pub struct ContractionTechnique {
 impl<'a> Technique<'a> for ContractionTechnique {
     type Inputs = &'a Graph;
     type Planner = ContractionHierarchy;
+    type Error = BindError;
 
     fn bind(
         &self,

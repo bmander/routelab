@@ -7,6 +7,7 @@ use pyo3::prelude::*;
 use routelab_core::kernels::ptl::{PtlTechnique, PublicTransitLabeling as CoreLabeling};
 use routelab_core::{NodeId, Technique};
 
+use crate::built;
 use crate::progress::*;
 use crate::timetable::*;
 
@@ -33,11 +34,8 @@ impl PyPublicTransitLabeling {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
         let counter = counter(progress);
-        let labeling = py.detach(|| {
-            PtlTechnique
-                .bind(transit_network(&timetable, &footpaths), &counter)
-                .expect("a labeling builds from any timetable")
-        });
+        let labeling = py
+            .detach(|| built(PtlTechnique.bind(transit_network(&timetable, &footpaths), &counter)));
         PyPublicTransitLabeling {
             inner: Arc::new(labeling),
         }

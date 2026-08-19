@@ -10,6 +10,7 @@ use routelab_core::kernels::tripbased::{
 };
 use routelab_core::{NodeId, Technique};
 
+use crate::built;
 use crate::progress::*;
 use crate::timetable::*;
 
@@ -36,13 +37,14 @@ impl PyTripBased {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
         let counter = counter(progress);
-        let built = py.detach(|| {
-            TripBasedTechnique { reduce }
-                .bind(transit_network(&timetable, &footpaths), &counter)
-                .expect("trip-based routing builds from any timetable")
+        let kernel = py.detach(|| {
+            built(
+                TripBasedTechnique { reduce }
+                    .bind(transit_network(&timetable, &footpaths), &counter),
+            )
         });
         PyTripBased {
-            inner: Arc::new(built),
+            inner: Arc::new(kernel),
         }
     }
 

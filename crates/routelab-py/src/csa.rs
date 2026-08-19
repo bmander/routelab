@@ -10,6 +10,7 @@ use routelab_core::kernels::csa::{
 };
 use routelab_core::{NodeId, Progress, Technique};
 
+use crate::built;
 use crate::timetable::*;
 
 /// A timetable laid out as one array of connections in departure order.
@@ -28,9 +29,10 @@ impl PyConnectionScan {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
         let scan = py.detach(|| {
-            ConnectionScanTechnique
-                .bind(transit_network(&timetable, &footpaths), &Progress::new())
-                .expect("a connection scan builds from any timetable")
+            built(
+                ConnectionScanTechnique
+                    .bind(transit_network(&timetable, &footpaths), &Progress::new()),
+            )
         });
         PyConnectionScan {
             inner: Arc::new(scan),

@@ -1071,32 +1071,59 @@ fn a_search_without_a_target_labels_every_stop_the_time_dependent_model_reaches(
     }
 }
 
-/// Hold one planner to the time-dependent model's answer from several
-/// sources, and check every itinerary it returns could actually be ridden.
+/// A question put to every model — where you may start and when, and where
+/// you are going — with the arrival the oracle says is best.
+type Asked = (Vec<(NodeId, Time)>, NodeId, Option<Time>);
+
+/// A pair of stops, with every departure worth taking between them.
+type Window = (NodeId, NodeId, Vec<(Time, Time)>);
+
+/// Every question the models are asked from several sources, with the answer
+/// the time-dependent model gives — this file's oracle, and rideable itself.
+///
+/// Asked once per instance rather than once per model: it is the same
+/// question whoever is answering, and enumerating it is far dearer than any
+/// of the answers.
+fn what_the_stops_say(table: &Timetable, paths: &Footpaths) -> Vec<Asked> {
+    let mut asked = Vec::new();
+    for a in 0..10u32 {
+        let b = (a + 3) % 10;
+        let sources = vec![(a, 0), (b, 400)];
+        for to in 0..10u32 {
+            let want = earliest_arrival(table, &sources, to, Transfer::instant(), paths);
+            if let Some(itinerary) = &want {
+                assert!(
+                    itinerary.is_valid(&sources, Transfer::instant(), paths),
+                    "the oracle's own answer: {sources:?} -> {to}: {itinerary:?}"
+                );
+            }
+            asked.push((sources.clone(), to, want.map(|i| i.arrives)));
+        }
+    }
+    asked
+}
+
+/// Hold one planner to those answers, and check every itinerary it returns
+/// could actually be ridden.
 fn agrees_with_stops<P: EarliestArrival>(
     name: &str,
     planner: &P,
-    table: &Timetable,
+    asked: &[Asked],
     paths: &Footpaths,
     seed: u64,
 ) {
-    for a in 0..10u32 {
-        let b = (a + 3) % 10;
-        let sources = [(a, 0), (b, 400)];
-        for to in 0..10u32 {
-            let want = earliest_arrival(table, &sources, to, Transfer::instant(), paths);
-            let got = planner.earliest_arrival(&sources, to);
-            assert_eq!(
-                got.as_ref().map(|i| i.arrives),
-                want.as_ref().map(|i| i.arrives),
-                "seed {seed}: {name} {sources:?} -> {to}"
+    for (sources, to, want) in asked {
+        let got = planner.earliest_arrival(sources, *to);
+        assert_eq!(
+            got.as_ref().map(|i| i.arrives),
+            *want,
+            "seed {seed}: {name} {sources:?} -> {to}"
+        );
+        if let Some(itinerary) = got {
+            assert!(
+                itinerary.is_valid(sources, Transfer::instant(), paths),
+                "seed {seed}: {name} {sources:?} -> {to}: {itinerary:?}"
             );
-            if let Some(itinerary) = got {
-                assert!(
-                    itinerary.is_valid(&sources, Transfer::instant(), paths),
-                    "seed {seed}: {name} {sources:?} -> {to}: {itinerary:?}"
-                );
-            }
         }
     }
 }
@@ -1115,18 +1142,22 @@ fn the_six_models_agree_from_several_sources() {
             footpaths: &paths,
         };
         let progress = Progress::new();
+        let asked = what_the_stops_say(&table, &paths);
+        // The oracle bound through the trait. Not the tautology it looks:
+        // what is under test is that binding wires this planner to the same
+        // timetable, transfer and footpaths the free function was handed.
         let dependent = TimeDependentTechnique.bind(net, &progress).unwrap();
-        agrees_with_stops("time-dependent", &dependent, &table, &paths, seed);
+        agrees_with_stops("time-dependent", &dependent, &asked, &paths, seed);
         let expanded = TimeExpandedTechnique.bind(net, &progress).unwrap();
-        agrees_with_stops("time-expanded", &expanded, &table, &paths, seed);
+        agrees_with_stops("time-expanded", &expanded, &asked, &paths, seed);
         let rounds = RaptorTechnique.bind(net, &progress).unwrap();
-        agrees_with_stops("RAPTOR", &rounds, &table, &paths, seed);
+        agrees_with_stops("RAPTOR", &rounds, &asked, &paths, seed);
         let scan = ConnectionScanTechnique.bind(net, &progress).unwrap();
-        agrees_with_stops("CSA", &scan, &table, &paths, seed);
+        agrees_with_stops("CSA", &scan, &asked, &paths, seed);
         let trips = TripBasedTechnique::default().bind(net, &progress).unwrap();
-        agrees_with_stops("trip-based", &trips, &table, &paths, seed);
+        agrees_with_stops("trip-based", &trips, &asked, &paths, seed);
         let labels = PtlTechnique.bind(net, &progress).unwrap();
-        agrees_with_stops("PTL", &labels, &table, &paths, seed);
+        agrees_with_stops("PTL", &labels, &asked, &paths, seed);
     }
 }
 
@@ -1263,36 +1294,30 @@ fn the_profile_matches_asking_at_every_second() {
 fn departures_agree<P: Profiled>(
     name: &str,
     planner: &P,
-    table: &Timetable,
+    asked: &[Window],
     paths: &Footpaths,
     seed: u64,
 ) {
-    for from in 0..6u32 {
-        for to in 0..6u32 {
-            if from == to {
-                continue;
+    for &(from, to, ref truth) in asked {
+        let departures = planner.departures(from, to, 0, 12_000);
+        // Project onto (departs, arrives) and drop what a later departure
+        // with an equal or earlier arrival dominates.
+        let mut pairs: Vec<(Time, Time)> = Vec::new();
+        for (dep, itinerary) in departures.iter().rev() {
+            if pairs
+                .last()
+                .is_none_or(|&(_, best)| itinerary.arrives < best)
+            {
+                pairs.push((*dep, itinerary.arrives));
             }
-            let truth = profile_by_brute_force(table, paths, from, to, 0..=12_000);
-            let departures = planner.departures(from, to, 0, 12_000);
-            // Project onto (departs, arrives) and drop what a later departure
-            // with an equal or earlier arrival dominates.
-            let mut pairs: Vec<(Time, Time)> = Vec::new();
-            for (dep, itinerary) in departures.iter().rev() {
-                if pairs
-                    .last()
-                    .is_none_or(|&(_, best)| itinerary.arrives < best)
-                {
-                    pairs.push((*dep, itinerary.arrives));
-                }
-            }
-            pairs.reverse();
-            assert_eq!(pairs, truth, "seed {seed}: {name} {from} -> {to}");
-            for (dep, itinerary) in departures {
-                assert!(
-                    itinerary.is_valid(&[(from, dep)], Transfer::instant(), paths),
-                    "seed {seed}: {name} {from} -> {to} at {dep}: {itinerary:?}"
-                );
-            }
+        }
+        pairs.reverse();
+        assert_eq!(&pairs, truth, "seed {seed}: {name} {from} -> {to}");
+        for (dep, itinerary) in departures {
+            assert!(
+                itinerary.is_valid(&[(from, dep)], Transfer::instant(), paths),
+                "seed {seed}: {name} {from} -> {to} at {dep}: {itinerary:?}"
+            );
         }
     }
 }
@@ -1308,12 +1333,26 @@ fn every_profiled_technique_agrees_with_the_oracle() {
             footpaths: &paths,
         };
         let progress = Progress::new();
+        // The oracle asks the time-dependent model at every second of the
+        // window, which costs far more than any profile it checks — so it is
+        // enumerated once per instance rather than once per technique.
+        let asked: Vec<Window> = (0..6u32)
+            .flat_map(|from| (0..6u32).map(move |to| (from, to)))
+            .filter(|(from, to)| from != to)
+            .map(|(from, to)| {
+                (
+                    from,
+                    to,
+                    profile_by_brute_force(&table, &paths, from, to, 0..=12_000),
+                )
+            })
+            .collect();
         let scan = ConnectionScanTechnique.bind(net, &progress).unwrap();
-        departures_agree("CSA", &scan, &table, &paths, seed);
+        departures_agree("CSA", &scan, &asked, &paths, seed);
         let trips = TripBasedTechnique::default().bind(net, &progress).unwrap();
-        departures_agree("trip-based", &trips, &table, &paths, seed);
+        departures_agree("trip-based", &trips, &asked, &paths, seed);
         let labels = PtlTechnique.bind(net, &progress).unwrap();
-        departures_agree("PTL", &labels, &table, &paths, seed);
+        departures_agree("PTL", &labels, &asked, &paths, seed);
     }
 }
 

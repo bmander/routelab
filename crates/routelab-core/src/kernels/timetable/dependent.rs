@@ -34,11 +34,13 @@
 //! [`Transfer::instant`], so the gap is a missing constructor rather than a
 //! parameter that would be quietly ignored.
 
+use std::convert::Infallible;
+
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use crate::model::graph::{NodeId, UNREACHABLE};
-use crate::model::technique::{BindError, EarliestArrival, Footprint, Technique, TransitNetwork};
+use crate::model::technique::{EarliestArrival, Footprint, Technique, TransitNetwork};
 use crate::model::timetable::{Footpaths, Itinerary, Leg, Time, Timetable, Transfer, Walk};
 use crate::util::progress::Progress;
 
@@ -51,12 +53,13 @@ pub struct TimeDependentTechnique;
 impl<'a> Technique<'a> for TimeDependentTechnique {
     type Inputs = TransitNetwork<'a>;
     type Planner = TimeDependent<'a>;
+    type Error = Infallible;
 
     fn bind(
         &self,
         net: TransitNetwork<'a>,
         _progress: &Progress,
-    ) -> Result<TimeDependent<'a>, BindError> {
+    ) -> Result<TimeDependent<'a>, Infallible> {
         Ok(TimeDependent {
             timetable: net.timetable,
             transfer: net.transfer,

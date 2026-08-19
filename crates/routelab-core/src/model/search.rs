@@ -2,7 +2,7 @@
 //! what it was asked for.
 
 use crate::model::graph::{EdgeId, Graph, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
-use crate::model::technique::{Distances, Tree};
+use crate::model::technique::Distances;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,24 +202,6 @@ impl Distances for SearchResult {
 
     fn settled(&self) -> usize {
         SearchResult::settled(self)
-    }
-}
-
-impl Tree for SearchResult {
-    fn parent(&self, node: NodeId) -> Option<NodeId> {
-        SearchResult::parent(self, node)
-    }
-
-    fn parent_edge(&self, node: NodeId) -> Option<EdgeId> {
-        SearchResult::parent_edge(self, node)
-    }
-
-    fn path(&self, node: NodeId) -> Option<Vec<NodeId>> {
-        SearchResult::path(self, node)
-    }
-
-    fn edge_path(&self, node: NodeId) -> Option<Vec<EdgeId>> {
-        SearchResult::edge_path(self, node)
     }
 }
 

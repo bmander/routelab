@@ -69,11 +69,13 @@
 mod tests;
 pub mod ucch;
 
+use std::convert::Infallible;
+
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use crate::model::graph::{Graph, NodeId, UNREACHABLE};
-use crate::model::technique::{BindError, EarliestArrival, Footprint, Technique};
+use crate::model::technique::{EarliestArrival, Footprint, Technique};
 use crate::model::timetable::{Itinerary, Leg, Time, Timetable, Walk};
 use crate::util::progress::Progress;
 
@@ -222,12 +224,13 @@ pub struct LabelConstrainedTechnique {
 impl<'a> Technique<'a> for LabelConstrainedTechnique {
     type Inputs = Multimodal<'a>;
     type Planner = LabelConstrained<'a>;
+    type Error = Infallible;
 
     fn bind(
         &self,
         network: Multimodal<'a>,
         _progress: &Progress,
-    ) -> Result<LabelConstrained<'a>, BindError> {
+    ) -> Result<LabelConstrained<'a>, Infallible> {
         Ok(LabelConstrained {
             network,
             modes: self.modes.clone(),

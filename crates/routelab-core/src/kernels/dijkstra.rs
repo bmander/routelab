@@ -1,5 +1,7 @@
 //! Dijkstra's algorithm on a [`Graph`], with a binary heap and lazy deletion.
 
+use std::convert::Infallible;
+
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -7,7 +9,7 @@ use crate::model::graph::{EdgeId, Graph, NodeId, Weight, UNREACHABLE};
 use crate::model::search::{
     check_sources, SearchError, SearchOptions, SearchResult, TargetTracker,
 };
-use crate::model::technique::{BindError, Distance, Footprint, Searches, Technique, Unpacks};
+use crate::model::technique::{Distance, Footprint, Searches, Technique, Unpacks};
 use crate::util::progress::Progress;
 
 /// Dijkstra as a configuration: nothing to set, nothing to build.
@@ -17,8 +19,9 @@ pub struct DijkstraTechnique;
 impl<'a> Technique<'a> for DijkstraTechnique {
     type Inputs = &'a Graph;
     type Planner = Dijkstra<'a>;
+    type Error = Infallible;
 
-    fn bind(&self, graph: &'a Graph, _progress: &Progress) -> Result<Dijkstra<'a>, BindError> {
+    fn bind(&self, graph: &'a Graph, _progress: &Progress) -> Result<Dijkstra<'a>, Infallible> {
         Ok(Dijkstra { graph })
     }
 }

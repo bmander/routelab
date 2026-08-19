@@ -44,12 +44,14 @@
 //! answer may still be a little later in the search than that first hit, and
 //! one bounded re-run up to *t + walk* finds it.
 
+use std::convert::Infallible;
+
 use std::collections::{HashMap, HashSet};
 
 use crate::kernels::dijkstra::dijkstra;
 use crate::model::graph::{Graph, NodeId, Weight};
 use crate::model::search::{SearchOptions, SearchResult};
-use crate::model::technique::{BindError, EarliestArrival, Footprint, Technique, TransitNetwork};
+use crate::model::technique::{EarliestArrival, Footprint, Technique, TransitNetwork};
 
 use crate::model::timetable::{Footpaths, Itinerary, Leg, Ride, Time, Timetable, Transfer, Walk};
 use crate::util::progress::Progress;
@@ -103,12 +105,13 @@ pub struct TimeExpandedTechnique;
 impl<'a> Technique<'a> for TimeExpandedTechnique {
     type Inputs = TransitNetwork<'a>;
     type Planner = TimeExpanded;
+    type Error = Infallible;
 
     fn bind(
         &self,
         net: TransitNetwork<'a>,
         _progress: &Progress,
-    ) -> Result<TimeExpanded, BindError> {
+    ) -> Result<TimeExpanded, Infallible> {
         Ok(TimeExpanded::build(
             net.timetable,
             net.transfer,

@@ -295,18 +295,19 @@ class ULTRAPlanner(TimetablePlanner):
         self._outer_of = {inner: outer for outer, inner in self._inner_of.items()}
         # Indexed by *this* graph's vertices, for renumbering the shortcuts:
         # NO_NODE wherever a vertex is a street corner rather than a stop. A
-        # local, not an attribute: it is one entry per street corner — half a
-        # million on a city — and the only thing that reads it is the
-        # renumbering below, which keeps what it needs.
+        # local read once and dropped, because it is one entry per street
+        # corner — half a million on a city — and only the renumbering wants it.
         slots = [_NOT_A_STOP] * len(compiled)
         for outer, inner in self._inner_of.items():
             slots[outer] = inner
 
         # The technique underneath reads the shortcuts rather than a closure,
         # which is the whole of the integration: `_with_walks` is the seam.
-        # Renumbered into the transit network's own vertices, since that is
-        # what the technique underneath is bound to.
-        shortcuts = _Shortcuts(self.shortcuts, slots, len(inner_compiled))
+        # Renumbered here into the transit network's own vertices, since that
+        # is what the technique underneath is bound to.
+        shortcuts = _Shortcuts(
+            self.shortcuts.footpaths_renumbered(slots, len(inner_compiled))
+        )
         self.inner: _StopTable = technique.technique._with_walks(shortcuts).bind(
             inner_environment, progress
         )
@@ -518,21 +519,24 @@ class _Shortcuts:
     What :meth:`TimetableTechnique._with_walks` is handed, so the wrapped
     technique reads the shortcuts through the same seam every other technique
     reads :class:`~routelab.Walks` through, and nothing about it has to change.
+
+    Holds the finished walks rather than the recipe for them. A derivation
+    that kept the recipe would keep the renumbering table too — one entry per
+    street corner, half a million on a city — for as long as the bound planner
+    lived, to answer a question asked once.
     """
 
     name = "walks"
 
-    def __init__(self, shortcuts: Any, slots: "List[int]", stops: int):
-        self.shortcuts = shortcuts
-        self.slots = slots
-        self.stops = stops
+    def __init__(self, footpaths: Any):
+        self.footpaths = footpaths
 
     @classmethod
     def missing_from(cls, compiled: CompiledEnvironment) -> "frozenset[str]":
         return frozenset()
 
     def bind(self, compiled: CompiledEnvironment, progress: Any = None) -> Any:
-        return self.shortcuts.footpaths_renumbered(self.slots, self.stops)
+        return self.footpaths
 
     def __repr__(self) -> str:
         return "Shortcuts()"

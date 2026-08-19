@@ -46,7 +46,7 @@ use std::convert::Infallible;
 use crate::model::graph::{NodeId, UNREACHABLE};
 use crate::model::lines::Lines;
 use crate::model::technique::{
-    BindError, Distances, EarliestArrival, Explored, Footprint, Front, Reads, Searches, Technique,
+    Distances, EarliestArrival, Explored, Footprint, Front, Reads, Searches, Technique,
     TransitNetwork,
 };
 use crate::model::timetable::{
@@ -86,8 +86,9 @@ pub struct RaptorTechnique;
 impl<'a> Technique<'a> for RaptorTechnique {
     type Inputs = TransitNetwork<'a>;
     type Planner = Raptor;
+    type Error = Infallible;
 
-    fn bind(&self, net: TransitNetwork<'a>, _progress: &Progress) -> Result<Raptor, BindError> {
+    fn bind(&self, net: TransitNetwork<'a>, _progress: &Progress) -> Result<Raptor, Infallible> {
         Ok(Raptor::build(net.timetable, net.transfer, net.footpaths))
     }
 }

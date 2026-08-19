@@ -1,11 +1,13 @@
 //! Breadth-first search: the unit-weight special case, kept separate because a
 //! FIFO queue beats a heap when every edge costs the same.
 
+use std::convert::Infallible;
+
 use std::collections::VecDeque;
 
 use crate::model::graph::{EdgeId, Graph, NodeId, UNREACHABLE};
 use crate::model::search::{check_nodes, SearchError, SearchOptions, SearchResult, TargetTracker};
-use crate::model::technique::{BindError, Footprint, Searches, Technique, Unpacks};
+use crate::model::technique::{Footprint, Searches, Technique, Unpacks};
 use crate::util::progress::Progress;
 
 /// Breadth-first search as a configuration: nothing to set, nothing to build.
@@ -15,8 +17,9 @@ pub struct BfsTechnique;
 impl<'a> Technique<'a> for BfsTechnique {
     type Inputs = &'a Graph;
     type Planner = Bfs<'a>;
+    type Error = Infallible;
 
-    fn bind(&self, graph: &'a Graph, _progress: &Progress) -> Result<Bfs<'a>, BindError> {
+    fn bind(&self, graph: &'a Graph, _progress: &Progress) -> Result<Bfs<'a>, Infallible> {
         Ok(Bfs { graph })
     }
 }

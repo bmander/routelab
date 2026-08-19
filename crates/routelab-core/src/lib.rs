@@ -57,7 +57,7 @@ pub use model::lines::{Lines, StopTime};
 pub use model::search::{SearchError, SearchOptions, SearchResult};
 pub use model::technique::{
     BindError, Distance, Distances, EarliestArrival, Explored, Footprint, Front, Profiled, Reads,
-    Searches, Technique, TransitNetwork, Tree, Unpacks,
+    Searches, Technique, TransitNetwork, Unpacks,
 };
 pub use model::timetable::{
     Connection, Footpaths, Itinerary, Leg, Ride, Timetable, Transfer, TripId, Walk,

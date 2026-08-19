@@ -64,8 +64,8 @@ use std::sync::Mutex;
 use crate::model::graph::{NodeId, UNREACHABLE};
 use crate::model::lines::Lines;
 use crate::model::technique::{
-    BindError, Distances, EarliestArrival, Explored, Footprint, Front, Profiled, Reads, Searches,
-    Technique, TransitNetwork,
+    Distances, EarliestArrival, Explored, Footprint, Front, Profiled, Reads, Searches, Technique,
+    TransitNetwork,
 };
 use crate::model::timetable::{
     Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, TripId, Walk,
@@ -115,8 +115,9 @@ impl Default for TripBasedTechnique {
 impl<'a> Technique<'a> for TripBasedTechnique {
     type Inputs = TransitNetwork<'a>;
     type Planner = TripBased;
+    type Error = Infallible;
 
-    fn bind(&self, net: TransitNetwork<'a>, progress: &Progress) -> Result<TripBased, BindError> {
+    fn bind(&self, net: TransitNetwork<'a>, progress: &Progress) -> Result<TripBased, Infallible> {
         Ok(TripBased::build_reporting(
             net.timetable,
             net.transfer,

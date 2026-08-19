@@ -64,8 +64,8 @@ use std::convert::Infallible;
 
 use crate::model::graph::{NodeId, UNREACHABLE};
 use crate::model::technique::{
-    BindError, Distances, EarliestArrival, Explored, Footprint, Profiled, Reads, Searches,
-    Technique, TransitNetwork,
+    Distances, EarliestArrival, Explored, Footprint, Profiled, Reads, Searches, Technique,
+    TransitNetwork,
 };
 use crate::model::timetable::{
     Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, TripId, Walk,
@@ -100,12 +100,13 @@ pub struct ConnectionScanTechnique;
 impl<'a> Technique<'a> for ConnectionScanTechnique {
     type Inputs = TransitNetwork<'a>;
     type Planner = ConnectionScan;
+    type Error = Infallible;
 
     fn bind(
         &self,
         net: TransitNetwork<'a>,
         _progress: &Progress,
-    ) -> Result<ConnectionScan, BindError> {
+    ) -> Result<ConnectionScan, Infallible> {
         Ok(ConnectionScan::build(
             net.timetable,
             net.transfer,

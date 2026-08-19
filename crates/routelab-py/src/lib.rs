@@ -14,6 +14,19 @@ pub(crate) fn value_err(err: impl std::fmt::Display) -> PyErr {
 }
 
 /// Bounds check for the id-taking accessors, phrased the way Python indexing errors are.
+/// The planner behind a bind that cannot fail.
+///
+/// A technique whose `Technique::Error` is [`Infallible`] has no error case
+/// to handle, and saying so costs nothing at runtime — where an `unwrap` or
+/// an `expect` would be a panic path in an extension module that can never
+/// be taken but has to be read as though it could.
+pub(crate) fn built<T>(bound: Result<T, std::convert::Infallible>) -> T {
+    match bound {
+        Ok(planner) => planner,
+        Err(never) => match never {},
+    }
+}
+
 pub(crate) fn check_index(id: u32, count: usize, what: &str) -> PyResult<()> {
     if (id as usize) < count {
         Ok(())

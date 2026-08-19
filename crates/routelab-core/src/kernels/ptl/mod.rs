@@ -63,10 +63,10 @@ mod query;
 #[cfg(test)]
 mod tests;
 
+use std::convert::Infallible;
+
 use crate::model::graph::NodeId;
-use crate::model::technique::{
-    BindError, EarliestArrival, Footprint, Profiled, Technique, TransitNetwork,
-};
+use crate::model::technique::{EarliestArrival, Footprint, Profiled, Technique, TransitNetwork};
 use crate::model::timetable::{Connection, Footpaths, Itinerary, Time, Timetable, Transfer};
 use crate::util::progress::Progress;
 
@@ -81,12 +81,13 @@ pub struct PtlTechnique;
 impl<'a> Technique<'a> for PtlTechnique {
     type Inputs = TransitNetwork<'a>;
     type Planner = PublicTransitLabeling;
+    type Error = Infallible;
 
     fn bind(
         &self,
         net: TransitNetwork<'a>,
         progress: &Progress,
-    ) -> Result<PublicTransitLabeling, BindError> {
+    ) -> Result<PublicTransitLabeling, Infallible> {
         Ok(PublicTransitLabeling::build_reporting(
             net.timetable,
             net.transfer,

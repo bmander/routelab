@@ -107,6 +107,7 @@ pub struct UcchTechnique {
 impl<'a> Technique<'a> for UcchTechnique {
     type Inputs = UcchInputs<'a>;
     type Planner = UcchPlanner<'a>;
+    type Error = BindError;
 
     fn bind(
         &self,

@@ -13,6 +13,7 @@ use routelab_core::model::timetable::{
 };
 use routelab_core::{EarliestArrival, NodeId, Progress, Technique, TransitNetwork};
 
+use crate::built;
 use crate::graph::*;
 
 /// Departures along one edge, as `(trip, departs, arrives)`.
@@ -165,10 +166,11 @@ impl PyTimetable {
             // The time-dependent model precomputes nothing, so binding it is
             // free — and says which model answers here rather than leaving a
             // free function to imply it.
-            TimeDependentTechnique
-                .bind(transit_network(&timetable, &footpaths), &Progress::new())
-                .expect("the time-dependent model reads any timetable")
-                .earliest_arrival(&sources, to)
+            built(
+                TimeDependentTechnique
+                    .bind(transit_network(&timetable, &footpaths), &Progress::new()),
+            )
+            .earliest_arrival(&sources, to)
         })
         .map(PyItinerary::from)
     }
@@ -198,9 +200,10 @@ impl PyTimeExpanded {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
         let expanded = py.detach(|| {
-            TimeExpandedTechnique
-                .bind(transit_network(&timetable, &footpaths), &Progress::new())
-                .expect("the time-expanded model builds from any timetable")
+            built(
+                TimeExpandedTechnique
+                    .bind(transit_network(&timetable, &footpaths), &Progress::new()),
+            )
         });
         PyTimeExpanded {
             inner: Arc::new(expanded),

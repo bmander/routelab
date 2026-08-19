@@ -1,5 +1,7 @@
 //! Time-dependent Dijkstra: label-setting with a clock.
 
+use std::convert::Infallible;
+
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -7,7 +9,7 @@ use crate::model::graph::{EdgeId, Graph, NodeId, Weight, UNREACHABLE};
 use crate::model::search::{
     check_sources, SearchError, SearchOptions, SearchResult, TargetTracker,
 };
-use crate::model::technique::{BindError, Footprint, Searches, Technique, Unpacks};
+use crate::model::technique::{Footprint, Searches, Technique, Unpacks};
 use crate::util::progress::Progress;
 
 use super::{Calendar, Departure, WEEK};
@@ -46,12 +48,13 @@ pub struct TimeDependentDijkstraTechnique;
 impl<'a> Technique<'a> for TimeDependentDijkstraTechnique {
     type Inputs = TimeDependentInputs<'a>;
     type Planner = TimeDependentDijkstra<'a>;
+    type Error = Infallible;
 
     fn bind(
         &self,
         inputs: TimeDependentInputs<'a>,
         _progress: &Progress,
-    ) -> Result<TimeDependentDijkstra<'a>, BindError> {
+    ) -> Result<TimeDependentDijkstra<'a>, Infallible> {
         Ok(TimeDependentDijkstra {
             graph: inputs.graph,
             calendar: inputs.calendar,
@@ -68,8 +71,12 @@ pub struct TimeDependentDijkstra<'a> {
 }
 
 impl Footprint for TimeDependentDijkstra<'_> {
+    /// Nothing: this search precomputes nothing, and the calendar it reads is
+    /// an input it borrows rather than bytes it built. Its two siblings that
+    /// also borrow — [`Dijkstra`](crate::Dijkstra) and
+    /// [`TimeDependent`](crate::TimeDependent) — say the same.
     fn footprint(&self) -> usize {
-        self.calendar.footprint()
+        0
     }
 
     fn searches(&self) -> (&'static str, usize) {

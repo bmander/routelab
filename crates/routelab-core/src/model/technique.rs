@@ -76,9 +76,15 @@ pub trait Technique<'a> {
     type Inputs;
     /// The bound, queryable result.
     type Planner;
+    /// What binding can go wrong with. [`std::convert::Infallible`] for a
+    /// technique that cannot fail — most of them, since laying a timetable
+    /// out differently is not something a timetable can refuse. Contraction
+    /// builds a graph, and a graph can be too large to build.
+    type Error: std::error::Error;
 
     /// Do the preprocessing and hand back something that answers queries.
-    fn bind(&self, inputs: Self::Inputs, progress: &Progress) -> Result<Self::Planner, BindError>;
+    fn bind(&self, inputs: Self::Inputs, progress: &Progress)
+        -> Result<Self::Planner, Self::Error>;
 }
 
 /// What a bound planner holds, and what it counts a search over.
@@ -96,18 +102,17 @@ pub trait Footprint {
 /// The result contract every kept search meets: a cost per node and a count
 /// of work done. Cost is a [`Weight`] or a [`Time`], both `u32`.
 pub trait Distances {
-    /// The best cost found to `node`, or `None` if it was not reached.
+    /// The cost to `node`, or `None` where this search has none to vouch for.
+    ///
+    /// `None` is not always "unreachable". A point-to-point search learns the
+    /// true cost of exactly one node — the one it was aimed at — and reports
+    /// `None` for every other node it touched, because an upward distance or
+    /// a pruned label is not the answer and would be a lie told in the right
+    /// shape. See [`MeetingSearch::cost`](crate::MeetingSearch::cost) and
+    /// [`TripBasedSearch::cost`](crate::TripBasedSearch::cost).
     fn cost(&self, node: NodeId) -> Option<u32>;
     /// How many things the search settled.
     fn settled(&self) -> usize;
-}
-
-/// A result that also kept the tree it grew.
-pub trait Tree: Distances {
-    fn parent(&self, node: NodeId) -> Option<NodeId>;
-    fn parent_edge(&self, node: NodeId) -> Option<EdgeId>;
-    fn path(&self, node: NodeId) -> Option<Vec<NodeId>>;
-    fn edge_path(&self, node: NodeId) -> Option<Vec<EdgeId>>;
 }
 
 /// A planner that runs a query and keeps what it found.

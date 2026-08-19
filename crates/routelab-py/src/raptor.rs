@@ -9,6 +9,7 @@ use routelab_core::kernels::raptor::{
 };
 use routelab_core::{NodeId, Progress, Technique};
 
+use crate::built;
 use crate::timetable::*;
 
 /// A timetable laid out as routes and trips, for round-based search.
@@ -27,9 +28,7 @@ impl PyRaptor {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
         let raptor = py.detach(|| {
-            RaptorTechnique
-                .bind(transit_network(&timetable, &footpaths), &Progress::new())
-                .expect("RAPTOR builds from any timetable")
+            built(RaptorTechnique.bind(transit_network(&timetable, &footpaths), &Progress::new()))
         });
         PyRaptor {
             inner: Arc::new(raptor),
