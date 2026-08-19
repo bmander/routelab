@@ -6,12 +6,13 @@ use pyo3::prelude::*;
 
 use routelab_core::kernels::timetable::{
     earliest_arrival as core_earliest_arrival, TimeExpanded as CoreTimeExpanded,
+    TimeExpandedTechnique,
 };
 use routelab_core::model::timetable::{
     Footpaths as CoreFootpaths, Itinerary as CoreItinerary, Leg, Timetable as CoreTimetable,
     Transfer,
 };
-use routelab_core::NodeId;
+use routelab_core::{Footprint, NodeId, Progress, Technique, TransitNetwork};
 
 use crate::graph::*;
 
@@ -81,6 +82,19 @@ pub(crate) fn footpaths_or_none(footpaths: Option<&PyFootpaths>) -> Arc<CoreFoot
         || Arc::new(CoreFootpaths::none()),
         |paths| Arc::clone(&paths.inner),
     )
+}
+
+/// The inputs every transit technique binds to, with the one transfer
+/// policy that exists today.
+pub(crate) fn transit_network<'a>(
+    timetable: &'a CoreTimetable,
+    footpaths: &'a CoreFootpaths,
+) -> TransitNetwork<'a> {
+    TransitNetwork {
+        timetable,
+        transfer: Transfer::instant(),
+        footpaths,
+    }
 }
 
 /// A day's connections, indexed for a search to read.
@@ -178,8 +192,11 @@ impl PyTimeExpanded {
     fn build(py: Python<'_>, timetable: &PyTimetable, footpaths: Option<&PyFootpaths>) -> Self {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
-        let expanded =
-            py.detach(|| CoreTimeExpanded::build(&timetable, Transfer::instant(), &footpaths));
+        let expanded = py.detach(|| {
+            TimeExpandedTechnique
+                .bind(transit_network(&timetable, &footpaths), &Progress::new())
+                .expect("the time-expanded model builds from any timetable")
+        });
         PyTimeExpanded {
             inner: Arc::new(expanded),
         }
@@ -188,6 +205,12 @@ impl PyTimeExpanded {
     #[getter]
     fn num_events(&self) -> usize {
         self.inner.num_events()
+    }
+
+    /// What a query settles and how many there are: `("events", n)`.
+    #[getter]
+    fn searches(&self) -> (&'static str, usize) {
+        Footprint::searches(&*self.inner)
     }
 
     #[getter]

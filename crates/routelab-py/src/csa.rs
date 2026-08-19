@@ -5,11 +5,10 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 
 use routelab_core::kernels::csa::{
-    ConnectionScan as CoreConnectionScan, ScanProfile as CoreScanProfile, ScanQuery,
-    ScanSearch as CoreScanSearch,
+    ConnectionScan as CoreConnectionScan, ConnectionScanTechnique, ScanProfile as CoreScanProfile,
+    ScanQuery, ScanSearch as CoreScanSearch,
 };
-use routelab_core::model::timetable::Transfer;
-use routelab_core::NodeId;
+use routelab_core::{EarliestArrival, Footprint, NodeId, Profiled, Progress, Technique};
 
 use crate::timetable::*;
 
@@ -28,11 +27,51 @@ impl PyConnectionScan {
     fn build(py: Python<'_>, timetable: &PyTimetable, footpaths: Option<&PyFootpaths>) -> Self {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
-        let scan =
-            py.detach(|| CoreConnectionScan::build(&timetable, Transfer::instant(), &footpaths));
+        let scan = py.detach(|| {
+            ConnectionScanTechnique
+                .bind(transit_network(&timetable, &footpaths), &Progress::new())
+                .expect("a connection scan builds from any timetable")
+        });
         PyConnectionScan {
             inner: Arc::new(scan),
         }
+    }
+
+    /// What a query settles and how many there are: `("stops", n)`.
+    #[getter]
+    fn searches(&self) -> (&'static str, usize) {
+        Footprint::searches(&*self.inner)
+    }
+
+    /// Earliest arrival at `to` from `sources` — `[(stop, time), ...]` — as
+    /// one itinerary, without keeping the search.
+    fn earliest_arrival(
+        &self,
+        py: Python<'_>,
+        sources: Vec<(NodeId, u32)>,
+        to: NodeId,
+    ) -> Option<PyItinerary> {
+        let scan = Arc::clone(&self.inner);
+        py.detach(|| scan.earliest_arrival(&sources, to))
+            .map(PyItinerary::from)
+    }
+
+    /// Every journey worth leaving `origin` on for `target` within
+    /// `[departing, until]`, as `(departure, itinerary)`, earliest first —
+    /// the one-to-one profile, in one call.
+    fn departures(
+        &self,
+        py: Python<'_>,
+        origin: NodeId,
+        target: NodeId,
+        departing: u32,
+        until: u32,
+    ) -> Vec<(u32, PyItinerary)> {
+        let scan = Arc::clone(&self.inner);
+        py.detach(|| scan.departures(origin, target, departing, until))
+            .into_iter()
+            .map(|(dep, itinerary)| (dep, PyItinerary::from(itinerary)))
+            .collect()
     }
 
     #[getter]

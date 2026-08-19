@@ -4,9 +4,8 @@ use std::sync::Arc;
 
 use pyo3::prelude::*;
 
-use routelab_core::kernels::ptl::PublicTransitLabeling as CoreLabeling;
-use routelab_core::model::timetable::Transfer;
-use routelab_core::NodeId;
+use routelab_core::kernels::ptl::{PtlTechnique, PublicTransitLabeling as CoreLabeling};
+use routelab_core::{Footprint, NodeId, Profiled, Technique};
 
 use crate::progress::*;
 use crate::timetable::*;
@@ -35,11 +34,36 @@ impl PyPublicTransitLabeling {
         let footpaths = footpaths_or_none(footpaths);
         let counter = counter(progress);
         let labeling = py.detach(|| {
-            CoreLabeling::build_reporting(&timetable, Transfer::instant(), &footpaths, &counter)
+            PtlTechnique
+                .bind(transit_network(&timetable, &footpaths), &counter)
+                .expect("a labeling builds from any timetable")
         });
         PyPublicTransitLabeling {
             inner: Arc::new(labeling),
         }
+    }
+
+    /// What a query reads and how many there are: `("hubs", n)`.
+    #[getter]
+    fn searches(&self) -> (&'static str, usize) {
+        Footprint::searches(&*self.inner)
+    }
+
+    /// [`profile`](Self::profile) under the name every profiled technique
+    /// shares.
+    fn departures(
+        &self,
+        py: Python<'_>,
+        origin: NodeId,
+        target: NodeId,
+        departing: u32,
+        until: u32,
+    ) -> Vec<(u32, PyItinerary)> {
+        let labeling = Arc::clone(&self.inner);
+        py.detach(|| labeling.departures(origin, target, departing, until))
+            .into_iter()
+            .map(|(dep, itinerary)| (dep, PyItinerary::from(itinerary)))
+            .collect()
     }
 
     #[getter]

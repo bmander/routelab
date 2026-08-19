@@ -5,10 +5,9 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 
 use routelab_core::kernels::raptor::{
-    Raptor as CoreRaptor, RaptorQuery, RaptorSearch as CoreRaptorSearch,
+    Raptor as CoreRaptor, RaptorQuery, RaptorSearch as CoreRaptorSearch, RaptorTechnique,
 };
-use routelab_core::model::timetable::Transfer;
-use routelab_core::NodeId;
+use routelab_core::{EarliestArrival, Footprint, NodeId, Progress, Technique};
 
 use crate::timetable::*;
 
@@ -27,10 +26,33 @@ impl PyRaptor {
     fn build(py: Python<'_>, timetable: &PyTimetable, footpaths: Option<&PyFootpaths>) -> Self {
         let timetable = Arc::clone(&timetable.inner);
         let footpaths = footpaths_or_none(footpaths);
-        let raptor = py.detach(|| CoreRaptor::build(&timetable, Transfer::instant(), &footpaths));
+        let raptor = py.detach(|| {
+            RaptorTechnique
+                .bind(transit_network(&timetable, &footpaths), &Progress::new())
+                .expect("RAPTOR builds from any timetable")
+        });
         PyRaptor {
             inner: Arc::new(raptor),
         }
+    }
+
+    /// What a query settles and how many there are: `("stops", n)`.
+    #[getter]
+    fn searches(&self) -> (&'static str, usize) {
+        Footprint::searches(&*self.inner)
+    }
+
+    /// Earliest arrival at `to` from `sources` — `[(stop, time), ...]` — as
+    /// one itinerary, without keeping the search.
+    fn earliest_arrival(
+        &self,
+        py: Python<'_>,
+        sources: Vec<(NodeId, u32)>,
+        to: NodeId,
+    ) -> Option<PyItinerary> {
+        let raptor = Arc::clone(&self.inner);
+        py.detach(|| raptor.earliest_arrival(&sources, to))
+            .map(PyItinerary::from)
     }
 
     #[getter]
