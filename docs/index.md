@@ -119,10 +119,12 @@ pytest tests/test_docs.py      # run every prompted block on this shelf
 
 ## Where else to look
 
-- [README](../README.md) — what routelab is for, how to install it, and a tour
-  of the whole shelf in one narrative.
-- [The contract](../README.md#the-contract) — what every kernel here is checked
-  against, and why an independent oracle rather than a golden file.
-- `demos/serve.py` — the node board: layers, a technique, a query, wired up on a
-  page, with the search drawn under a map.
+- [How it is built](design.md) — what routelab is for, the layout of the code,
+  and the decisions the whole shelf rests on. Its [contract](design.md#the-contract)
+  says what every kernel here is checked against, and why an independent oracle
+  rather than a golden file.
+- [Seeing it run](demos.md) — the node board: layers, a technique, a query,
+  wired up on a page, with the search drawn under a map.
+- [README](../README.md) — the one-page version: install it, and the shelf as a
+  table.
 - `benchmarks/` — the source of the real-network numbers on these pages.

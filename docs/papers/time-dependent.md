@@ -155,6 +155,20 @@ env = rl.Environment(rl.OSM("seattle.osm.pbf", rl.Driving()))
 rl.TimeDependentDijkstra().bind(env)      # gathers every layer's windows
 ```
 
+`python demos/route_by_clock.py seattle.osm.pbf` prints one trip at every hour.
+354 of Seattle's 1,480,122 walking edges carry a schedule — a rounding error
+that changes the answer completely for the trips that meet one. The walkway
+across the Hiram M. Chittenden Locks is tagged
+`foot:conditional=yes @ (07:00-21:00)`, and the alternative is the long way
+round the ship canal:
+
+| depart | moving | waiting | legs | scheduled |
+|---|---|---|---|---|
+| 06:00 | 61.6 min | 0 min | 153 | 0 |
+| 07:00 | **30.0 min** | 0 min | 106 | 20 |
+| 20:00 | 30.0 min | 0 min | 106 | 20 |
+| 21:00 | 61.6 min | 0 min | 153 | 0 |
+
 ## See also
 
 - [Dijkstra](dijkstra.md) — the same algorithm on a network that is always open.

@@ -110,6 +110,23 @@ quietly fell back to zero is Dijkstra wearing A*'s name — the one thing a
 benchmark must never fail to notice — so the degenerate case has to be asked
 for by name.
 
+## When guidance buys nothing
+
+Whether an estimate pays depends on how tight the bound is, which is worth
+measuring rather than assuming. On a 200×200 grid, corner to corner
+(`benchmarks/bench_astar.py`):
+
+| | settled | of graph | ms |
+|---|---:|---:|---:|
+| Dijkstra | 40,000 | 100% | 3.3 |
+| A* (zero) | 40,000 | 100% | 3.3 |
+| A* (euclidean), 8-connected | 794 | 2% | 0.3 |
+| A* (euclidean), 4-connected | 40,000 | 100% | 3.9 |
+
+Same code, same heuristic, same answers. The last row moves in L1 while the
+estimate measures L2, so the bound is loose by up to √2 everywhere and the
+guidance buys exactly nothing — it only pays for the priority queue.
+
 ## What it refuses
 
 `Euclidean` needs coordinates for every node and a rate to price them at. An
