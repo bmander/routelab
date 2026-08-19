@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import List, Optional, Protocol, runtime_checkable
 
-from .._routelab import SearchResult
+from .._routelab import Itinerary, SearchResult
 
-__all__ = ["EdgeResult", "Result", "SearchResult"]
+__all__ = ["EdgeResult", "FrontResult", "Result", "SearchResult", "StopResult"]
 
 
 @runtime_checkable
@@ -27,21 +27,28 @@ class Result(Protocol):
     — a cost, a path, and how much work it took — so this is the contract, and
     a technique is free to satisfy it however its algorithm demands.
 
+    The parameters are positional-only because a kernel names them after what
+    it labels — a stop, a node, an event — and a protocol that insisted on one
+    of those names would be describing a spelling rather than a contract.
+
     Note what is *not* here: `order`. A search that settles in more than one
     direction has no single settle sequence, which is exactly why the count
     worth comparing across algorithms is :attr:`settled` rather than the length
     of a list.
     """
 
-    def cost(self, node: int) -> Optional[int]:
+    def cost(self, node: int, /) -> Optional[int]:
         """The cheapest cost to ``node``, or ``None`` if it has none."""
+        ...
 
-    def path(self, node: int) -> "Optional[List[int]]":
+    def path(self, node: int, /) -> "Optional[List[int]]":
         """Node ids from the source to ``node``, source first."""
+        ...
 
     @property
     def settled(self) -> int:
         """How many nodes the search settled: the work it did."""
+        ...
 
 
 @runtime_checkable
@@ -55,5 +62,40 @@ class EdgeResult(Result, Protocol):
     not this, and answers with an itinerary instead.
     """
 
-    def edge_path(self, node: int) -> "Optional[List[int]]":
+    def edge_path(self, node: int, /) -> "Optional[List[int]]":
         """Edge ids from the source to ``node`` — in the *caller's* graph."""
+        ...
+
+
+@runtime_checkable
+class StopResult(Result, Protocol):
+    """A result that labelled stops on a clock, and can say which vehicles.
+
+    The timetable counterpart of :class:`EdgeResult`. A leg of a transit
+    journey is a ride rather than an edge, so what a journey is built from
+    here is an itinerary the search already holds — and reading it needs the
+    moment the query left, which a cost table does not carry and this does.
+    """
+
+    @property
+    def departing(self) -> int:
+        """When the query left, on the service day's clock."""
+        ...
+
+    def itinerary(self, stop: int, /) -> Optional[Itinerary]:
+        """The earliest arrival at ``stop``, as the rides that make it up."""
+        ...
+
+
+@runtime_checkable
+class FrontResult(StopResult, Protocol):
+    """A result that told journeys apart by more than when they arrive.
+
+    Rounds, or transfers: either way the search kept one journey per number of
+    changes rather than one per stop, and can hand back the set. What
+    :class:`~routelab.kernels.Front` reads.
+    """
+
+    def itineraries(self, stop: int, /) -> "List[Itinerary]":
+        """The Pareto set at ``stop``, in the kernel's own order."""
+        ...

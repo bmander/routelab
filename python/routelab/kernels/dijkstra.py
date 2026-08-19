@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Dict, Hashable, Optional
 
 from .. import _routelab
 from .._routelab import SearchResult
+from ..model.answer import Answer
+from ..model.environment import Environment
 from ..util._args import Nodes, Sources, normalize_nodes, normalize_sources
-from .planner import Planner
+from .planner import Origins, Technique, TreePlanner
 
-__all__ = ["Dijkstra", "dijkstra"]
+__all__ = ["Dijkstra", "DijkstraPlanner", "dijkstra"]
 
 
 def dijkstra(
@@ -42,10 +44,64 @@ def dijkstra(
     )
 
 
-class Dijkstra(Planner):
+class Dijkstra(Technique):
     """Cheapest-cost routing over fixed-cost edges."""
 
-    options = frozenset({"max_cost"})
+    def bind(
+        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "DijkstraPlanner":
+        return DijkstraPlanner(self, environment, self._compile(environment), progress)
 
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> SearchResult:
-        return dijkstra(self._bound().graph, starts, **options)
+
+class DijkstraPlanner(TreePlanner):
+    """:class:`Dijkstra` over one environment."""
+
+    def route(
+        self,
+        origin: Origins,
+        destination: Hashable,
+        *,
+        max_cost: Optional[int] = None,
+    ) -> Answer:
+        """The cheapest journey from ``origin`` to ``destination``.
+
+        Args:
+            origin: A label, several labels, or ``{label: initial_cost}`` — the
+                last being how a multimodal query starts, with each entry point
+                already costing an access walk.
+            destination: The label to route to.
+            max_cost: Do not settle anything costing more than this, so a
+                destination beyond it is simply not reached.
+
+        Returns:
+            An :class:`~routelab.Answer`: the route — empty if nothing was
+            reachable — the search space behind it, and the kernel's own table.
+        """
+        target = self.node_id(destination)
+        return self._answer(
+            self._run(self._origin_ids(origin), [target], max_cost), destination
+        )
+
+    def search(
+        self,
+        origins: Origins,
+        *,
+        targets: "Optional[Nodes]" = None,
+        max_cost: Optional[int] = None,
+    ) -> SearchResult:
+        """Run the search and return the raw, id-keyed result.
+
+        The escape hatch: everything the kernel computed, without the journey
+        packaging. Node ids here are dense, so use :meth:`node_id`/:meth:`label`
+        to get between them and your labels. ``targets`` stops the search once
+        all of them are settled.
+        """
+        return self._run(self._origin_ids(origins), targets, max_cost)
+
+    def _run(
+        self,
+        starts: "Dict[int, int]",
+        targets: "Optional[Nodes]",
+        max_cost: Optional[int],
+    ) -> SearchResult:
+        return dijkstra(self.compiled.graph, starts, targets=targets, max_cost=max_cost)

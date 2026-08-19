@@ -19,7 +19,7 @@ import routelab as rl
 
 
 @pytest.fixture
-def planner(env) -> rl.TripBased:
+def planner(env) -> rl.TripBasedPlanner:
     return rl.TripBased().bind(env)
 
 
@@ -44,7 +44,7 @@ def test_bind_computes_the_transfer_set(planner):
 
 
 def test_the_search_is_goal_directed(planner):
-    result = planner.search("A", targets=[planner.node_id("C")], departing=time(8, 0))
+    result = planner.search("A", target=planner.node_id("C"), departing=time(8, 0))
     assert result.cost(planner.node_id("C")) == 8 * 3600 + 20 * 60
     assert result.cost(planner.node_id("B")) is None, "the query is point-to-point"
     assert result.settled == 3, "every trip in the fixture was reached"
@@ -53,7 +53,7 @@ def test_the_search_is_goal_directed(planner):
     # A kept search answers for its target exactly as route() would.
     assert planner.journey(result, "C") == planner.route("A", "C", departing=time(8, 0)).routes[0]
     assert planner.journey(result, "B") is None
-    with pytest.raises(ValueError, match="searches toward a single target, and got no target"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'target'"):
         planner.search("A", departing=time(8, 0))
 
 
@@ -66,14 +66,14 @@ def test_the_front_is_one_journey_per_number_of_changes(planner):
     capped = planner.route("A", "C", departing=time(8, 0), max_transfers=0).routes[0]
     assert (capped.arrives, capped.transfers) == (front[-1].arrives, 0)
     assert capped.settled < front[-1].settled, "a capped sweep never reaches the third trip"
-    result = planner.search("A", targets=[planner.node_id("C")], departing=time(8, 0))
+    result = planner.search("A", target=planner.node_id("C"), departing=time(8, 0))
     assert planner.journeys(result, "C") == list(reversed(front))
     with pytest.raises(ValueError, match="cannot be -1"):
         planner.route("A", "C", departing=time(8, 0), max_transfers=-1).routes[0]
 
 
 def test_the_segments_are_a_search_space(planner):
-    result = planner.search("A", targets=[planner.node_id("C")], departing=time(8, 0))
+    result = planner.search("A", target=planner.node_id("C"), departing=time(8, 0))
     space = planner.explored(result)
     assert isinstance(space, rl.Segments)
     assert space.kind == "segments"
@@ -94,7 +94,7 @@ def test_the_segments_are_a_search_space(planner):
     assert drawn["peak"] == 1
     assert len(space.geojson(min_round=1)["features"]) == 1
     assert repr(space) == "Segments(3 trip segments, out to round 1)"
-    with pytest.raises(ValueError, match="trip segments has no magnitude"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'magnitude'"):
         planner.explored(result, magnitude="weight")
 
 
@@ -103,7 +103,7 @@ def test_several_origins_each_carry_a_head_start(feed):
     planner = rl.TripBased().bind(env)
     journey = planner.route({"A": 0, "C": 300}, "B", departing=time(8, 0)).routes[0]
     assert (journey.origin, journey.arrives, journey.cost) == ("C", 8 * 3600 + 360, 360)
-    result = planner.search({"A": 0, "C": 300}, targets=[planner.node_id("B")], departing=time(8, 0))
+    result = planner.search({"A": 0, "C": 300}, target=planner.node_id("B"), departing=time(8, 0))
     assert planner.journey(result, "B").cost == 360, "cost elapsed from the query's departure"
 
 
@@ -141,11 +141,11 @@ def test_a_walk_beats_the_steps_it_dominates(feed):
 
 
 def test_the_profile_refuses_a_missing_or_backwards_window(planner):
-    with pytest.raises(ValueError, match="needs a departure window"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'until'"):
         planner.profile("A", "C", departing=time(8, 0))
     with pytest.raises(ValueError, match="cannot close before it opens"):
         planner.profile("A", "C", departing=time(9, 0), until=time(8, 0))
-    with pytest.raises(ValueError, match=r"takes no until; .*profile\(\) on CSA\(\), PTL\(\) or TripBased\(\)"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'until'"):
         planner.route("A", "C", departing=time(8, 0), until=time(9, 0)).routes[0]
 
 
@@ -177,7 +177,7 @@ def test_footprint_counts_the_transfers_on_top_of_the_timetable(env, planner):
 def test_it_needs_a_timetable_and_a_departure(planner):
     plain = rl.Environment(rl.ScalarEdges(("a", "b", 1)))
     assert rl.TripBased().missing_from(plain.compile()) == frozenset({"timetable"})
-    with pytest.raises(ValueError, match="needs a departure time"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'departing'"):
         planner.route("A", "C").routes[0]
-    with pytest.raises(ValueError, match="takes no max_cost; a cost bound belongs to"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'max_cost'"):
         planner.route("A", "C", departing=time(8, 0), max_cost=10).routes[0]

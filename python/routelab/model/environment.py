@@ -62,7 +62,7 @@ LabelledEdge = Tuple[Hashable, Hashable, int]
 #: ``"scalar"`` flattens into the graph itself. ``"timetable"`` does not — its
 #: edges get a lower-bound weight and the schedule travels beside the graph, so
 #: what compiles is a graph a planner must not route as if the weights told the
-#: whole story. :attr:`Planner.accepts` is what enforces that.
+#: whole story. :attr:`~routelab.kernels.Technique.accepts` is what enforces that.
 #:
 #: A cost model absent from here is one nothing could carry without lying about
 #: it, which is the seam a new schedule-based algorithm plugs into.

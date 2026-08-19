@@ -8,8 +8,8 @@ Three steps rather than two, and the middle one is why. Every algorithm this
 project is heading toward — ULTRA's transfer shortcuts, transfer patterns,
 contraction hierarchies — earns its query speed with preprocessing paid once and
 amortized. Sixteen landmarks over a city is already a second and 33 MB. Spending
-that inside a constructor hides it; spending it in :meth:`Planner.bind` gives it
-a verb.
+that inside a constructor hides it; spending it in :meth:`Technique.bind` gives
+it a verb.
 
 Configuring separately from binding is also what makes a technique a *value*.
 Layers and heuristics have always worked this way — ``ScalarEdges(...)``,
@@ -23,6 +23,14 @@ own table of lambdas. Now:
             continue                     # this dataset cannot support it
         technique.bind(env).route(origin, destination)
 
+A :class:`Technique` and a :class:`Planner` are different types, and that is the
+whole of the contract. A technique holds configuration and can be bound; only a
+planner has ``route``. Each planner declares the query options it takes on its
+own signature, keyword-only, so what a technique understands is read off the
+signature rather than out of a registry — an option nobody takes is a
+``TypeError`` from Python and an error from a type checker, in the caller's own
+words, before anything runs.
+
 A bound planner holds the environment as it was when it was bound. Register
 another layer and you have a different world; bind the technique again.
 """
@@ -30,29 +38,38 @@ another layer and you have a different world; bind the technique again.
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, Hashable, Iterable, List, Mapping, Optional, Tuple, Union
+from typing import (
+    Any,
+    Dict,
+    Hashable,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 from .. import _routelab
 from ..model.environment import CompiledEnvironment, Environment
 from ..model.answer import Answer
 from ..model.journey import Journey
-from ..model.search import Result
-from ..model.searchspace import SearchSpace, ShortestPathTree
-from ..util.clock import service_seconds
+from ..model.search import EdgeResult, FrontResult, StopResult
+from ..model.searchspace import ShortestPathTree
+from ..util.clock import Departure, service_seconds
 from .departures import Departures, Walks
-from .schedule import Schedule
 
 __all__ = [
-    "OPTIONS",
     "Front",
+    "GraphPlanner",
     "Origins",
     "Planner",
+    "Technique",
     "TimetablePlanner",
-    "clock_readers",
-    "names",
-    "owners",
+    "TimetableTechnique",
+    "TreePlanner",
     "route",
-    "techniques",
 ]
 
 
@@ -61,154 +78,27 @@ __all__ = [
 #: labels — a label may itself be a tuple, so iterability cannot decide this.
 Origins = Union[Hashable, Iterable[Hashable], Mapping[Hashable, int]]
 
+#: A technique, as itself: what :meth:`TimetableTechnique._with_walks` hands
+#: back, so that a copy of a `RAPTOR` is still a `RAPTOR` and its `bind` still
+#: promises a `RAPTORPlanner`.
+_Technique = TypeVar("_Technique", bound="TimetableTechnique")
 
 
-def techniques() -> "List[type]":
-    """Every technique in the library, most general first.
+class Technique:
+    """A routing algorithm, configured and not yet attached to anything.
 
-    A list of the classes rather than a registry of names: what it is for is
-    answering "which of these takes that?" when a refusal has to name someone,
-    so nothing here is a lookup table anyone routes through.
-    """
-    found: "List[type]" = []
-    stack = [Planner]
-    while stack:
-        technique = stack.pop()
-        stack.extend(technique.__subclasses__())
-        # What this library ships, and what a caller could actually write
-        # down: not the abstract middle of the hierarchy, and not somebody
-        # else's subclass — a test's or an application's — which would be
-        # named in a refusal nobody could act on.
-        if technique in (Planner, TimetablePlanner):
-            continue
-        if technique.__module__.split(".")[0] == __name__.split(".")[0]:
-            found.append(technique)
-    return sorted(found, key=lambda cls: cls.__name__)
-
-
-def owners(option: str) -> "List[type]":
-    """The techniques that take ``option`` on any of their verbs — who a
-    refusal should point at."""
-    return [cls for cls in techniques() if option in cls.options or option in cls.verbs]
-
-
-def verb_for(option: str) -> Optional[str]:
-    """The verb ``option`` belongs to, when it is not :meth:`Planner.route`'s
-    or :meth:`Planner.search`'s and every technique that takes it agrees on
-    which one — so a refusal can say *where* to pass it, not just to whom.
-    ``None`` when they disagree, which is when the verb is not the useful half
-    of the answer anyway."""
-    where = {cls.verbs[option] for cls in techniques() if option in cls.verbs}
-    return where.pop() if len(where) == 1 else None
-
-
-def names(classes: "Iterable[type]") -> str:
-    """``"A(), B() or C()"`` — techniques, as a caller would write them."""
-    written = [f"{cls.__name__}()" for cls in classes]
-    if not written:
-        return ""
-    if len(written) == 1:
-        return written[0]
-    return f"{', '.join(written[:-1])} or {written[-1]}"
-
-
-def clock_readers(compiled: CompiledEnvironment) -> Optional[str]:
-    """The technique or techniques that would read this environment's clock.
-
-    A refusal that says "use TimeDependentDijkstra()" on a GTFS feed is wrong
-    advice, so the sentence is assembled from what the layers actually hold
-    and from which techniques exist: departures want the timetable techniques,
-    opening hours want the ones that read a schedule, and an environment with
-    neither has no clock for anyone to read — ``None``. A new kernel joins the
-    sentence by existing rather than by being added to a list.
-    """
-    if not Departures.missing_from(compiled):
-        return names(cls for cls in techniques() if issubclass(cls, TimetablePlanner))
-    if not Schedule.missing_from(compiled):
-        return names(
-            cls
-            for cls in techniques()
-            if "departing" in cls.options and not issubclass(cls, TimetablePlanner)
-        )
-    return None
-
-
-#: What each query option *is*, for the first half of a refusal. Who it belongs
-#: to is not written down: :func:`owners` asks the techniques, so the sentence
-#: cannot go stale as the shelf grows. ``departing`` is missing because what it
-#: is depends on the environment — see :func:`clock_readers`.
-OPTIONS = {
-    "max_cost": "a cost bound",
-    "max_depth": "a hop bound",
-    "max_transfers": "a cap on changes",
-    "until": "a departure window",
-    "magnitude": "a magnitude, which belongs to explored() on a technique that grows a tree",
-}
-
-
-class Planner:
-    """A routing technique: configured on construction, bound to data later.
-
-    Every technique answers the same three verbs — :meth:`bind`, :meth:`route`,
-    :meth:`search` — and declares, as data, which query options it takes
-    (:attr:`options`) and which it insists on (:attr:`required`). An option a
-    technique does not take is refused by name, with the technique it belongs
-    to; that is one sentence written once, here, rather than one per planner.
+    A value: write it down, name it, put it in a list, point it at more than
+    one dataset. It answers two questions — whether a dataset can support it
+    (:meth:`missing_from`) and what a planner over that dataset is
+    (:meth:`bind`) — and nothing else, because a technique with no data has
+    nothing to route.
     """
 
-    #: Cost models this algorithm knows how to route over.
+    #: Cost models this algorithm knows how to route over. A bind-time refusal
+    #: rather than a query-time one: routing a timetable as though its edges
+    #: had weights is a real path and a wrong answer, and the layers say which
+    #: it is before anything is built.
     accepts: "frozenset[str]" = frozenset({"scalar"})
-
-    #: The query options this technique understands, and the ones it cannot do
-    #: without. Declared rather than discovered so a caller — or a board — can
-    #: know what a technique takes before asking it anything. Empty here on
-    #: purpose: a technique inherits no knobs it did not ask for, so a refusal
-    #: naming who takes an option can never name someone who merely forgot to
-    #: unset it.
-    options: "frozenset[str]" = frozenset()
-    required: "frozenset[str]" = frozenset()
-
-    #: Options this technique takes on a verb of its own rather than on
-    #: :meth:`route` or :meth:`search`, as ``{option: verb}``. Declared for the
-    #: same reason :attr:`options` is: a refusal names who takes the option and
-    #: where to pass it by asking the shelf, so no sentence has to spell out a
-    #: technique that may not be the only one tomorrow.
-    verbs: "Dict[str, str]" = {}
-
-    #: The environment this was bound to, or ``None`` while it is still just a
-    #: configuration.
-    environment: Optional[Environment] = None
-    compiled: Optional[CompiledEnvironment] = None
-
-    def bind(
-        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
-    ) -> "Planner":
-        """Attach this technique to an environment and do its preprocessing.
-
-        Returns a *new* planner and leaves this one as it was, so a technique can
-        be bound to several environments — which is the whole point of writing
-        one down: the same configuration, measured across datasets.
-
-        Args:
-            progress: A counter to write into while preprocessing runs, for
-                anything watching from another thread. Six seconds of
-                contraction is long enough that "still working" and "hung" want
-                telling apart. Techniques with no honest measure of their own
-                progress leave it alone — see :mod:`routelab._routelab` and
-                `Progress.fraction` returning ``None``.
-        """
-        unsupported = environment.cost_models - self.accepts
-        if unsupported:
-            raise TypeError(
-                f"{type(self).__name__} cannot route over "
-                f"{', '.join(sorted(unsupported))} layers; it accepts "
-                f"{', '.join(sorted(self.accepts))}"
-            )
-        bound = copy.copy(self)
-        bound.environment = environment
-        bound.compiled = environment.compile()
-        bound.preprocess(progress)
-        return bound
 
     def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
         """Everything standing between this technique and that environment.
@@ -227,15 +117,72 @@ class Planner:
         """
         return compiled.cost_models - self.accepts
 
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        """Work done once at bind time, before any query.
+    def bind(
+        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "Planner":
+        """Attach this technique to an environment and do its preprocessing.
 
-        Nothing to do for a plain search; this is where a landmark table or a
-        set of shortcuts gets built. `progress` is passed straight through to
-        whatever does that building, and is not kept: it describes one build,
-        and a planner holding it afterwards would be holding a stopwatch that
-        stopped.
+        Returns a *new* planner and leaves this technique as it was, so one
+        configuration can be bound to several environments — which is the whole
+        point of writing it down: the same technique, measured across datasets.
+        Each subclass narrows the return type to its own planner, so what a
+        caller may ask next is known before anything runs.
+
+        Args:
+            progress: A counter to write into while preprocessing runs, for
+                anything watching from another thread. Six seconds of
+                contraction is long enough that "still working" and "hung" want
+                telling apart. Techniques with no honest measure of their own
+                progress leave it alone — see :mod:`routelab._routelab` and
+                `Progress.fraction` returning ``None``.
         """
+        raise NotImplementedError
+
+    def _compile(self, environment: Environment) -> CompiledEnvironment:
+        """The environment as this technique may read it, or a refusal.
+
+        Where the cost-model check lives, because it is the one thing every
+        technique checks and the one that has to happen before a kernel sees a
+        weight it would misread.
+        """
+        unsupported = environment.cost_models - self.accepts
+        if unsupported:
+            raise TypeError(
+                f"{type(self).__name__} cannot route over "
+                f"{', '.join(sorted(unsupported))} layers; it accepts "
+                f"{', '.join(sorted(self.accepts))}"
+            )
+        return environment.compile()
+
+    def __repr__(self) -> str:
+        return self._describe()
+
+    def _describe(self, *configuration: str) -> str:
+        """A technique reads as the call that would make it."""
+        return f"{type(self).__name__}({', '.join(configuration)})"
+
+
+class Planner:
+    """A technique with an environment behind it: the thing that answers.
+
+    Holds what binding produced and nothing about how to ask — the verbs live
+    on the subclasses, each with the keyword-only options its own algorithm
+    understands, because a base class wide enough for all of them would be a
+    base class promising things half of them refuse.
+    """
+
+    def __init__(
+        self,
+        technique: Technique,
+        environment: Environment,
+        compiled: CompiledEnvironment,
+        progress: "Optional[_routelab.Progress]" = None,
+    ):
+        #: The configuration this was bound from, unchanged.
+        self.technique = technique
+        #: The environment as it was when this was bound.
+        self.environment = environment
+        self.compiled = compiled
 
     @property
     def footprint(self) -> int:
@@ -245,11 +192,6 @@ class Planner:
         missing one: preprocessing is a trade, and a table comparing techniques
         has to be able to print the cost side of it for every row.
         """
-        self._bound()          # an unbound technique holds nothing, and says so
-        return self._footprint()
-
-    def _footprint(self) -> int:
-        """The size of whatever :meth:`preprocess` built."""
         return 0
 
     @property
@@ -261,225 +203,15 @@ class Planner:
         that searches something else says so: the time-expanded model settles
         events, the timetable techniques stops.
         """
-        return ("nodes", len(self._bound()))
-
-    def _bound(self) -> CompiledEnvironment:
-        """The compiled environment, or an error naming what is missing."""
-        if self.compiled is None:
-            raise ValueError(
-                f"{self!r} is a technique, not a planner — bind it to an "
-                f"environment first: {type(self).__name__}(...).bind(env)"
-            )
-        return self.compiled
-
-    # --- the three questions ------------------------------------------------
-
-    def route(self, origin: Origins, destination: Hashable, **options: Any) -> Answer:
-        """Ask this planner for a journey from ``origin`` to ``destination``.
-
-        One implementation for every technique: options are checked once,
-        origins are resolved once, and the technique supplies only the part
-        that is its own — see :meth:`_route`.
-
-        Args:
-            origin: A label, several labels, or ``{label: initial_cost}`` — the
-                last being how a multimodal query starts, with each entry point
-                already costing an access walk. For a timetable technique the
-                cost is seconds already spent when the query departs, so
-                ``{"stop_b": 45}`` stands at stop_b forty-five seconds after
-                ``departing``.
-            destination: The label to route to.
-            **options: What this technique takes — see :attr:`options`.
-                ``max_cost``, ``max_depth`` bound a search; ``departing`` is
-                when a clock-reading technique leaves; ``max_transfers`` caps
-                a round-based one.
-
-        Returns:
-            An :class:`~routelab.Answer`: the routes, best first — empty if
-            nothing was reachable — the search space behind them, and the
-            kernel's own table. The cheapest journey is ``routes[0]``.
-        """
-        options = self._options(options)
-        starts = self._origin_ids(origin)
-        return self._route(starts, self.node_id(destination), destination, options)
-
-    def _route(
-        self,
-        starts: "Dict[int, int]",
-        target: int,
-        destination: Hashable,
-        options: "Dict[str, Any]",
-    ) -> Answer:
-        """The technique's own half of :meth:`route`, ids in.
-
-        The default is the search-based one: run :meth:`_search` toward the
-        target and read the journey off the result, keeping the result. A
-        technique whose answer is an itinerary rather than a cost table
-        overrides this instead, and one that tells journeys apart by more than
-        arrival time overrides :meth:`_routes` to say so.
-        """
-        result = self._search(starts, targets=[target], **options)
-        return Answer(self, destination, self._routes(result, destination), result)
-
-    def _routes(self, result: Result, destination: Hashable) -> "List[Journey]":
-        """The Pareto set a result holds for ``destination``, best first.
-
-        One entry, for a technique whose search tells journeys apart only by
-        when they arrive — which is most of them, and is a front of one rather
-        than a lesser kind of answer. :class:`Front` overrides this.
-        """
-        journey = self.journey(result, destination)
-        return [] if journey is None else [journey]
-
-    def search(self, origins: Origins, **options: Any) -> Result:
-        """Run the search and return the raw, id-keyed result.
-
-        The escape hatch: everything the kernel computed, without the journey
-        packaging. Node ids here are dense, so use :meth:`node_id`/:meth:`label`
-        to get between them and your labels. Options are the same as
-        :meth:`route`'s, plus ``targets=[node, ...]`` to stop early.
-
-        Every technique that keeps a table of costs answers this; one that
-        answers only with a journey says so rather than handing back an empty
-        table.
-        """
-        return self._search(self._origin_ids(origins), **self._options(options))
-
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> Result:
-        """The technique's own half of :meth:`search`, ids in — the one place
-        it calls its kernel."""
-        raise NotImplementedError(
-            f"{type(self).__name__} answers with a journey rather than a cost "
-            f"per node — use route(origin, destination, ...)."
-        )
-
-    def journey(self, result: Result, destination: Hashable) -> Optional[Journey]:
-        """The journey a kept result holds for ``destination``, or ``None``.
-
-        What :meth:`route` does with a search; public so a result asked for once
-        can be read for several destinations, or drawn and then answered from,
-        without running the search again.
-        """
-        if result.cost(self.node_id(destination)) is None:
-            return None
-        return Journey.from_result(self._bound(), result, destination)
-
-    def journeys(self, result: Result, destination: Hashable) -> "List[Journey]":
-        """Not this: a search that told journeys apart only by arrival holds no
-        front to read off.
-
-        Said in so many words rather than left to fail as a missing attribute,
-        and who to ask instead is read off the shelf — the techniques that mix
-        in :class:`Front` — so a new one joins the sentence by existing.
-        """
-        keepers = names(cls for cls in techniques() if issubclass(cls, Front))
-        raise NotImplementedError(
-            f"{type(self).__name__} answers with one journey rather than a "
-            f"front: its search never told two journeys apart by anything but "
-            f"when they arrive. The techniques that count changes as they go "
-            f"keep one: ask {keepers}."
-        )
-
-    def explored(self, result: Result, **options: Any) -> SearchSpace:
-        """What the search looked at, in a form something can draw.
-
-        Dijkstra and A* — and BFS — explore by growing a shortest-path tree, so
-        that is what they report. An algorithm that explores differently returns
-        a different :class:`~routelab.SearchSpace`; the promise is only that
-        whatever it explored can be rendered.
-
-        Options belong to the shape of the space, so they differ by algorithm and
-        an algorithm that does not understand one says so — the same rule
-        :meth:`SearchSpace.geojson` states, and the reason ``magnitude`` is not
-        on this signature: it means something only to a tree.
-
-        Args:
-            result: A result from :meth:`search`, or an answer's
-                :attr:`~routelab.Answer.raw`. The tree is rebuilt from it rather
-                than recorded during the search, so asking costs nothing until
-                you ask — which is why an answer's
-                :meth:`~routelab.Answer.searchspace` is a method.
-            magnitude: What each branch should carry from the subtree beyond it:
-                ``"weight"`` for travel time, ``"nodes"`` for a count.
-        """
-        magnitude = options.pop("magnitude", "weight")
-        self._no_other(options, "a shortest-path tree")
-        return ShortestPathTree(self._bound(), result, magnitude)
-
-    # --- the shared checks ---------------------------------------------------
-
-    def _options(self, options: "Dict[str, Any]") -> "Dict[str, Any]":
-        """Refuse what this technique does not take, and insist on what it does.
-
-        One sentence for every planner: the option, the technique that owns it,
-        and — for a departure time — which technique here could read this
-        environment's clock, or that nothing can.
-        """
-        name = type(self).__name__
-        for option in sorted(options):
-            if option == "targets" or option in self.options:
-                continue
-            if option == "departing":
-                readers = clock_readers(self._bound())
-                advice = (
-                    f"Use {readers} to read the clock, or drop departing= to search "
-                    f"the always-open network knowingly."
-                    if readers
-                    else "Nothing in this environment is scheduled, so no technique "
-                    "has a clock to read here; drop departing=."
-                )
-                raise ValueError(
-                    f"{name} routes the network as though it were always open, so "
-                    f"it has no departure time. {advice}"
-                )
-            described = OPTIONS.get(option, f"{option}")
-            takers = names(owners(option))
-            verb = verb_for(option)
-            where = takers if verb is None else f"{verb}() on {takers}"
-            owner = f"{described} belongs to {where}" if takers else f"no technique here takes {described}"
-            raise ValueError(f"{name} takes no {option}; {owner}.")
-        for option in sorted(self.required - options.keys()):
-            if option == "departing":
-                raise ValueError(
-                    f"{name} needs a departure time: pass departing=time(8, 30), "
-                    f"a datetime, or seconds on its clock. There is no default, "
-                    f"for the reason Zero() has to be asked for out loud."
-                )
-            raise ValueError(f"{name} needs {option}=, and it was not given.")
-        return dict(options)
-
-    @staticmethod
-    def _no_other(options: "Dict[str, Any]", what: str) -> None:
-        """Reject leftover options rather than silently ignoring them."""
-        if options:
-            raise ValueError(
-                f"{what} has no {', '.join(sorted(options))}; that option belongs "
-                f"to a different kind of search."
-            )
-
-    def _single_target(self, options: "Dict[str, Any]", searches: str) -> int:
-        """Pop the one target a goal-directed search needs, or explain.
-
-        Shared because more than one technique here is goal-directed: A* aims a
-        heuristic at somewhere, a hierarchy climbs toward somewhere, and neither
-        has anything to estimate or climb toward without exactly one somewhere.
-        """
-        targets = options.pop("targets", None)
-        if targets is None or len(targets) != 1:
-            count = "no target" if not targets else f"{len(targets)} targets"
-            raise ValueError(
-                f"{searches} searches toward a single target, and got {count}. Use "
-                f"route(origin, destination), or pass targets=[node]."
-            )
-        return targets[0]
+        return ("nodes", len(self.compiled))
 
     def node_id(self, label: Hashable) -> int:
         """The dense id this environment gave ``label``."""
-        return self._bound().node_id(label)
+        return self.compiled.node_id(label)
 
     def label(self, node_id: int) -> Hashable:
         """The label behind a dense id."""
-        return self._bound().label(node_id)
+        return self.compiled.label(node_id)
 
     def _origin_ids(self, origins: Origins) -> "Dict[int, int]":
         """Resolve labelled origins to ``{node_id: initial_cost}``.
@@ -500,16 +232,61 @@ class Planner:
         return {self.node_id(label): int(cost) for label, cost in items}
 
     def __repr__(self) -> str:
-        return self._describe()
-
-    def _describe(self, *configuration: str) -> str:
-        """A technique reads as its configuration; a planner adds its data."""
-        inside = ", ".join(configuration)
-        bound = "" if self.environment is None else f" bound to {self.environment!r}"
-        return f"{type(self).__name__}({inside}){bound}"
+        return f"{self.technique!r} bound to {self.environment!r}"
 
 
-class TimetablePlanner(Planner):
+class GraphPlanner(Planner):
+    """A planner whose answer is a path through the environment's own edges.
+
+    Every static search is one of these, and so is a hierarchy that searches a
+    graph nobody else has seen and unpacks before answering. What they share is
+    the reading: a cost table, and a leg per edge.
+    """
+
+    def journey(self, result: EdgeResult, destination: Hashable) -> Optional[Journey]:
+        """The journey a kept result holds for ``destination``, or ``None``.
+
+        What :meth:`route` does with a search; public so a result asked for once
+        can be read for several destinations, or drawn and then answered from,
+        without running the search again.
+        """
+        if result.cost(self.node_id(destination)) is None:
+            return None
+        return Journey.from_result(self.compiled, result, destination)
+
+    def _answer(self, result: EdgeResult, destination: Hashable) -> Answer:
+        """The routes and the table they were read off — one search, kept."""
+        journey = self.journey(result, destination)
+        return Answer(self, destination, [] if journey is None else [journey], result)
+
+
+class TreePlanner(GraphPlanner):
+    """A planner that explores by growing a shortest-path tree.
+
+    Dijkstra and A* — and BFS, whose tree is by hops — settle outward from
+    their sources, so what they looked at is a tree and ``magnitude`` is a
+    question that can be asked of it. A planner that explores some other shape
+    returns some other :class:`~routelab.SearchSpace` and takes no magnitude,
+    which is why this is a class of its own rather than a method on
+    :class:`Planner`.
+    """
+
+    def explored(self, result: EdgeResult, magnitude: str = "weight") -> ShortestPathTree:
+        """What the search looked at, in a form something can draw.
+
+        Args:
+            result: A result from ``search``, or an answer's
+                :attr:`~routelab.Answer.raw`. The tree is rebuilt from it rather
+                than recorded during the search, so asking costs nothing until
+                you ask — which is why an answer's
+                :meth:`~routelab.Answer.searchspace` is a method.
+            magnitude: What each branch should carry from the subtree beyond it:
+                ``"weight"`` for travel time, ``"nodes"`` for a count.
+        """
+        return ShortestPathTree(self.compiled, result, magnitude)
+
+
+class TimetableTechnique(Technique):
     """Earliest arrival over a timetable — what the timetable techniques share.
 
     Pyrga, Schulz, Wagner & Zaroliagis, *Efficient Models for Timetable
@@ -521,8 +298,8 @@ class TimetablePlanner(Planner):
     years later and builds no graph at all; :class:`CSA` a year after that and
     keeps only the departures, sorted; :class:`TripBased` two years on again
     and labels trips, with the changes between them computed once. Every
-    technique here must agree on every query, which is the paper's thesis and this library's
-    test.
+    technique here must agree on every query, which is the paper's thesis and
+    this library's test.
 
     Each accepts a ``"scalar"`` layer alongside the timetable and reads its
     edges between stops as **footpaths** — walks a rider may make at any time,
@@ -537,40 +314,66 @@ class TimetablePlanner(Planner):
     """
 
     accepts: "frozenset[str]" = frozenset({"scalar", "timetable"})
-    options = frozenset({"departing"})
-    required = frozenset({"departing"})
+
+    #: The walks this technique was handed instead of the ones it would derive.
+    #: ``None`` for every technique a caller writes down; :class:`~routelab.ULTRA`
+    #: is what sets it, and :meth:`_with_walks` is the only way it is set.
+    _walks: Any = None
 
     def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
-        """Departures to read, on top of what any planner needs. Without them
+        """Departures to read, on top of what any technique needs. Without them
         there is no timetable to route over."""
         return super().missing_from(compiled) | Departures.missing_from(compiled)
 
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        """Gather the layers' departures into the timetable every model reads,
-        and their scalar edges between stops into the footpaths every model
-        walks.
-
-        Derived here rather than kept on the environment, for the reason
-        :class:`TimeDependentDijkstra` gives — and refused here, at bind, so
-        a technique that cannot route says so before it is asked to.
-        """
-        compiled = self._bound()
-        self.timetable = Departures().bind(compiled, progress)
-        self.footpaths = self.walks().bind(compiled, progress)
-
-    def walks(self) -> Walks:
+    def walks(self) -> Any:
         """Which walks this technique reads — a derivation, like the timetable.
 
         :class:`~routelab.Walks` for every model here: the scalar edges between
         stops, closed under composition, which is what a one-hop transfer set
         has to be. Declared rather than assumed so that a technique which walks
-        something else can say so — :class:`~routelab.ULTRA` computes a far
-        smaller set that needs no closure, and overriding this is the whole of
-        how it hands that set to the model underneath it.
+        something else can say so — :class:`~routelab.LabelConstrained` reads
+        the arcs themselves and wants no closure at all.
         """
-        return Walks()
+        return Walks() if self._walks is None else self._walks
 
-    def _footprint(self) -> int:
+    def _with_walks(self: _Technique, spec: Any) -> _Technique:
+        """The same configuration, reading someone else's transfer set.
+
+        :class:`~routelab.ULTRA`'s seam, and the whole of how a precomputed
+        set of shortcuts reaches the technique underneath: a copy rather than a
+        mutation, because the technique a caller wrote down is still theirs.
+        """
+        other = copy.copy(self)
+        other._walks = spec
+        return other
+
+
+class TimetablePlanner(Planner):
+    """A timetable technique with a feed behind it.
+
+    Holds the two things every model here reads — the departures, and the walks
+    between stops — and the clock arithmetic they all do: a query's sources are
+    stops on the service day, each already some seconds along, and a journey is
+    an itinerary rather than a path through edges.
+    """
+
+    def __init__(
+        self,
+        technique: TimetableTechnique,
+        environment: Environment,
+        compiled: CompiledEnvironment,
+        progress: "Optional[_routelab.Progress]" = None,
+    ):
+        super().__init__(technique, environment, compiled, progress)
+        #: Gathered here rather than kept on the environment, for the reason
+        #: :class:`~routelab.TimeDependentDijkstra` gives about its calendar —
+        #: and refused here, at bind, so a technique that cannot route says so
+        #: before it is asked anything.
+        self.timetable = Departures().bind(compiled, progress)
+        self.footpaths = technique.walks().bind(compiled, progress)
+
+    @property
+    def footprint(self) -> int:
         """The timetable and the walks, in kernel form: what every model holds
         before it builds anything of its own."""
         return self.timetable.footprint + self.footpaths.footprint
@@ -579,26 +382,21 @@ class TimetablePlanner(Planner):
     def searches(self) -> "Tuple[str, int]":
         return ("stops", self.timetable.num_stops)
 
-    def _sources(self, starts: "Dict[int, int]", options: "Dict[str, Any]") -> "Tuple[List[Tuple[int, int]], int]":
+    def _sources(
+        self, starts: "Dict[int, int]", departing: Departure
+    ) -> "Tuple[List[Tuple[int, int]], int]":
         """The query's sources as ``(stop, time)`` on the service-day clock, and
         the departure everything is elapsed from."""
-        at = service_seconds(options["departing"])
+        at = service_seconds(departing)
         return [(stop, at + head_start) for stop, head_start in starts.items()], at
 
-    def _window(self, departing: Any, until: Any) -> "Tuple[int, int]":
+    def _window(self, departing: Departure, until: Departure) -> "Tuple[int, int]":
         """A departure window as ``(opens, closes)`` on the service-day clock.
 
         Shared because more than one technique here answers over a range of
-        departures rather than from one moment, and a window is refused the
-        same way whoever asked: a missing end is a question that was not
-        finished, and one that closes before it opens is not a window.
+        departures rather than from one moment, and a window that closes before
+        it opens is not a window whoever asked.
         """
-        if departing is None or until is None:
-            raise ValueError(
-                f"{type(self).__name__}.profile needs a departure window: pass "
-                f"departing=time(8, 30), until=time(10, 30) — times, datetimes, "
-                f"or seconds on the service-day clock."
-            )
         opens, closes = service_seconds(departing), service_seconds(until)
         if closes < opens:
             raise ValueError(
@@ -623,14 +421,13 @@ class TimetablePlanner(Planner):
         The journey is built from the survivors only, since building one asks
         the environment for an edge per leg and most origins lose most pairs.
         """
-        compiled = self._bound()
         found.sort(key=lambda pair: (pair[0], -pair[1].arrives))
         kept: "List[Journey]" = []
         best: Optional[int] = None
         for departs, itinerary in reversed(found):
             if best is None or itinerary.arrives < best:
                 kept.append(
-                    Journey.from_itinerary(compiled, itinerary, destination, departs)
+                    Journey.from_itinerary(self.compiled, itinerary, destination, departs)
                 )
                 best = itinerary.arrives
         kept.reverse()
@@ -653,89 +450,66 @@ class TimetablePlanner(Planner):
             )
         return int(max_transfers)
 
-    def _earliest_arrival(
-        self, sources: "List[Tuple[int, int]]", target: int, options: "Dict[str, Any]"
-    ) -> "Optional[_routelab.Itinerary]":
-        """Run the model. The one line the models do not share."""
-        raise NotImplementedError
-
-    def journey(self, result: Result, destination: Hashable) -> Optional[Journey]:
+    def journey(self, result: StopResult, destination: Hashable) -> Optional[Journey]:
         """The earliest arrival at ``destination`` a kept search holds.
 
         A timetable technique that keeps a table — a label per stop, however
         it got there — reads an *itinerary* off it rather than an edge path,
-        which is why this is the family's and not :class:`Planner`'s: the
+        which is why this is the family's and not :class:`GraphPlanner`'s: the
         result knows which vehicles were ridden, and a leg is one of those.
         """
-        itinerary = result.itinerary(self.node_id(destination))  # type: ignore[attr-defined]
+        itinerary = result.itinerary(self.node_id(destination))
         if itinerary is None:
             return None
-        return Journey.from_itinerary(self._bound(), itinerary, destination, result.departing)
+        return Journey.from_itinerary(
+            self.compiled, itinerary, destination, result.departing
+        )
 
-    def _route(
+    def _answer(self, result: StopResult, destination: Hashable) -> Answer:
+        """The routes a kept search holds, and the search."""
+        journey = self.journey(result, destination)
+        return Answer(self, destination, [] if journey is None else [journey], result)
+
+    def _answer_itinerary(
         self,
-        starts: "Dict[int, int]",
-        target: int,
+        itinerary: "Optional[_routelab.Itinerary]",
         destination: Hashable,
-        options: "Dict[str, Any]",
+        at: int,
     ) -> Answer:
-        """The earliest arrival at ``destination``, as a route and nothing else.
+        """One itinerary, as an answer that holds no table.
 
-        A timetable technique of this family answers with an itinerary — which
-        vehicles, when — rather than a cost per node, so this is where the
-        shared :meth:`Planner.route` hands over, and why the answer holds no
-        table. The questions that need one refuse by name, as they always did.
+        A model that answers a pair of stops rather than filling a cost table —
+        Pyrga's two, PTL, the label-constrained pair — has nothing else to hand
+        back, and says so with ``raw=None`` rather than an empty table.
         """
-        sources, at = self._sources(starts, options)
-        itinerary = self._earliest_arrival(sources, target, options)
         journey = (
             None
             if itinerary is None
-            else Journey.from_itinerary(self._bound(), itinerary, destination, at)
+            else Journey.from_itinerary(self.compiled, itinerary, destination, at)
         )
         return Answer(self, destination, [] if journey is None else [journey], None)
 
-    def explored(self, result: Result, **options: Any) -> SearchSpace:
-        """Not this: a model that answers with a journey keeps no search space.
 
-        Said in so many words rather than left to fail on a result that was
-        never a table. Who to ask instead is read off the shelf — the kernels
-        that override this — so a new one joins the sentence by existing,
-        the way :func:`clock_readers` does it.
-        """
-        drawers = names(
-            cls
-            for cls in techniques()
-            if issubclass(cls, TimetablePlanner)
-            and cls.explored is not TimetablePlanner.explored
-        )
-        raise NotImplementedError(
-            f"{type(self).__name__} answers with a journey and keeps no search "
-            f"space, so there is nothing to draw. The techniques that keep a "
-            f"table report one: ask {drawers}."
-        )
-
-
-class Front:
+class Front(TimetablePlanner):
     """Answers with a front of more than one, where most techniques answer one.
 
     Every query here answers with a Pareto set — the journeys no other journey
     beats on every criterion — and a technique that tells them apart only by
-    when they arrive has exactly one. What this mixin says is that *these* two
-    tell them apart by something else as well: one journey per number of
-    changes that arrives strictly earlier than any journey with fewer.
-    :class:`RAPTOR` gets it from its rounds and :class:`TripBased` from its
-    transfer counts, and both read it off a result the same way — so it is
-    written here rather than twice.
+    when they arrive has exactly one. What this says is that *these* two tell
+    them apart by something else as well: one journey per number of changes
+    that arrives strictly earlier than any journey with fewer.
+    :class:`~routelab.RAPTOR` gets it from its rounds and
+    :class:`~routelab.TripBased` from its transfer counts, and both read it off
+    a result the same way — so it is written here rather than twice.
 
     Not on :class:`TimetablePlanner`, because it is not the family's: a
-    connection scan counts nothing but time, and :class:`CSA` has no front to
-    read off a search that never distinguished one journey from another by
-    changes. A mixin is what says *these* techniques, rather than widening the
-    base until a technique inherits a verb it cannot honour.
+    connection scan counts nothing but time, and :class:`~routelab.CSA` has no
+    front to read off a search that never distinguished one journey from
+    another by changes. Saying *these* techniques is what keeps the base from
+    promising a verb half of it cannot honour.
     """
 
-    def journeys(self, result: Result, destination: Hashable) -> "List[Journey]":
+    def journeys(self, result: FrontResult, destination: Hashable) -> "List[Journey]":
         """Every journey a kept search holds for ``destination``: the earliest
         arrival for each number of changes, fewest changes first, none
         dominated by another.
@@ -744,14 +518,15 @@ class Front:
         is this reversed, so that it leads with the earliest arrival — the
         journey every technique here would have given — whatever was asked.
         """
-        compiled = self._bound()  # type: ignore[attr-defined]
-        target = self.node_id(destination)  # type: ignore[attr-defined]
+        target = self.node_id(destination)
         return [
-            Journey.from_itinerary(compiled, itinerary, destination, result.departing)
-            for itinerary in result.itineraries(target)  # type: ignore[attr-defined]
+            Journey.from_itinerary(
+                self.compiled, itinerary, destination, result.departing
+            )
+            for itinerary in result.itineraries(target)
         ]
 
-    def _routes(self, result: Result, destination: Hashable) -> "List[Journey]":
+    def _answer_front(self, result: FrontResult, destination: Hashable) -> Answer:
         """The front, best first — which is the order an answer promises and
         the reverse of the order a search produces it in.
 
@@ -760,12 +535,18 @@ class Front:
         technique here would have returned, so `routes[0]` means the same thing
         whatever was asked, and each entry after it trades arrival time for one
         fewer change.
+
+        A verb of its own rather than an override of
+        :meth:`TimetablePlanner._answer`: what it takes is a result that kept a
+        front, which is less than the family's answer promises to accept, and a
+        narrower argument is not the same method.
         """
-        return list(reversed(self.journeys(result, destination)))
+        routes = list(reversed(self.journeys(result, destination)))
+        return Answer(self, destination, routes, result)
 
 
 def route(
-    technique: Planner,
+    technique: Technique,
     environment: Environment,
     origin: Origins,
     destination: Hashable,
@@ -779,8 +560,9 @@ def route(
     technique yourself and keep the planner — that is what makes preprocessing
     worth doing, and this function throws it away every time.
 
-    There is no registry of names here on purpose. A technique is a value: a
-    dictionary of them is a line a caller writes, and no fixed set the library
-    could ship would serve both a demo's dropdown and a parameter sweep.
+    ``**options`` are the bound planner's own, and are checked by it: this
+    knows which technique it was handed no earlier than the caller does, so it
+    passes them straight through rather than pretending to.
     """
-    return technique.bind(environment).route(origin, destination, **options)
+    planner: Any = technique.bind(environment)
+    return planner.route(origin, destination, **options)

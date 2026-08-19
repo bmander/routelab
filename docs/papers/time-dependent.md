@@ -124,7 +124,7 @@ a time is not a query with a sensible fallback, it is a different question:
 >>> planner.route(1, 3).routes[0]                        # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
-ValueError: TimeDependentDijkstra needs a departure time: pass departing=time(8, 30), ...
+TypeError: ...route() missing 1 required keyword-only argument: 'departing'
 
 ```
 

@@ -3,19 +3,19 @@ and simpler hierarchical routing in road networks* (2008)."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Dict, Hashable, Optional
 
 from .. import _routelab
-from ..model.environment import CompiledEnvironment
-from ..model.search import Result
-from ..model.searchspace import MeetingTrees, SearchSpace
+from ..model.answer import Answer
+from ..model.environment import CompiledEnvironment, Environment
+from ..model.searchspace import MeetingTrees
 from .orderings import EdgeDifference, Ordering
-from .planner import Planner
+from .planner import GraphPlanner, Origins, Technique
 
-__all__ = ["ContractionHierarchy"]
+__all__ = ["ContractionHierarchy", "ContractionHierarchyPlanner"]
 
 
-class ContractionHierarchy(Planner):
+class ContractionHierarchy(Technique):
     """Exact routing by rewriting the graph, then only ever climbing it.
 
         ContractionHierarchy().bind(env).route("a", "b")
@@ -50,31 +50,61 @@ class ContractionHierarchy(Planner):
         self.ordering = ordering if ordering is not None else EdgeDifference()
 
     def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
-        """Whatever the ordering needs, on top of what any planner needs."""
+        """Whatever the ordering needs, on top of what any technique needs."""
         return super().missing_from(compiled) | self.ordering.missing_from(compiled)
 
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        """Contract the graph. The expensive step, and the whole technique."""
-        self.hierarchy = self.ordering.bind(self._bound(), progress)
+    def bind(
+        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "ContractionHierarchyPlanner":
+        return ContractionHierarchyPlanner(
+            self, environment, self._compile(environment), progress
+        )
 
-    def _footprint(self) -> int:
+    def __repr__(self) -> str:
+        return self._describe(repr(self.ordering))
+
+
+class ContractionHierarchyPlanner(GraphPlanner):
+    """A contracted graph, and the bidirectional query over it."""
+
+    def __init__(
+        self,
+        technique: ContractionHierarchy,
+        environment: Environment,
+        compiled: CompiledEnvironment,
+        progress: "Optional[_routelab.Progress]" = None,
+    ):
+        super().__init__(technique, environment, compiled, progress)
+        #: Contracting the graph. The expensive step, and the whole technique.
+        self.hierarchy = technique.ordering.bind(compiled, progress)
+
+    @property
+    def footprint(self) -> int:
         return self.hierarchy.footprint
 
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> Result:
-        """Run the bidirectional query. Requires exactly one target.
+    def route(self, origin: Origins, destination: Hashable) -> Answer:
+        """The cheapest journey, climbing from both ends and meeting above it.
+
+        No bounds: the search is over the contracted graph, where a cost bound
+        would cut off paths that are still cheap in the original.
+        """
+        target = self.node_id(destination)
+        return self._answer(self._run(self._origin_ids(origin), target), destination)
+
+    def search(self, origins: Origins, *, target: int) -> "_routelab.MeetingSearch":
+        """Run the bidirectional query toward one target.
 
         Returns a :class:`~routelab._routelab.MeetingSearch` rather than a
         `SearchResult`: two searches met in the middle, and neither half alone
         is the answer. It reports costs and paths in the environment's own edges,
-        which is all :class:`~routelab.Journey` ever asked of a result.
+        which is all :class:`~routelab.Journey` ever asked of a result. A
+        hierarchy climbs *toward* somewhere, so the target is required.
         """
-        target = self._single_target(options, "A hierarchy")
+        return self._run(self._origin_ids(origins), target)
+
+    def _run(self, starts: "Dict[int, int]", target: int) -> "_routelab.MeetingSearch":
         return self.hierarchy.query(list(starts.items()), target)
 
-    def explored(self, result: Result, **options: Any) -> SearchSpace:
+    def explored(self, result: "_routelab.MeetingSearch") -> MeetingTrees:
         """The two halves of the search, and where they met."""
-        self._no_other(options, "meeting trees")
-        return MeetingTrees(self._bound(), result)
-
-    def __repr__(self) -> str:
-        return self._describe(repr(self.ordering))
+        return MeetingTrees(self.compiled, result)

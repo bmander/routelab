@@ -55,17 +55,27 @@ class Answer:
     #: that answers with an itinerary and keeps no table. The escape hatch.
     raw: Optional[Result] = None
 
-    def searchspace(self, **options: Any) -> SearchSpace:
+    def searchspace(self, magnitude: Optional[str] = None) -> SearchSpace:
         """What the search looked at, in a form something can draw.
 
-        A method rather than an attribute because the shape takes options —
+        A method rather than an attribute because the shape takes an option —
         ``magnitude="nodes"`` counts settled nodes where the default
         accumulates travel time — and because building it is real work over
         what was settled, which a caller who only wanted a route should not
-        pay. A technique that keeps no space says so and names the ones that
-        do.
+        pay.
+
+        ``magnitude`` means something only to a technique that grows a tree,
+        and is passed on only when it was asked for, so that the ones exploring
+        some other shape refuse it in their own signature rather than here.
         """
-        return self.planner.explored(self.raw, **options)
+        if self.raw is None:
+            raise NotImplementedError(
+                f"{type(self.planner).__name__} answers with a journey and keeps "
+                f"no search space, so there is nothing to draw."
+            )
+        if magnitude is None:
+            return self.planner.explored(self.raw)
+        return self.planner.explored(self.raw, magnitude=magnitude)
 
     def __repr__(self) -> str:
         held = "no table" if self.raw is None else repr(self.raw)

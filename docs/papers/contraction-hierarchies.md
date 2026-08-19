@@ -79,7 +79,7 @@ The search is not one tree, so `explored` reports something else — the two
 halves, and where they met:
 
 ```python
->>> result = planner.search("m0", targets=[planner.node_id("m5")])
+>>> result = planner.search("m0", target=planner.node_id("m5"))
 >>> space = planner.explored(result)
 >>> space
 MeetingTrees(4 branches, longest span=2)
@@ -134,12 +134,13 @@ where a cost bound would cut off paths that are still cheap in the original:
 >>> planner.route("m0", "m5", max_cost=100).routes[0]    # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
-ValueError: ContractionHierarchy takes no max_cost; a cost bound belongs to AStar(), ...
+TypeError: ...route() got an unexpected keyword argument 'max_cost'
 
 ```
 
 And, like [A*](astar.md), it needs exactly one destination — a bidirectional
-search has to know what the other half is searching from.
+search has to know what the other half is searching from — so `search` takes
+`target=` and nothing else.
 
 ## On a real map
 

@@ -3,16 +3,17 @@ of minimum cost paths* (1968)."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Dict, Hashable, Optional
 
 from .. import _routelab
 from .._routelab import SearchResult
-from ..model.environment import CompiledEnvironment
+from ..model.answer import Answer
+from ..model.environment import CompiledEnvironment, Environment
 from ..util._args import Sources, normalize_sources
 from .heuristics import Heuristic
-from .planner import Planner
+from .planner import Origins, Technique, TreePlanner
 
-__all__ = ["AStar", "astar"]
+__all__ = ["AStar", "AStarPlanner", "astar"]
 
 
 def astar(
@@ -47,7 +48,7 @@ def astar(
     )
 
 
-class AStar(Planner):
+class AStar(Technique):
     """Cheapest-cost routing, guided toward the destination by a heuristic.
 
         AStar(Euclidean()).bind(env).route("a", "b")
@@ -62,32 +63,67 @@ class AStar(Planner):
     out loud.
     """
 
-    options = frozenset({"max_cost"})
-
     def __init__(self, heuristic: Heuristic):
         self.heuristic_spec = heuristic
 
     def missing_from(self, compiled: CompiledEnvironment) -> "frozenset[str]":
-        """Whatever the heuristic needs, on top of what any planner needs."""
+        """Whatever the heuristic needs, on top of what any technique needs."""
         return super().missing_from(compiled) | self.heuristic_spec.missing_from(compiled)
 
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        """Bind the heuristic to this environment — where a landmark table,
-        and any preprocessing after it, gets built."""
-        self.heuristic = self.heuristic_spec.bind(self._bound(), progress)
-
-    def _footprint(self) -> int:
-        return self.heuristic.footprint
-
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> SearchResult:
-        """Run the guided search. Requires exactly one target.
-
-        A* is goal-directed: the estimate is an estimate *to somewhere*. Without
-        a target there is nothing to aim at, and with several there is no single
-        thing the heuristic could be a bound on.
-        """
-        target = self._single_target(options, "A*")
-        return astar(self._bound().graph, starts, target, self.heuristic, **options)
+    def bind(
+        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "AStarPlanner":
+        return AStarPlanner(self, environment, self._compile(environment), progress)
 
     def __repr__(self) -> str:
         return self._describe(repr(self.heuristic_spec))
+
+
+class AStarPlanner(TreePlanner):
+    """:class:`AStar` over one environment, its heuristic already built."""
+
+    def __init__(
+        self,
+        technique: AStar,
+        environment: Environment,
+        compiled: CompiledEnvironment,
+        progress: "Optional[_routelab.Progress]" = None,
+    ):
+        super().__init__(technique, environment, compiled, progress)
+        #: Where a landmark table, and any preprocessing after it, gets built.
+        self.heuristic = technique.heuristic_spec.bind(compiled, progress)
+
+    @property
+    def footprint(self) -> int:
+        return self.heuristic.footprint
+
+    def route(
+        self,
+        origin: Origins,
+        destination: Hashable,
+        *,
+        max_cost: Optional[int] = None,
+    ) -> Answer:
+        """The cheapest journey to ``destination``, guided toward it."""
+        target = self.node_id(destination)
+        return self._answer(
+            self._run(self._origin_ids(origin), target, max_cost), destination
+        )
+
+    def search(
+        self, origins: Origins, *, target: int, max_cost: Optional[int] = None
+    ) -> SearchResult:
+        """Run the guided search toward one target.
+
+        A* is goal-directed: the estimate is an estimate *to somewhere*, so the
+        target is a required argument rather than a bound on the search. There
+        is nothing a heuristic could be a bound on for several of them.
+        """
+        return self._run(self._origin_ids(origins), target, max_cost)
+
+    def _run(
+        self, starts: "Dict[int, int]", target: int, max_cost: Optional[int]
+    ) -> SearchResult:
+        return astar(
+            self.compiled.graph, starts, target, self.heuristic, max_cost=max_cost
+        )

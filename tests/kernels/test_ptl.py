@@ -19,7 +19,7 @@ import routelab as rl
 
 
 @pytest.fixture
-def planner(env) -> rl.PTL:
+def planner(env) -> rl.PTLPlanner:
     return rl.PTL().bind(env)
 
 
@@ -95,7 +95,7 @@ def test_a_walk_beats_the_steps_it_dominates(feed):
 
 
 def test_the_profile_refuses_a_missing_or_backwards_window(planner):
-    with pytest.raises(ValueError, match="needs a departure window"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'until'"):
         planner.profile("A", "C", departing=time(8, 0))
     with pytest.raises(ValueError, match="cannot close before it opens"):
         planner.profile("A", "C", departing=time(9, 0), until=time(8, 0))
@@ -115,7 +115,9 @@ def test_binding_reports_its_progress(env):
 def test_it_needs_a_timetable_and_a_departure(planner):
     plain = rl.Environment(rl.ScalarEdges(("a", "b", 1)))
     assert rl.PTL().missing_from(plain.compile()) == frozenset({"timetable"})
-    with pytest.raises(ValueError, match="needs a departure time"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'departing'"):
         planner.route("A", "C").routes[0]
-    with pytest.raises(ValueError, match="takes no max_transfers; a cap on changes belongs to RAPTOR"):
+    # PTL's labels answer arrival and nothing else; the paper's multicriteria
+    # labels are not here, so there is no cap on changes to give.
+    with pytest.raises(TypeError, match="unexpected keyword argument 'max_transfers'"):
         planner.route("A", "C", departing=time(8, 0), max_transfers=1).routes[0]

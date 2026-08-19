@@ -165,17 +165,6 @@ def main(argv: "list[str] | None" = None) -> int:
         if len(arrivals) == 1
         else f"\n  THE TECHNIQUES DISAGREE: {arrivals} — one of them is wrong"
     )
-    # The extra readouts, each asked of the techniques that have the verb.
-    for name, planner in planners.items():
-        if not hasattr(planner, "frontier"):
-            continue
-        front = planner.frontier(origin, target, departing=args.departing)
-        if len(front) > 1:
-            print(f"  {name}'s front: " + " · ".join(
-                f"{j.transfers} change{'' if j.transfers == 1 else 's'} arrives {clock(j.arrives)}"
-                for j in front
-            ))
-
     # CSA's profile is over departure and arrival; TripBased's over changes as
     # well, so the same window holds more and each of its steps says how many.
     def step(journey: rl.Journey, changes: bool) -> str:
@@ -194,7 +183,7 @@ def main(argv: "list[str] | None" = None) -> int:
         print(
             f"  {name}'s profile to {clock(until)} ({took:.1f}ms): "
             f"{len(profile)} departures worth taking — "
-            + " · ".join(step(j, "max_transfers" in type(planner).options) for j in profile[:4])
+            + " · ".join(step(j, isinstance(planner, rl.kernels.Front)) for j in profile[:4])
             + (" · …" if len(profile) > 4 else "")
         )
 

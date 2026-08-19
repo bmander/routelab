@@ -114,17 +114,20 @@ else — so neither has a search space to hand over, and both say so rather than
 inventing one:
 
 ```python
->>> result = None
->>> expanded.explored(result)                  # doctest: +ELLIPSIS
+>>> answer = expanded.route("A", "C", departing=time(8, 0))
+>>> answer.raw is None
+True
+>>> answer.searchspace()                       # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
-NotImplementedError: TimeExpanded answers with a journey and keeps no search space, ...
+NotImplementedError: TimeExpandedPlanner answers with a journey and keeps no search space, ...
 
 ```
 
-The refusal names the techniques that *do* keep one, which is how the shelf is
-meant to be navigated: [CSA](csa.md), [RAPTOR](raptor.md) or
-[TripBased](trip-based.md).
+Neither planner has a `search` either, which is the same fact said by the type
+rather than at the bottom of a stack trace. The techniques that *do* keep a
+table are how the shelf is meant to be navigated from here: [CSA](csa.md),
+[RAPTOR](raptor.md) or [TripBased](trip-based.md).
 
 ## What is not here
 

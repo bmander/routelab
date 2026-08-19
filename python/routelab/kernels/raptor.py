@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Dict, Hashable, List, Optional, Tuple
 
 from .. import _routelab
-from ..model.search import Result
-from ..model.searchspace import Rounds, SearchSpace
-from .planner import Front, Planner, TimetablePlanner
+from ..model.answer import Answer
+from ..model.environment import CompiledEnvironment, Environment
+from ..model.searchspace import Rounds
+from ..util.clock import Departure
+from .planner import Front, Origins, TimetablePlanner, TimetableTechnique
 
-__all__ = ["RAPTOR"]
+__all__ = ["RAPTOR", "RAPTORPlanner"]
 
 
-class RAPTOR(Front, TimetablePlanner):
+class RAPTOR(TimetableTechnique):
     """Round-based public transit routing (Delling, Pajor & Werneck, 2012).
 
         RAPTOR().bind(env).route(origin, target, departing=time(8, 30))
@@ -21,10 +23,10 @@ class RAPTOR(Front, TimetablePlanner):
     and rides the earliest trip that can be caught, so after `k` rounds every
     stop holds its earliest arrival with at most `k-1` changes. That is
     one-to-all by construction — a label per stop per round — which is why,
-    like :class:`CSA` and unlike the two Pyrga models, this one has a real
-    :meth:`search` and something to draw. It is Pareto by construction too: arrival against
-    changes, one incomparable journey per round that improved something, which
-    is what :meth:`frontier` hands back.
+    like :class:`~routelab.CSA` and unlike the two Pyrga models, this one has a
+    real ``search`` and something to draw. It is Pareto by construction too:
+    arrival against changes, one incomparable journey per round that improved
+    something, which is what :meth:`~routelab.kernels.Front.journeys` hands back.
 
     ``max_transfers`` is a query option, not a constructor argument, for the
     reason ``max_cost`` is: it bounds one question, not the technique.
@@ -34,51 +36,106 @@ class RAPTOR(Front, TimetablePlanner):
     is not a knob here.
     """
 
-    options = frozenset({"departing", "max_transfers"})
+    def bind(
+        self, environment: Environment, progress: "Optional[_routelab.Progress]" = None
+    ) -> "RAPTORPlanner":
+        return RAPTORPlanner(self, environment, self._compile(environment), progress)
 
-    def preprocess(self, progress: "Optional[_routelab.Progress]" = None) -> None:
-        super().preprocess(progress)
+
+class RAPTORPlanner(Front, TimetablePlanner):
+    """:class:`RAPTOR` over one feed, its routes and trips already indexed."""
+
+    def __init__(
+        self,
+        technique: RAPTOR,
+        environment: Environment,
+        compiled: CompiledEnvironment,
+        progress: "Optional[_routelab.Progress]" = None,
+    ):
+        super().__init__(technique, environment, compiled, progress)
         self._raptor = _routelab.Raptor.build(self.timetable, self.footpaths)
 
-    def _footprint(self) -> int:
-        return super()._footprint() + self._raptor.footprint
+    @property
+    def footprint(self) -> int:
+        return super().footprint + self._raptor.footprint
 
     @property
     def num_routes(self) -> int:
         """Routes in the paper's sense — distinct stop sequences whose trips
         never overtake — which is more than a feed's own count of routes."""
-        self._bound()
         return self._raptor.num_routes
 
     @property
     def num_trips(self) -> int:
-        self._bound()
         return self._raptor.num_trips
 
-    @classmethod
-    def _rounds(cls, max_transfers: Optional[int]) -> Optional[int]:
-        """`k` changes is `k + 1` trips is `k + 1` rounds."""
-        changes = cls._changes(max_transfers)
-        return None if changes is None else changes + 1
+    def route(
+        self,
+        origin: Origins,
+        destination: Hashable,
+        *,
+        departing: Departure,
+        max_transfers: Optional[int] = None,
+    ) -> Answer:
+        """Every journey worth having to ``destination``, earliest arrival first.
 
-    # RAPTOR keeps a label per stop per round, so it has a cost table like any
-    # graph search and `Planner.route` — search, then read the journey off the
-    # result — is the whole implementation; the family's `journey` reads an
-    # itinerary off it. The itinerary hook the two Pyrga models need is not
-    # used here.
-    _route = Planner._route
-
-    def _search(self, starts: "Dict[int, int]", **options: Any) -> "_routelab.RaptorSearch":
-        """Run the rounds — toward one target if given, else to every stop."""
-        sources, at = self._sources(starts, options)
-        target = None
-        if options.get("targets"):
-            target = self._single_target(options, "RAPTOR, pruning toward a target,")
-        return self._raptor.search(
-            sources, target, self._rounds(options.get("max_transfers")), at
+        One entry per number of changes: the front the rounds produce, reversed
+        so that ``routes[0]`` is the journey every other timetable technique
+        here would have given.
+        """
+        return self._answer_front(
+            self._run(
+                self._origin_ids(origin),
+                self.node_id(destination),
+                departing,
+                max_transfers,
+            ),
+            destination,
         )
 
-    def explored(self, result: Result, **options: Any) -> SearchSpace:
+    def search(
+        self,
+        origins: Origins,
+        *,
+        departing: Departure,
+        target: Optional[int] = None,
+        max_transfers: Optional[int] = None,
+    ) -> "_routelab.RaptorSearch":
+        """Run the rounds — toward one target if given, else to every stop."""
+        return self._run(self._origin_ids(origins), target, departing, max_transfers)
+
+    def _run(
+        self,
+        starts: "Dict[int, int]",
+        target: Optional[int],
+        departing: Departure,
+        max_transfers: Optional[int],
+    ) -> "_routelab.RaptorSearch":
+        sources, at = self._sources(starts, departing)
+        return self._search_stops(sources, at, max_transfers, target)
+
+    def _search_stops(
+        self,
+        sources: "List[Tuple[int, int]]",
+        departing: int,
+        max_transfers: Optional[int],
+        target: Optional[int] = None,
+    ) -> "_routelab.RaptorSearch":
+        """The rounds, from stops already on the service-day clock.
+
+        The seam :class:`~routelab.ULTRA` reaches through: it has worked out
+        which stops the query can reach and when, and wants the table over
+        those and nothing else — no labels, no head starts, no journey. `k`
+        changes is `k + 1` trips is `k + 1` rounds.
+        """
+        changes = self._changes(max_transfers)
+        return self._raptor.search(
+            sources,
+            target=target,
+            max_rounds=None if changes is None else changes + 1,
+            departing=departing,
+        )
+
+    def explored(self, result: "_routelab.RaptorSearch") -> Rounds:
         """Every stop the rounds reached, by the round that first got there."""
-        self._no_other(options, "rounds")
-        return Rounds(self._bound(), result)
+        return Rounds(self.compiled, result)

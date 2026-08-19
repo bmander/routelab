@@ -152,7 +152,7 @@ def test_a_language_naming_a_mode_the_network_lacks_says_so(multimodal):
 
 
 def test_it_needs_a_departure(multimodal):
-    with pytest.raises(ValueError, match="needs a departure time"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'departing'"):
         rl.LabelConstrained().bind(multimodal).route("doorstep", "corner-C").routes[0]
 
 

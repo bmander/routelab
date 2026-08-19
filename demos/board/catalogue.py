@@ -7,6 +7,8 @@ neither half works alone.
 
 from __future__ import annotations
 
+import inspect
+
 import routelab as rl
 
 PROFILES = {"walking": rl.Walking, "cycling": rl.Cycling, "driving": rl.Driving}
@@ -128,27 +130,33 @@ NODES: "dict[str, dict]" = {
 }
 
 
-#: What each technique node stands for in the library — the class whose
-#: `options` say which query knobs the board should show under it. Declared
-#: by the technique, read here; the board learns what a technique takes from
-#: the library rather than from a second table.
-TECHNIQUES: "dict[str, type]" = {
-    "Dijkstra": rl.Dijkstra,
-    "BFS": rl.BFS,
-    "AStar": rl.AStar,
-    "ContractionHierarchy": rl.ContractionHierarchy,
-    "TimeDependentDijkstra": rl.TimeDependentDijkstra,
-    "TimeDependent": rl.TimeDependent,
-    "TimeExpanded": rl.TimeExpanded,
-    "RAPTOR": rl.RAPTOR,
-    "CSA": rl.CSA,
-    "TripBased": rl.TripBased,
-    "PTL": rl.PTL,
-    "LabelConstrained": rl.LabelConstrained,
-    "UCCH": rl.UCCH,
-    "ULTRA": rl.ULTRA,
+#: What each technique node stands for in the library: the configuration class
+#: the board builds, and the planner class whose `route` signature says which
+#: query knobs the board should show under it. Declared by the library and read
+#: here, so the board never keeps a second list of what a technique takes.
+TECHNIQUES: "dict[str, tuple[type, type]]" = {
+    "Dijkstra": (rl.Dijkstra, rl.DijkstraPlanner),
+    "BFS": (rl.BFS, rl.BFSPlanner),
+    "AStar": (rl.AStar, rl.AStarPlanner),
+    "ContractionHierarchy": (rl.ContractionHierarchy, rl.ContractionHierarchyPlanner),
+    "TimeDependentDijkstra": (rl.TimeDependentDijkstra, rl.TimeDependentDijkstraPlanner),
+    "TimeDependent": (rl.TimeDependent, rl.TimeDependentPlanner),
+    "TimeExpanded": (rl.TimeExpanded, rl.TimeExpandedPlanner),
+    "RAPTOR": (rl.RAPTOR, rl.RAPTORPlanner),
+    "CSA": (rl.CSA, rl.CSAPlanner),
+    "TripBased": (rl.TripBased, rl.TripBasedPlanner),
+    "PTL": (rl.PTL, rl.PTLPlanner),
+    "LabelConstrained": (rl.LabelConstrained, rl.LabelConstrainedPlanner),
+    "UCCH": (rl.UCCH, rl.UCCHPlanner),
+    "ULTRA": (rl.ULTRA, rl.ULTRAPlanner),
 }
-for _kind, _cls in TECHNIQUES.items():
-    # `departing` is covered by `clock`; the rest are the knobs a Query node
-    # shows when this technique is wired into it.
-    NODES[_kind]["options"] = sorted(_cls.options - {"departing"})
+for _kind, (_technique, _planner) in TECHNIQUES.items():
+    # A planner's keyword-only arguments *are* what it takes, so this is read
+    # off the signature rather than declared twice. `departing` is covered by
+    # `clock`; the rest are the knobs a Query node shows when this technique is
+    # wired into it.
+    NODES[_kind]["options"] = sorted(
+        name
+        for name, parameter in inspect.signature(_planner.route).parameters.items()
+        if parameter.kind is inspect.Parameter.KEYWORD_ONLY and name != "departing"
+    )

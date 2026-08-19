@@ -14,13 +14,20 @@ from datetime import time
 import pytest
 
 import routelab as rl
-#: Every timetable technique, read off the shelf rather than listed: a
-#: technique that nobody added here would silently not be tested, which is
-#: the one thing a list like this must not allow.
+#: Every timetable technique. Written out, and checked against the shelf in
+#: test_timetable.py, because a technique that nobody added here would
+#: silently not be tested — which is the one thing a list like this must not
+#: allow.
 MODELS = [
-    technique
-    for technique in rl.kernels.techniques()
-    if issubclass(technique, rl.TimetablePlanner)
+    rl.TimeDependent,
+    rl.TimeExpanded,
+    rl.RAPTOR,
+    rl.CSA,
+    rl.TripBased,
+    rl.PTL,
+    rl.ULTRA,
+    rl.LabelConstrained,
+    rl.UCCH,
 ]
 
 

@@ -73,7 +73,13 @@ def main() -> int:
     journey = None
     for name, planner in planners:
         target = planner.node_id(destination)
-        result, ms = timed(planner.search, origin, targets=[target])
+        # A* aims at the one target it estimates toward; Dijkstra stops once a
+        # set of them is settled. Same query, two signatures.
+        result, ms = (
+            timed(planner.search, origin, target=target)
+            if isinstance(planner, rl.AStarPlanner)
+            else timed(planner.search, origin, targets=[target])
+        )
         searches[name] = result
         cost = result.cost(target)
         if cost is None:

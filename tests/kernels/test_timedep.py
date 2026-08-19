@@ -81,7 +81,7 @@ def test_an_unknown_waiting_policy_says_what_it_expected():
 
 def test_a_departure_time_has_no_default(gated):
     planner = rl.TimeDependentDijkstra().bind(gated)
-    with pytest.raises(ValueError, match="needs a departure time"):
+    with pytest.raises(TypeError, match="required keyword-only argument: 'departing'"):
         planner.route(1, 3).routes[0]
 
 
@@ -202,12 +202,10 @@ def test_a_hop_count_is_not_a_wait(gated):
     ids=lambda t: type(t).__name__,
 )
 def test_a_planner_with_no_clock_refuses_a_departure_by_name(gated, technique):
-    # Refusing is the easy part; refusing usefully is the point. The kernel's
-    # own "unexpected keyword argument 'departing'" names a function the caller
-    # never called and offers nothing to do about it.
-    with pytest.raises(ValueError, match="as though it were always open"):
-        technique.bind(gated).route(1, 3, departing=at(22)).routes[0]
-    with pytest.raises(ValueError, match="TimeDependentDijkstra"):
+    # A technique that routes the always-open network has no departure time to
+    # take, and its signature is where that is said — so the refusal names the
+    # method the caller actually called and the argument they actually passed.
+    with pytest.raises(TypeError, match="unexpected keyword argument 'departing'"):
         technique.bind(gated).route(1, 3, departing=at(22)).routes[0]
 
 

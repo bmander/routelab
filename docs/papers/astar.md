@@ -77,14 +77,14 @@ The same answer, from fewer settled nodes. That difference is the whole point
 of the paper, and `result.settled` is how you measure it:
 
 ```python
->>> def settled(technique):
+>>> def settled(technique, aim):
 ...     planner = technique.bind(env)
-...     result = planner.search("m0", targets=[planner.node_id("m5")])
+...     result = planner.search("m0", **{aim: planner.node_id("m5")})
 ...     return result.settled, planner.journey(result, "m5").cost
 
->>> settled(rl.Dijkstra())
+>>> settled(rl.Dijkstra(), "targets")     # a set of targets to stop at
 (10, 500)
->>> settled(rl.AStar(rl.Euclidean()))
+>>> settled(rl.AStar(rl.Euclidean()), "target")   # the one it aims at
 (6, 500)
 
 ```
@@ -100,7 +100,7 @@ it. Dijkstra has no way to know that and walks the whole thing.
 back into Dijkstra. It is the control every guided-search measurement needs.
 
 ```python
->>> settled(rl.AStar(rl.Zero()))
+>>> settled(rl.AStar(rl.Zero()), "target")
 (10, 500)
 
 ```
@@ -127,14 +127,15 @@ refusal names what is missing rather than guessing:
 ask before binding, and no exception is needed. Binding anyway raises, and
 names the nodes nothing placed.
 
-A* also needs exactly one destination, since there is no single thing an
-estimate could be a bound on otherwise:
+A* needs exactly one destination, since there is no single thing an estimate
+could be a bound on otherwise — so `target=` is required, and there is no
+spelling of the call that hands it two:
 
 ```python
 >>> rl.AStar(rl.Euclidean()).bind(env).search("m0")    # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
-ValueError: A* searches toward a single target, and got no target. ...
+TypeError: ...search() missing 1 required keyword-only argument: 'target'
 
 ```
 

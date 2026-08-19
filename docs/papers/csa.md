@@ -119,14 +119,14 @@ gives four or five steps rather than one.
 
 ## What it refuses
 
-`until` belongs to `profile`, not to `route`, and the refusal says which verb
-to use:
+`until` belongs to `profile`, not to `route`, and each verb takes exactly what
+it understands:
 
 ```python
 >>> planner.route("A", "C", departing=time(8, 0), until=time(9, 0)).routes[0]  # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
-ValueError: CSA takes no until; a departure window belongs to profile() on CSA(), ...
+TypeError: ...route() got an unexpected keyword argument 'until'
 
 ```
 
@@ -137,7 +137,7 @@ elsewhere:
 >>> planner.route("A", "C", departing=time(8, 0), max_transfers=1).routes[0]   # doctest: +ELLIPSIS
 Traceback (most recent call last):
     ...
-ValueError: CSA takes no max_transfers; a cap on changes belongs to RAPTOR(), ...
+TypeError: ...route() got an unexpected keyword argument 'max_transfers'
 
 ```
 
