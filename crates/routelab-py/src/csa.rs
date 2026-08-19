@@ -5,7 +5,7 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 
 use routelab_core::kernels::csa::{
-    ConnectionScan as CoreConnectionScan, ScanProfile as CoreScanProfile,
+    ConnectionScan as CoreConnectionScan, ScanProfile as CoreScanProfile, ScanQuery,
     ScanSearch as CoreScanSearch,
 };
 use routelab_core::model::timetable::Transfer;
@@ -62,7 +62,7 @@ impl PyConnectionScan {
     ///
     /// `departing` is what an elapsed cost is measured from; defaults to the
     /// earliest source.
-    #[pyo3(signature = (sources, target = None, departing = None))]
+    #[pyo3(signature = (sources, *, target = None, departing = None))]
     fn search(
         &self,
         py: Python<'_>,
@@ -71,7 +71,8 @@ impl PyConnectionScan {
         departing: Option<u32>,
     ) -> PyScanSearch {
         let scan = Arc::clone(&self.inner);
-        let search = py.detach(|| scan.search(&sources, target, departing));
+        let query = ScanQuery { target, departing };
+        let search = py.detach(|| scan.search(&sources, &query));
         PyScanSearch {
             scan: Arc::clone(&self.inner),
             inner: Arc::new(search),

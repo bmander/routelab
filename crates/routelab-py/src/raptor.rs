@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use pyo3::prelude::*;
 
-use routelab_core::kernels::raptor::{Raptor as CoreRaptor, RaptorSearch as CoreRaptorSearch};
+use routelab_core::kernels::raptor::{
+    Raptor as CoreRaptor, RaptorQuery, RaptorSearch as CoreRaptorSearch,
+};
 use routelab_core::model::timetable::Transfer;
 use routelab_core::NodeId;
 
@@ -61,7 +63,7 @@ impl PyRaptor {
     /// `departing` is what an elapsed cost is measured from — the moment the
     /// question was asked, which is not the earliest source when every source
     /// carries a head start. Defaults to the earliest source.
-    #[pyo3(signature = (sources, target = None, max_rounds = None, departing = None))]
+    #[pyo3(signature = (sources, *, target = None, max_rounds = None, departing = None))]
     fn search(
         &self,
         py: Python<'_>,
@@ -71,7 +73,12 @@ impl PyRaptor {
         departing: Option<u32>,
     ) -> PyRaptorSearch {
         let raptor = Arc::clone(&self.inner);
-        let search = py.detach(|| raptor.search(&sources, target, max_rounds, departing));
+        let query = RaptorQuery {
+            target,
+            max_rounds,
+            departing,
+        };
+        let search = py.detach(|| raptor.search(&sources, &query));
         PyRaptorSearch {
             raptor: Arc::clone(&self.inner),
             inner: Arc::new(search),

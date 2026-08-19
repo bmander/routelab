@@ -2,6 +2,7 @@
 //! what it was asked for.
 
 use crate::model::graph::{EdgeId, Graph, NodeId, Weight, NO_EDGE, NO_NODE, UNREACHABLE};
+use crate::model::technique::{Distances, Tree};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,6 +187,39 @@ impl SearchResult {
         }
         edges.reverse();
         Some(edges)
+    }
+
+    /// How many nodes the search settled — the length of [`order`](Self::order).
+    pub fn settled(&self) -> usize {
+        self.order.len()
+    }
+}
+
+impl Distances for SearchResult {
+    fn cost(&self, node: NodeId) -> Option<u32> {
+        SearchResult::cost(self, node)
+    }
+
+    fn settled(&self) -> usize {
+        SearchResult::settled(self)
+    }
+}
+
+impl Tree for SearchResult {
+    fn parent(&self, node: NodeId) -> Option<NodeId> {
+        SearchResult::parent(self, node)
+    }
+
+    fn parent_edge(&self, node: NodeId) -> Option<EdgeId> {
+        SearchResult::parent_edge(self, node)
+    }
+
+    fn path(&self, node: NodeId) -> Option<Vec<NodeId>> {
+        SearchResult::path(self, node)
+    }
+
+    fn edge_path(&self, node: NodeId) -> Option<Vec<EdgeId>> {
+        SearchResult::edge_path(self, node)
     }
 }
 

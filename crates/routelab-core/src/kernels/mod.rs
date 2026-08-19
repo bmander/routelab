@@ -10,7 +10,11 @@
 //! under composition before any transit kernel reads them.
 //!
 //! A new technique arrives as a new module beside these, not as a
-//! generalisation of them.
+//! generalisation of them. What it shares with the others it declares by
+//! `impl`: the traits in [`crate::model::technique`] say what a technique can
+//! promise — a footprint, an earliest arrival, a kept search, a front — and a
+//! kernel implements the ones it honestly meets. That is the whole contract,
+//! and the compiler holds each module to it.
 
 pub mod astar;
 pub mod bfs;
@@ -25,6 +29,8 @@ pub mod lcspp;
 pub(crate) mod oracles;
 pub mod ptl;
 pub mod raptor;
+#[cfg(test)]
+mod technique_tests;
 pub mod timedep;
 pub mod timetable;
 pub mod tripbased;

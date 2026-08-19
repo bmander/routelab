@@ -3,8 +3,65 @@
 
 use std::collections::VecDeque;
 
-use crate::model::graph::{Graph, NodeId, UNREACHABLE};
+use crate::model::graph::{EdgeId, Graph, NodeId, UNREACHABLE};
 use crate::model::search::{check_nodes, SearchError, SearchOptions, SearchResult, TargetTracker};
+use crate::model::technique::{BindError, Footprint, Searches, Technique, Unpacks};
+use crate::util::progress::Progress;
+
+/// Breadth-first search as a configuration: nothing to set, nothing to build.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BfsTechnique;
+
+impl<'a> Technique<'a> for BfsTechnique {
+    type Inputs = &'a Graph;
+    type Planner = Bfs<'a>;
+
+    fn bind(&self, graph: &'a Graph, _progress: &Progress) -> Result<Bfs<'a>, BindError> {
+        Ok(Bfs { graph })
+    }
+}
+
+/// Breadth-first search bound to a graph. Borrows, like [`Dijkstra`](crate::kernels::dijkstra::Dijkstra).
+///
+/// Its sources are bare nodes — no initial cost, since a FIFO queue is only
+/// correct when every entry enters at the same depth — and its cost is a hop
+/// count, so it is not a [`Distance`](crate::model::technique::Distance).
+#[derive(Debug, Clone, Copy)]
+pub struct Bfs<'a> {
+    pub graph: &'a Graph,
+}
+
+impl Footprint for Bfs<'_> {
+    fn footprint(&self) -> usize {
+        0
+    }
+
+    fn searches(&self) -> (&'static str, usize) {
+        ("nodes", self.graph.num_nodes())
+    }
+}
+
+impl Searches for Bfs<'_> {
+    type Source = NodeId;
+    /// `max_cost` bounds the depth, as it does for the free function.
+    type Query = SearchOptions;
+    type Search = SearchResult;
+    type Error = SearchError;
+
+    fn search(
+        &self,
+        sources: &[NodeId],
+        query: &SearchOptions,
+    ) -> Result<SearchResult, SearchError> {
+        bfs(self.graph, sources, query)
+    }
+}
+
+impl Unpacks for Bfs<'_> {
+    fn edge_path(&self, search: &SearchResult, to: NodeId) -> Option<Vec<EdgeId>> {
+        search.edge_path(to)
+    }
+}
 
 /// Hop counts from one or more sources, all of which start at depth 0.
 ///

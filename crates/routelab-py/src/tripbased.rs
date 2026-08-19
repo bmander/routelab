@@ -5,7 +5,7 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 
 use routelab_core::kernels::tripbased::{
-    TripBased as CoreTripBased, TripBasedProfile as CoreTripBasedProfile,
+    TripBased as CoreTripBased, TripBasedProfile as CoreTripBasedProfile, TripBasedQuery,
     TripBasedSearch as CoreTripBasedSearch,
 };
 use routelab_core::model::timetable::Transfer;
@@ -91,7 +91,7 @@ impl PyTripBased {
     ///
     /// `departing` is what an elapsed cost is measured from; defaults to the
     /// earliest source.
-    #[pyo3(signature = (sources, target, max_transfers = None, departing = None))]
+    #[pyo3(signature = (sources, target, *, max_transfers = None, departing = None))]
     fn search(
         &self,
         py: Python<'_>,
@@ -101,7 +101,12 @@ impl PyTripBased {
         departing: Option<u32>,
     ) -> PyTripBasedSearch {
         let kernel = Arc::clone(&self.inner);
-        let search = py.detach(|| kernel.search(&sources, target, max_transfers, departing));
+        let query = TripBasedQuery {
+            target,
+            max_transfers,
+            departing,
+        };
+        let search = py.detach(|| kernel.search(&sources, &query));
         PyTripBasedSearch {
             kernel: Arc::clone(&self.inner),
             inner: Arc::new(search),

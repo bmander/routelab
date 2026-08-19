@@ -57,15 +57,75 @@
 //! until there are none. Not here: the paper's SIMD and three-loop query
 //! layout (§3.4) and its transfer preferences, each its own increment.
 
-use crate::model::graph::{NodeId, UNREACHABLE};
-use crate::model::lines::Lines;
-use crate::model::timetable::{
-    Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, TripId, Walk,
-};
+use std::convert::Infallible;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
+use crate::model::graph::{NodeId, UNREACHABLE};
+use crate::model::lines::Lines;
+use crate::model::technique::{
+    BindError, Distances, EarliestArrival, Explored, Footprint, Front, Profiled, Reads, Searches,
+    Technique, TransitNetwork,
+};
+use crate::model::timetable::{
+    Connection, Footpaths, Itinerary, Leg, Time, Timetable, Transfer, TripId, Walk,
+};
 use crate::util::progress::Progress;
+
+/// What a trip-based query takes, beyond where you start.
+///
+/// The target is not optional: the paper's query is point-to-point, and the
+/// lines that reach the target are what every segment is checked against.
+/// There is no one-to-all form, so there is no `Default` here — a query has
+/// to be aimed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TripBasedQuery {
+    /// Where the query is aimed.
+    pub target: NodeId,
+    /// Stop after this many changes.
+    pub max_transfers: Option<usize>,
+    /// What an elapsed cost is measured from; `None` for the earliest source.
+    pub departing: Option<Time>,
+}
+
+impl TripBasedQuery {
+    /// A query aimed at `target`, with no cap and no fixed departure.
+    pub fn to(target: NodeId) -> Self {
+        TripBasedQuery {
+            target,
+            max_transfers: None,
+            departing: None,
+        }
+    }
+}
+
+/// Trip-based routing as a configuration: whether to reduce transfers
+/// (Algorithm 3), which is the paper's own control and on by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TripBasedTechnique {
+    pub reduce: bool,
+}
+
+impl Default for TripBasedTechnique {
+    fn default() -> Self {
+        TripBasedTechnique { reduce: true }
+    }
+}
+
+impl<'a> Technique<'a> for TripBasedTechnique {
+    type Inputs = TransitNetwork<'a>;
+    type Planner = TripBased;
+
+    fn bind(&self, net: TransitNetwork<'a>, progress: &Progress) -> Result<TripBased, BindError> {
+        Ok(TripBased::build_reporting(
+            net.timetable,
+            net.transfer,
+            net.footpaths,
+            self.reduce,
+            progress,
+        ))
+    }
+}
 
 /// "None" in the arrays that index trips, positions and segments.
 const NONE: u32 = u32::MAX;
@@ -254,37 +314,31 @@ impl TripBased {
 
     // --- Earliest arrival (§3.2) --------------------------------------------
 
-    /// Earliest arrival at `to`, leaving `from` no earlier than `at`.
-    pub fn earliest_arrival(&self, from: NodeId, at: Time, to: NodeId) -> Option<Itinerary> {
-        let search = self.search(&[(from, at)], to, None, None);
-        self.itinerary(&search, to)
-    }
-
     /// The Pareto front for `to`: one itinerary per number of changes that
     /// arrives strictly earlier than any journey with fewer, fewest first.
     pub fn pareto(&self, from: NodeId, at: Time, to: NodeId) -> Vec<Itinerary> {
-        let search = self.search(&[(from, at)], to, None, None);
+        let search = self.search(&[(from, at)], &TripBasedQuery::to(to));
         self.itineraries(&search, to)
     }
 
     /// Run the query from `sources` — each a stop and the time you are
-    /// standing there — toward `target`, stopping after `max_transfers`
-    /// changes if given.
+    /// standing there — toward the query's target, stopping after its
+    /// `max_transfers` changes if given.
     ///
     /// The query is the paper's and needs its target: the lines that reach it
     /// are what a segment is checked against, and its best arrival is what
     /// prunes the rest. There is no one-to-all form.
     ///
-    /// `departing` is what an elapsed cost is measured from — the moment the
-    /// question was asked, which is not the same as the earliest source when
-    /// every source carries a head start. `None` means the earliest source.
-    pub fn search(
-        &self,
-        sources: &[(NodeId, Time)],
-        target: NodeId,
-        max_transfers: Option<usize>,
-        departing: Option<Time>,
-    ) -> TripBasedSearch {
+    /// The query's `departing` is what an elapsed cost is measured from — the
+    /// moment the question was asked, which is not the same as the earliest
+    /// source when every source carries a head start. `None` means the
+    /// earliest source.
+    pub fn search(&self, sources: &[(NodeId, Time)], query: &TripBasedQuery) -> TripBasedSearch {
+        let TripBasedQuery {
+            target,
+            max_transfers,
+            departing,
+        } = *query;
         let mut sweep = Sweep::new(self, false);
         let target_lines = self.target_lines(target);
         let mut earliest_source = UNREACHABLE;
@@ -1051,6 +1105,70 @@ impl<'a> Sweep<'a> {
     }
 }
 
+impl Footprint for TripBased {
+    fn footprint(&self) -> usize {
+        TripBased::footprint(self)
+    }
+
+    fn searches(&self) -> (&'static str, usize) {
+        ("trips", self.num_trips())
+    }
+}
+
+impl Searches for TripBased {
+    type Source = (NodeId, Time);
+    type Query = TripBasedQuery;
+    type Search = TripBasedSearch;
+    type Error = Infallible;
+
+    fn search(
+        &self,
+        sources: &[(NodeId, Time)],
+        query: &TripBasedQuery,
+    ) -> Result<TripBasedSearch, Infallible> {
+        Ok(TripBased::search(self, sources, query))
+    }
+}
+
+impl Reads for TripBased {
+    fn itinerary(&self, search: &TripBasedSearch, to: NodeId) -> Option<Itinerary> {
+        TripBased::itinerary(self, search, to)
+    }
+}
+
+impl Front for TripBased {
+    fn itineraries(&self, search: &TripBasedSearch, to: NodeId) -> Vec<Itinerary> {
+        TripBased::itineraries(self, search, to)
+    }
+}
+
+impl Explored for TripBased {
+    type Step = (usize, TripId, Vec<NodeId>);
+
+    fn reached(&self, search: &TripBasedSearch) -> Vec<Self::Step> {
+        search.reached(self)
+    }
+}
+
+impl EarliestArrival for TripBased {
+    fn earliest_arrival(&self, sources: &[(NodeId, Time)], to: NodeId) -> Option<Itinerary> {
+        let search = TripBased::search(self, sources, &TripBasedQuery::to(to));
+        TripBased::itinerary(self, &search, to)
+    }
+}
+
+impl Profiled for TripBased {
+    fn departures(
+        &self,
+        from: NodeId,
+        to: NodeId,
+        opens: Time,
+        closes: Time,
+    ) -> Vec<(Time, Itinerary)> {
+        self.journeys(&self.profile(from, to, opens, closes))
+    }
+}
+
 /// What a query found: the segments it scanned and the journeys that reached
 /// the target, one per number of changes that improved on fewer. Plain data;
 /// the [`TripBased`] it came from reads the itineraries out of it.
@@ -1104,6 +1222,16 @@ impl TripBasedSearch {
                 )
             })
             .collect()
+    }
+}
+
+impl Distances for TripBasedSearch {
+    fn cost(&self, stop: NodeId) -> Option<u32> {
+        TripBasedSearch::cost(self, stop)
+    }
+
+    fn settled(&self) -> usize {
+        self.settled
     }
 }
 

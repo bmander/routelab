@@ -4,7 +4,9 @@
 //! the timetable structures the schedule-based ones read. A type belongs here
 //! when more than one paper reads it, which is the whole test — [`timetable`]
 //! is here rather than beside one transit kernel precisely because every one of
-//! them reads it, and [`lines`] because two do.
+//! them reads it, and [`lines`] because two do. [`technique`] is the same
+//! test passed by an interface rather than a structure: the traits every
+//! kernel opts into, naming none.
 //!
 //! Nothing here decides anything, and nothing here names a kernel. Where a
 //! structure needs work done to build it, that work lives with the techniques
@@ -16,5 +18,6 @@ pub mod graph;
 pub mod heuristic;
 pub mod lines;
 pub mod search;
+pub mod technique;
 pub mod timetable;
 pub mod tree;

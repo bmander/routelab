@@ -3,10 +3,74 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use crate::model::graph::{Graph, NodeId, Weight, UNREACHABLE};
+use crate::model::graph::{EdgeId, Graph, NodeId, Weight, UNREACHABLE};
 use crate::model::search::{
     check_sources, SearchError, SearchOptions, SearchResult, TargetTracker,
 };
+use crate::model::technique::{BindError, Distance, Footprint, Searches, Technique, Unpacks};
+use crate::util::progress::Progress;
+
+/// Dijkstra as a configuration: nothing to set, nothing to build.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DijkstraTechnique;
+
+impl<'a> Technique<'a> for DijkstraTechnique {
+    type Inputs = &'a Graph;
+    type Planner = Dijkstra<'a>;
+
+    fn bind(&self, graph: &'a Graph, _progress: &Progress) -> Result<Dijkstra<'a>, BindError> {
+        Ok(Dijkstra { graph })
+    }
+}
+
+/// Dijkstra bound to a graph. Nothing is precomputed, so this borrows: the
+/// planner is the graph and the promise to search it.
+#[derive(Debug, Clone, Copy)]
+pub struct Dijkstra<'a> {
+    pub graph: &'a Graph,
+}
+
+impl Footprint for Dijkstra<'_> {
+    fn footprint(&self) -> usize {
+        0
+    }
+
+    fn searches(&self) -> (&'static str, usize) {
+        ("nodes", self.graph.num_nodes())
+    }
+}
+
+impl Searches for Dijkstra<'_> {
+    type Source = (NodeId, Weight);
+    type Query = SearchOptions;
+    type Search = SearchResult;
+    type Error = SearchError;
+
+    fn search(
+        &self,
+        sources: &[(NodeId, Weight)],
+        query: &SearchOptions,
+    ) -> Result<SearchResult, SearchError> {
+        dijkstra(self.graph, sources, query)
+    }
+}
+
+impl Unpacks for Dijkstra<'_> {
+    fn edge_path(&self, search: &SearchResult, to: NodeId) -> Option<Vec<EdgeId>> {
+        search.edge_path(to)
+    }
+}
+
+impl Distance for Dijkstra<'_> {
+    fn distance(
+        &self,
+        sources: &[(NodeId, Weight)],
+        to: NodeId,
+    ) -> Result<Option<Weight>, SearchError> {
+        let options = SearchOptions::default().with_any_target([to]);
+        Ok(dijkstra(self.graph, sources, &options)?.cost(to))
+    }
+}
 
 /// Shortest paths from one or more sources, each with an initial cost.
 ///

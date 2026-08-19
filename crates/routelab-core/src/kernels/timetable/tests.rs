@@ -2,16 +2,18 @@
 //! question, so that is what is tested: the models against each other, and both
 //! against an oracle that enumerates itineraries the obvious way.
 
-use super::{earliest_arrival, TimeExpanded};
-use crate::kernels::csa::ConnectionScan;
+use super::{earliest_arrival, TimeDependentTechnique, TimeExpanded, TimeExpandedTechnique};
+use crate::kernels::csa::{ConnectionScan, ConnectionScanTechnique, ScanQuery};
 use crate::kernels::oracles::{
     best_by_brute_force, c, profile_by_brute_force, random_footpaths, random_timetable, town,
 };
-use crate::kernels::ptl::PublicTransitLabeling;
-use crate::kernels::raptor::Raptor;
-use crate::kernels::tripbased::TripBased;
+use crate::kernels::ptl::{PtlTechnique, PublicTransitLabeling};
+use crate::kernels::raptor::{Raptor, RaptorQuery, RaptorTechnique};
+use crate::kernels::tripbased::{TripBased, TripBasedQuery, TripBasedTechnique};
 use crate::model::graph::{NodeId, UNREACHABLE};
+use crate::model::technique::{EarliestArrival, Profiled, Technique, TransitNetwork};
 use crate::model::timetable::{Footpaths, Itinerary, Leg, Time, Timetable, Transfer, TripId, Walk};
+use crate::util::progress::Progress;
 
 fn expanded(timetable: &Timetable) -> TimeExpanded {
     TimeExpanded::build(timetable, Transfer::instant(), &Footpaths::none())
@@ -168,9 +170,9 @@ fn the_two_models_agree_on_everything() {
                         Transfer::instant(),
                         &Footpaths::none(),
                     );
-                    let by_rounds = rounds.earliest_arrival(from, at, to);
-                    let by_scan = scan.earliest_arrival(from, at, to);
-                    let by_trips = trips.earliest_arrival(from, at, to);
+                    let by_rounds = rounds.earliest_arrival(&[(from, at)], to);
+                    let by_scan = scan.earliest_arrival(&[(from, at)], to);
+                    let by_trips = trips.earliest_arrival(&[(from, at)], to);
                     assert_eq!(
                         by_trips.as_ref().map(|i| i.arrives),
                         by_stops.as_ref().map(|i| i.arrives),
@@ -210,12 +212,12 @@ fn both_models_agree_with_brute_force() {
             for to in 0..6u32 {
                 let truth = best_by_brute_force(&table, &Footpaths::none(), from, 0, to, 6);
                 assert_eq!(
-                    scan.earliest_arrival(from, 0, to).map(|i| i.arrives),
+                    scan.earliest_arrival(&[(from, 0)], to).map(|i| i.arrives),
                     truth,
                     "seed {seed}: CSA, {from} -> {to}"
                 );
                 assert_eq!(
-                    trips.earliest_arrival(from, 0, to).map(|i| i.arrives),
+                    trips.earliest_arrival(&[(from, 0)], to).map(|i| i.arrives),
                     truth,
                     "seed {seed}: trip-based, {from} -> {to}"
                 );
@@ -239,7 +241,7 @@ fn both_models_agree_with_brute_force() {
                     "seed {seed}: time-dependent, {from} -> {to}"
                 );
                 assert_eq!(
-                    rounds.earliest_arrival(from, 0, to).map(|i| i.arrives),
+                    rounds.earliest_arrival(&[(from, 0)], to).map(|i| i.arrives),
                     truth,
                     "seed {seed}: RAPTOR, {from} -> {to}"
                 );
@@ -279,9 +281,9 @@ fn every_vehicle_named_is_one_the_timetable_runs() {
                     for itinerary in [
                         expanded.earliest_arrival(&[(from, at)], to),
                         earliest_arrival(&table, &[(from, at)], to, Transfer::instant(), &paths),
-                        rounds.earliest_arrival(from, at, to),
-                        scan.earliest_arrival(from, at, to),
-                        trips.earliest_arrival(from, at, to),
+                        rounds.earliest_arrival(&[(from, at)], to),
+                        scan.earliest_arrival(&[(from, at)], to),
+                        trips.earliest_arrival(&[(from, at)], to),
                         labels.earliest_arrival(&[(from, at)], to),
                     ]
                     .into_iter()
@@ -375,9 +377,9 @@ fn every_itinerary_returned_is_one_you_could_actually_ride() {
                         Transfer::instant(),
                         &Footpaths::none(),
                     ),
-                    rounds.earliest_arrival(from, 0, to),
-                    scan.earliest_arrival(from, 0, to),
-                    trips.earliest_arrival(from, 0, to),
+                    rounds.earliest_arrival(&[(from, 0)], to),
+                    scan.earliest_arrival(&[(from, 0)], to),
+                    trips.earliest_arrival(&[(from, 0)], to),
                 ] {
                     let Some(itinerary) = query else { continue };
                     assert!(
@@ -416,7 +418,7 @@ fn you_are_already_where_you_already_are() {
                 Transfer::instant(),
                 &Footpaths::none(),
             ),
-            rounds.earliest_arrival(1, at, 1),
+            rounds.earliest_arrival(&[(1, at)], 1),
         ] {
             let answer = answer.expect("standing still is an answer");
             assert_eq!(answer.arrives, at);
@@ -589,9 +591,9 @@ fn the_two_models_agree_with_footpaths_too() {
                     let by_events = expanded.earliest_arrival(&[(from, at)], to);
                     let by_stops =
                         earliest_arrival(&table, &[(from, at)], to, Transfer::instant(), &paths);
-                    let by_rounds = rounds.earliest_arrival(from, at, to);
-                    let by_scan = scan.earliest_arrival(from, at, to);
-                    let by_trips = trips.earliest_arrival(from, at, to);
+                    let by_rounds = rounds.earliest_arrival(&[(from, at)], to);
+                    let by_scan = scan.earliest_arrival(&[(from, at)], to);
+                    let by_trips = trips.earliest_arrival(&[(from, at)], to);
                     assert_eq!(
                         by_events.as_ref().map(|i| i.arrives),
                         by_stops.as_ref().map(|i| i.arrives),
@@ -640,7 +642,7 @@ fn both_models_agree_with_brute_force_when_walking() {
             for to in 0..6u32 {
                 let truth = best_by_brute_force(&table, &paths, from, 0, to, 6);
                 assert_eq!(
-                    trips.earliest_arrival(from, 0, to).map(|i| i.arrives),
+                    trips.earliest_arrival(&[(from, 0)], to).map(|i| i.arrives),
                     truth,
                     "seed {seed}: trip-based, {from} -> {to}"
                 );
@@ -658,12 +660,12 @@ fn both_models_agree_with_brute_force_when_walking() {
                     "seed {seed}: time-dependent, {from} -> {to}"
                 );
                 assert_eq!(
-                    rounds.earliest_arrival(from, 0, to).map(|i| i.arrives),
+                    rounds.earliest_arrival(&[(from, 0)], to).map(|i| i.arrives),
                     truth,
                     "seed {seed}: RAPTOR, {from} -> {to}"
                 );
                 assert_eq!(
-                    scan.earliest_arrival(from, 0, to).map(|i| i.arrives),
+                    scan.earliest_arrival(&[(from, 0)], to).map(|i| i.arrives),
                     truth,
                     "seed {seed}: CSA, {from} -> {to}"
                 );
@@ -690,9 +692,9 @@ fn the_two_models_agree_with_dense_footpaths_over_many_seeds() {
                     let by_events = expanded.earliest_arrival(&[(from, at)], to);
                     let by_stops =
                         earliest_arrival(&table, &[(from, at)], to, Transfer::instant(), &paths);
-                    let by_rounds = rounds.earliest_arrival(from, at, to);
-                    let by_scan = scan.earliest_arrival(from, at, to);
-                    let by_trips = trips.earliest_arrival(from, at, to);
+                    let by_rounds = rounds.earliest_arrival(&[(from, at)], to);
+                    let by_scan = scan.earliest_arrival(&[(from, at)], to);
+                    let by_trips = trips.earliest_arrival(&[(from, at)], to);
                     assert_eq!(
                         by_trips.as_ref().map(|i| i.arrives),
                         by_stops.as_ref().map(|i| i.arrives),
@@ -837,7 +839,7 @@ fn changing_at_b_is_a_second_round() {
         2,
         "one leg per connection: 0->1 on trip 1, 1->2 on trip 3"
     );
-    let best = rounds.earliest_arrival(0, 28_800, 2).unwrap();
+    let best = rounds.earliest_arrival(&[(0, 28_800)], 2).unwrap();
     assert_eq!(best.arrives, 30_000);
     for itinerary in front {
         assert!(itinerary.is_valid(&[(0, 28_800)], Transfer::instant(), &Footpaths::none()));
@@ -853,7 +855,7 @@ fn a_walk_only_journey_is_round_zero() {
     assert_eq!(front.len(), 1);
     assert_eq!(front[0].arrives, 28_800 + 300);
     assert!(front[0].rides().next().is_none());
-    let search = rounds.search(&[(0, 28_800)], None, None, None);
+    let search = rounds.search(&[(0, 28_800)], &RaptorQuery::default());
     assert_eq!(
         search.round_reached(3),
         Some(0),
@@ -877,7 +879,7 @@ fn overtaking_trips_are_split_into_two_routes() {
     );
     let rounds = raptor(&table);
     assert_eq!(rounds.num_routes(), 2);
-    let best = rounds.earliest_arrival(0, 100, 2).unwrap();
+    let best = rounds.earliest_arrival(&[(0, 100)], 2).unwrap();
     assert_eq!(best.arrives, 300);
     assert_eq!(
         best.arrives,
@@ -908,7 +910,7 @@ fn a_trip_that_revisits_a_stop_can_be_boarded_at_the_later_visit() {
     let rounds = raptor(&table);
     assert_eq!(rounds.num_routes(), 1);
     for (from, at, legs) in [(0, 250, 1), (0, 50, 3), (1, 210, 2)] {
-        let itinerary = rounds.earliest_arrival(from, at, 2).unwrap();
+        let itinerary = rounds.earliest_arrival(&[(from, at)], 2).unwrap();
         assert_eq!(itinerary.arrives, 400, "{from} at {at}");
         assert_eq!(itinerary.legs.len(), legs, "{from} at {at}");
         assert!(itinerary.is_valid(&[(from, at)], Transfer::instant(), &Footpaths::none()));
@@ -933,7 +935,7 @@ fn a_broken_trip_chain_is_two_trips() {
     let table = Timetable::new(4, [c(1, 0, 1, 100, 200), c(1, 2, 3, 300, 400)]);
     let rounds = raptor(&table);
     assert_eq!(rounds.num_trips(), 2);
-    assert!(rounds.earliest_arrival(0, 0, 3).is_none());
+    assert!(rounds.earliest_arrival(&[(0, 0)], 3).is_none());
 }
 
 #[test]
@@ -994,11 +996,25 @@ fn the_pareto_front_matches_a_trip_counting_oracle() {
 fn max_rounds_caps_the_journeys() {
     let table = town();
     let rounds = raptor(&table);
-    let capped = rounds.search(&[(0, 28_800)], Some(2), Some(1), None);
+    let capped = rounds.search(
+        &[(0, 28_800)],
+        &RaptorQuery {
+            target: Some(2),
+            max_rounds: Some(1),
+            departing: None,
+        },
+    );
     let front = rounds.itineraries(&capped, 2);
     assert_eq!(front.len(), 1, "one round: the through ride only");
     assert_eq!(front[0].arrives, 30_600);
-    let none = rounds.search(&[(0, 28_800)], Some(2), Some(0), None);
+    let none = rounds.search(
+        &[(0, 28_800)],
+        &RaptorQuery {
+            target: Some(2),
+            max_rounds: Some(0),
+            departing: None,
+        },
+    );
     assert!(
         rounds.itinerary(&none, 2).is_none(),
         "no rounds: nowhere to ride"
@@ -1012,14 +1028,14 @@ fn several_sources_each_carry_their_own_time() {
     // From 0 at 08:00 the answer is 08:20; standing at 1 from 08:13 as well
     // (trip 3 leaves it at 08:15) it is still 08:20 — the pair answers as the
     // better single source does.
-    let both = rounds.search(&[(0, 28_800), (1, 29_600)], Some(2), None, None);
-    let one = rounds.search(&[(0, 28_800)], Some(2), None, None);
+    let both = rounds.search(&[(0, 28_800), (1, 29_600)], &RaptorQuery::to(2));
+    let one = rounds.search(&[(0, 28_800)], &RaptorQuery::to(2));
     assert_eq!(
         rounds.itinerary(&both, 2).unwrap().arrives,
         rounds.itinerary(&one, 2).unwrap().arrives
     );
     // And a source that is already ahead wins outright.
-    let ahead = rounds.search(&[(0, 28_800), (1, 29_000)], Some(2), None, None);
+    let ahead = rounds.search(&[(0, 28_800), (1, 29_000)], &RaptorQuery::to(2));
     let itinerary = rounds.itinerary(&ahead, 2).unwrap();
     assert_eq!(itinerary.arrives, 30_000);
     assert_eq!(
@@ -1037,7 +1053,7 @@ fn a_search_without_a_target_labels_every_stop_the_time_dependent_model_reaches(
         let paths = random_footpaths(seed, 10, 4);
         let rounds = raptor_with(&table, &paths);
         for from in 0..10u32 {
-            let search = rounds.search(&[(from, 0)], None, None, None);
+            let search = rounds.search(&[(from, 0)], &RaptorQuery::default());
             for to in 0..10u32 {
                 let truth = earliest_arrival(&table, &[(from, 0)], to, Transfer::instant(), &paths)
                     .map(|i| i.arrives);
@@ -1055,66 +1071,62 @@ fn a_search_without_a_target_labels_every_stop_the_time_dependent_model_reaches(
     }
 }
 
+/// Hold one planner to the time-dependent model's answer from several
+/// sources, and check every itinerary it returns could actually be ridden.
+fn agrees_with_stops<P: EarliestArrival>(
+    name: &str,
+    planner: &P,
+    table: &Timetable,
+    paths: &Footpaths,
+    seed: u64,
+) {
+    for a in 0..10u32 {
+        let b = (a + 3) % 10;
+        let sources = [(a, 0), (b, 400)];
+        for to in 0..10u32 {
+            let want = earliest_arrival(table, &sources, to, Transfer::instant(), paths);
+            let got = planner.earliest_arrival(&sources, to);
+            assert_eq!(
+                got.as_ref().map(|i| i.arrives),
+                want.as_ref().map(|i| i.arrives),
+                "seed {seed}: {name} {sources:?} -> {to}"
+            );
+            if let Some(itinerary) = got {
+                assert!(
+                    itinerary.is_valid(&sources, Transfer::instant(), paths),
+                    "seed {seed}: {name} {sources:?} -> {to}: {itinerary:?}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn the_six_models_agree_from_several_sources() {
     // A multimodal query starts at several stops, each already reached at its
-    // own time. All five must take whichever wins, and say so the same way.
+    // own time. Every model must take whichever wins, and say so the same way
+    // — and now that they all answer through one trait, one loop asks them.
     for seed in 0..8 {
         let table = random_timetable(seed, 10, 20);
         let paths = random_footpaths(seed, 10, 4);
-        let expanded = expanded_with(&table, &paths);
-        let rounds = raptor_with(&table, &paths);
-        let scan = csa_with(&table, &paths);
-        let trips = tripbased_with(&table, &paths);
-        let labels = PublicTransitLabeling::build(&table, Transfer::instant(), &paths);
-        for a in 0..10u32 {
-            let b = (a + 3) % 10;
-            let sources = [(a, 0), (b, 400)];
-            for to in 0..10u32 {
-                let by_stops = earliest_arrival(&table, &sources, to, Transfer::instant(), &paths);
-                let by_events = expanded.earliest_arrival(&sources, to);
-                let by_rounds =
-                    rounds.itinerary(&rounds.search(&sources, Some(to), None, None), to);
-                let by_scan = scan.itinerary(&scan.search(&sources, Some(to), None), to);
-                let by_trips = trips.itinerary(&trips.search(&sources, to, None, None), to);
-                let want = by_stops.as_ref().map(|i| i.arrives);
-                assert_eq!(
-                    by_trips.as_ref().map(|i| i.arrives),
-                    want,
-                    "seed {seed}: trip-based {sources:?} -> {to}"
-                );
-                let by_labels = labels.earliest_arrival(&sources, to);
-                assert_eq!(
-                    by_labels.as_ref().map(|i| i.arrives),
-                    want,
-                    "seed {seed}: PTL {sources:?} -> {to}"
-                );
-                assert_eq!(
-                    by_events.as_ref().map(|i| i.arrives),
-                    want,
-                    "seed {seed}: {sources:?} -> {to}"
-                );
-                assert_eq!(
-                    by_rounds.as_ref().map(|i| i.arrives),
-                    want,
-                    "seed {seed}: RAPTOR {sources:?} -> {to}"
-                );
-                assert_eq!(
-                    by_scan.as_ref().map(|i| i.arrives),
-                    want,
-                    "seed {seed}: CSA {sources:?} -> {to}"
-                );
-                for itinerary in [by_stops, by_events, by_rounds, by_scan, by_trips, by_labels]
-                    .into_iter()
-                    .flatten()
-                {
-                    assert!(
-                        itinerary.is_valid(&sources, Transfer::instant(), &paths),
-                        "seed {seed}: {sources:?} -> {to}: {itinerary:?}"
-                    );
-                }
-            }
-        }
+        let net = TransitNetwork {
+            timetable: &table,
+            transfer: Transfer::instant(),
+            footpaths: &paths,
+        };
+        let progress = Progress::new();
+        let dependent = TimeDependentTechnique.bind(net, &progress).unwrap();
+        agrees_with_stops("time-dependent", &dependent, &table, &paths, seed);
+        let expanded = TimeExpandedTechnique.bind(net, &progress).unwrap();
+        agrees_with_stops("time-expanded", &expanded, &table, &paths, seed);
+        let rounds = RaptorTechnique.bind(net, &progress).unwrap();
+        agrees_with_stops("RAPTOR", &rounds, &table, &paths, seed);
+        let scan = ConnectionScanTechnique.bind(net, &progress).unwrap();
+        agrees_with_stops("CSA", &scan, &table, &paths, seed);
+        let trips = TripBasedTechnique::default().bind(net, &progress).unwrap();
+        agrees_with_stops("trip-based", &trips, &table, &paths, seed);
+        let labels = PtlTechnique.bind(net, &progress).unwrap();
+        agrees_with_stops("PTL", &labels, &table, &paths, seed);
     }
 }
 
@@ -1130,7 +1142,7 @@ fn csa_lays_town_out_as_one_array() {
     assert!(scan.footprint() > 0);
     // Leaving 0 at 08:00: trip 1 to stop 1, then trip 3 to stop 2 by 08:20 —
     // one change, and every leg is one connection.
-    let best = scan.earliest_arrival(0, 28_800, 2).unwrap();
+    let best = scan.earliest_arrival(&[(0, 28_800)], 2).unwrap();
     assert_eq!(best.arrives, 30_000);
     assert_eq!(best.transfers(), 1);
     assert_eq!(best.legs.len(), 2);
@@ -1141,8 +1153,8 @@ fn csa_lays_town_out_as_one_array() {
 fn the_stop_criterion_scans_less_than_the_whole_day() {
     let table = town();
     let scan = csa(&table);
-    let toward = scan.search(&[(0, 28_800)], Some(1), None);
-    let everything = scan.search(&[(0, 28_800)], None, None);
+    let toward = scan.search(&[(0, 28_800)], &ScanQuery::to(1));
+    let everything = scan.search(&[(0, 28_800)], &ScanQuery::default());
     assert!(
         toward.scanned < everything.scanned,
         "{} < {}",
@@ -1156,14 +1168,25 @@ fn the_stop_criterion_scans_less_than_the_whole_day() {
     assert_eq!(scan.itinerary(&everything, 2).unwrap().arrives, 30_000);
     assert_eq!(scan.path(&everything, 2), Some(vec![0, 1, 2]));
     // A start criterion: nothing before 08:05 is scanned when leaving then.
-    let late = scan.search(&[(0, 29_100)], None, None);
+    let late = scan.search(&[(0, 29_100)], &ScanQuery::default());
     assert!(late.scanned < everything.scanned);
     // The departure an elapsed cost is measured from.
     assert_eq!(
-        scan.search(&[(0, 100), (1, 50)], None, Some(0)).departing,
+        scan.search(
+            &[(0, 100), (1, 50)],
+            &ScanQuery {
+                target: None,
+                departing: Some(0)
+            }
+        )
+        .departing,
         0
     );
-    assert_eq!(scan.search(&[(0, 100), (1, 50)], None, None).departing, 50);
+    assert_eq!(
+        scan.search(&[(0, 100), (1, 50)], &ScanQuery::default())
+            .departing,
+        50
+    );
 }
 
 #[test]
@@ -1173,7 +1196,7 @@ fn a_broken_trip_chain_is_two_trips_to_the_scan_too() {
     let table = Timetable::new(3, [c(1, 0, 1, 100, 200), c(1, 1, 2, 150, 250)]);
     let scan = csa(&table);
     assert_eq!(scan.num_trips(), 2);
-    assert!(scan.earliest_arrival(0, 0, 2).is_none());
+    assert!(scan.earliest_arrival(&[(0, 0)], 2).is_none());
 }
 
 #[test]
@@ -1181,11 +1204,11 @@ fn a_walk_from_the_source_needs_no_connection_to_set_it_off() {
     let table = Timetable::new(4, town().connections().iter().copied());
     let paths = Footpaths::new(4, [(0, 3, 300), (3, 0, 300)]);
     let scan = csa_with(&table, &paths);
-    let walked = scan.earliest_arrival(0, 28_800, 3).unwrap();
+    let walked = scan.earliest_arrival(&[(0, 28_800)], 3).unwrap();
     assert_eq!(walked.arrives, 29_100);
     assert!(walked.rides().next().is_none());
     // And from 3, the walk to 0 catches trip 1.
-    let ridden = scan.earliest_arrival(3, 28_500, 1).unwrap();
+    let ridden = scan.earliest_arrival(&[(3, 28_500)], 1).unwrap();
     assert_eq!(ridden.arrives, 29_400);
     assert!(ridden.is_valid(&[(3, 28_500)], Transfer::instant(), &paths));
 }
@@ -1229,6 +1252,66 @@ fn the_profile_matches_asking_at_every_second() {
                 assert!(pruned.settled <= profile.settled);
             }
         }
+    }
+}
+
+/// Hold one planner's `departures` to the brute-force profile: the same
+/// `(departs, arrives)` pairs, in the same order, each behind a journey you
+/// could actually ride. A kernel that also tells journeys apart by changes
+/// may list journeys a later departure dominates on time alone, because they
+/// change less; projected onto (departs, arrives) its front is the oracle's.
+fn departures_agree<P: Profiled>(
+    name: &str,
+    planner: &P,
+    table: &Timetable,
+    paths: &Footpaths,
+    seed: u64,
+) {
+    for from in 0..6u32 {
+        for to in 0..6u32 {
+            if from == to {
+                continue;
+            }
+            let truth = profile_by_brute_force(table, paths, from, to, 0..=12_000);
+            let departures = planner.departures(from, to, 0, 12_000);
+            // Project onto (departs, arrives) and drop what a later departure
+            // with an equal or earlier arrival dominates.
+            let all: Vec<(Time, Time)> = departures.iter().map(|(d, i)| (*d, i.arrives)).collect();
+            let mut pairs: Vec<(Time, Time)> = Vec::new();
+            for &(dep, arr) in all.iter().rev() {
+                if pairs.last().is_none_or(|&(_, best)| arr < best) {
+                    pairs.push((dep, arr));
+                }
+            }
+            pairs.reverse();
+            assert_eq!(pairs, truth, "seed {seed}: {name} {from} -> {to}");
+            for (dep, itinerary) in departures {
+                assert!(
+                    itinerary.is_valid(&[(from, dep)], Transfer::instant(), paths),
+                    "seed {seed}: {name} {from} -> {to} at {dep}: {itinerary:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn every_profiled_technique_agrees_with_the_oracle() {
+    for seed in 0..6 {
+        let table = random_timetable(seed, 6, 12);
+        let paths = random_footpaths(seed, 6, 3);
+        let net = TransitNetwork {
+            timetable: &table,
+            transfer: Transfer::instant(),
+            footpaths: &paths,
+        };
+        let progress = Progress::new();
+        let scan = ConnectionScanTechnique.bind(net, &progress).unwrap();
+        departures_agree("CSA", &scan, &table, &paths, seed);
+        let trips = TripBasedTechnique::default().bind(net, &progress).unwrap();
+        departures_agree("trip-based", &trips, &table, &paths, seed);
+        let labels = PtlTechnique.bind(net, &progress).unwrap();
+        departures_agree("PTL", &labels, &table, &paths, seed);
     }
 }
 
@@ -1296,7 +1379,7 @@ fn town_keeps_the_one_transfer_worth_making() {
         vec![(30_600, 0), (30_000, 1)]
     );
     assert!(front[1].is_valid(&[(0, 28_800)], Transfer::instant(), &Footpaths::none()));
-    let search = trips.search(&[(0, 28_800)], 2, None, None);
+    let search = trips.search(&[(0, 28_800)], &TripBasedQuery::to(2));
     assert_eq!(search.cost(2), Some(30_000));
     assert_eq!(search.cost(1), None, "the query is point-to-point");
     assert_eq!(
@@ -1325,7 +1408,7 @@ fn a_u_turn_is_not_a_transfer() {
     );
     let trips = tripbased(&table);
     assert_eq!(trips.num_initial_transfers(), 0);
-    assert_eq!(trips.earliest_arrival(0, 100, 2).unwrap().arrives, 300);
+    assert_eq!(trips.earliest_arrival(&[(0, 100)], 2).unwrap().arrives, 300);
     let back = trips.pareto(1, 150, 0);
     assert_eq!(
         back.iter()
@@ -1351,7 +1434,10 @@ fn a_u_turn_is_not_a_transfer() {
         "onto trip 3 from either trip at 1"
     );
     assert_eq!(trips.num_transfers(), 2);
-    assert_eq!(trips.earliest_arrival(2, 310, 3).unwrap().transfers(), 1);
+    assert_eq!(
+        trips.earliest_arrival(&[(2, 310)], 3).unwrap().transfers(),
+        1
+    );
 }
 
 #[test]
@@ -1453,11 +1539,25 @@ fn the_trip_based_front_is_raptors_and_the_oracles() {
 fn max_transfers_caps_the_trip_based_front() {
     let table = town();
     let trips = tripbased(&table);
-    let capped = trips.search(&[(0, 28_800)], 2, Some(0), None);
+    let capped = trips.search(
+        &[(0, 28_800)],
+        &TripBasedQuery {
+            target: 2,
+            max_transfers: Some(0),
+            departing: None,
+        },
+    );
     let front = trips.itineraries(&capped, 2);
     assert_eq!(front.len(), 1, "no changes: the through ride only");
     assert_eq!(front[0].arrives, 30_600);
-    let one = trips.search(&[(0, 28_800)], 2, Some(1), None);
+    let one = trips.search(
+        &[(0, 28_800)],
+        &TripBasedQuery {
+            target: 2,
+            max_transfers: Some(1),
+            departing: None,
+        },
+    );
     assert_eq!(trips.itinerary(&one, 2).unwrap().arrives, 30_000);
     assert!(one.scanned >= capped.scanned);
 }
@@ -1477,7 +1577,7 @@ fn a_trip_that_revisits_a_stop_is_transferred_onto_at_the_right_visit() {
         ],
     );
     let trips = tripbased(&table);
-    let itinerary = trips.earliest_arrival(3, 0, 2).unwrap();
+    let itinerary = trips.earliest_arrival(&[(3, 0)], 2).unwrap();
     assert_eq!(itinerary.arrives, 400);
     assert_eq!(itinerary.transfers(), 1);
     assert_eq!(itinerary.stops(3), vec![3, 0, 2]);
@@ -1488,9 +1588,9 @@ fn a_trip_that_revisits_a_stop_is_transferred_onto_at_the_right_visit() {
 fn several_sources_reach_the_trip_based_target_as_the_best_one_does() {
     let table = town();
     let trips = tripbased(&table);
-    let both = trips.search(&[(0, 28_800), (1, 29_600)], 2, None, None);
+    let both = trips.search(&[(0, 28_800), (1, 29_600)], &TripBasedQuery::to(2));
     assert_eq!(trips.itinerary(&both, 2).unwrap().arrives, 30_000);
-    let ahead = trips.search(&[(0, 28_800), (1, 29_000)], 2, None, None);
+    let ahead = trips.search(&[(0, 28_800), (1, 29_000)], &TripBasedQuery::to(2));
     let itinerary = trips.itinerary(&ahead, 2).unwrap();
     assert_eq!(itinerary.arrives, 30_000);
     assert_eq!(
