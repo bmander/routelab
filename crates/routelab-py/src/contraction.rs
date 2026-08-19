@@ -8,7 +8,7 @@ use routelab_core::kernels::contraction::{
     ContractionHierarchy as CoreHierarchy, ContractionTechnique,
     MeetingSearch as CoreMeetingSearch, Ordering as CoreOrdering, Policy,
 };
-use routelab_core::{EdgeId, Footprint, Graph as CoreGraph, NodeId, Technique, Weight};
+use routelab_core::{EdgeId, Graph as CoreGraph, NodeId, Technique, Weight};
 
 use crate::graph::*;
 use crate::progress::*;
@@ -107,12 +107,6 @@ impl PyContractionHierarchy {
     #[getter]
     fn footprint(&self) -> usize {
         self.inner.footprint()
-    }
-
-    /// What a query settles and how many there are: `("nodes", n)`.
-    #[getter]
-    fn searches(&self) -> (&'static str, usize) {
-        Footprint::searches(&*self.inner)
     }
 
     /// The contraction rank of every node, highest meaning most important.

@@ -1276,11 +1276,13 @@ fn departures_agree<P: Profiled>(
             let departures = planner.departures(from, to, 0, 12_000);
             // Project onto (departs, arrives) and drop what a later departure
             // with an equal or earlier arrival dominates.
-            let all: Vec<(Time, Time)> = departures.iter().map(|(d, i)| (*d, i.arrives)).collect();
             let mut pairs: Vec<(Time, Time)> = Vec::new();
-            for &(dep, arr) in all.iter().rev() {
-                if pairs.last().is_none_or(|&(_, best)| arr < best) {
-                    pairs.push((dep, arr));
+            for (dep, itinerary) in departures.iter().rev() {
+                if pairs
+                    .last()
+                    .is_none_or(|&(_, best)| itinerary.arrives < best)
+                {
+                    pairs.push((*dep, itinerary.arrives));
                 }
             }
             pairs.reverse();

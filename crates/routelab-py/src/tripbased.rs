@@ -8,7 +8,7 @@ use routelab_core::kernels::tripbased::{
     TripBased as CoreTripBased, TripBasedProfile as CoreTripBasedProfile, TripBasedQuery,
     TripBasedSearch as CoreTripBasedSearch, TripBasedTechnique,
 };
-use routelab_core::{EarliestArrival, Footprint, NodeId, Profiled, Technique};
+use routelab_core::{NodeId, Technique};
 
 use crate::progress::*;
 use crate::timetable::*;
@@ -44,43 +44,6 @@ impl PyTripBased {
         PyTripBased {
             inner: Arc::new(built),
         }
-    }
-
-    /// What a query settles and how many there are: `("trips", n)`.
-    #[getter]
-    fn searches(&self) -> (&'static str, usize) {
-        Footprint::searches(&*self.inner)
-    }
-
-    /// Earliest arrival at `to` from `sources` — `[(stop, time), ...]` — as
-    /// one itinerary, without keeping the search.
-    fn earliest_arrival(
-        &self,
-        py: Python<'_>,
-        sources: Vec<(NodeId, u32)>,
-        to: NodeId,
-    ) -> Option<PyItinerary> {
-        let kernel = Arc::clone(&self.inner);
-        py.detach(|| kernel.earliest_arrival(&sources, to))
-            .map(PyItinerary::from)
-    }
-
-    /// Every journey worth leaving `origin` on for `target` within
-    /// `[departing, until]`, as `(departure, itinerary)`, earliest first —
-    /// the profile, in one call.
-    fn departures(
-        &self,
-        py: Python<'_>,
-        origin: NodeId,
-        target: NodeId,
-        departing: u32,
-        until: u32,
-    ) -> Vec<(u32, PyItinerary)> {
-        let kernel = Arc::clone(&self.inner);
-        py.detach(|| kernel.departures(origin, target, departing, until))
-            .into_iter()
-            .map(|(dep, itinerary)| (dep, PyItinerary::from(itinerary)))
-            .collect()
     }
 
     #[getter]

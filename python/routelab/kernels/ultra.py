@@ -10,7 +10,7 @@ from ..model.environment import CompiledEnvironment, Environment
 from ..model.answer import Answer
 from ..model.journey import Journey, Leg, _edge_between, _leg
 from ..model.search import StopResult
-from ..util.clock import Departure, service_seconds
+from ..util.clock import Departure
 from .csa import CSA
 from .departures import Departures
 from .planner import Origins, Planner, TimetablePlanner, TimetableTechnique
@@ -294,17 +294,19 @@ class ULTRAPlanner(TimetablePlanner):
         }
         self._outer_of = {inner: outer for outer, inner in self._inner_of.items()}
         # Indexed by *this* graph's vertices, for renumbering the shortcuts:
-        # NO_NODE wherever a vertex is a street corner rather than a stop.
-        self._slots = [_NOT_A_STOP] * len(compiled)
+        # NO_NODE wherever a vertex is a street corner rather than a stop. A
+        # local, not an attribute: it is one entry per street corner — half a
+        # million on a city — and the only thing that reads it is the
+        # renumbering below, which keeps what it needs.
+        slots = [_NOT_A_STOP] * len(compiled)
         for outer, inner in self._inner_of.items():
-            self._slots[outer] = inner
-        self._inner_stops = len(inner_compiled)
+            slots[outer] = inner
 
         # The technique underneath reads the shortcuts rather than a closure,
         # which is the whole of the integration: `_with_walks` is the seam.
         # Renumbered into the transit network's own vertices, since that is
         # what the technique underneath is bound to.
-        shortcuts = _Shortcuts(self.shortcuts, self._slots, self._inner_stops)
+        shortcuts = _Shortcuts(self.shortcuts, slots, len(inner_compiled))
         self.inner: _StopTable = technique.technique._with_walks(shortcuts).bind(
             inner_environment, progress
         )
@@ -415,16 +417,17 @@ class ULTRAPlanner(TimetablePlanner):
         compiled = self.compiled
         starts = self._origin_ids(origin)
         target = self.node_id(destination)
-        at = service_seconds(departing)
 
         # Algorithm 2, lines 1-3: the direct walk, and the initial and final
         # transfers that beat it. Two bucket scans over a hierarchy's search
         # space, not two searches of the network.
         found = self.buckets.endpoints(list(starts.items()), target)
         # Into the transit network's own numbering, which is what the wrapped
-        # technique was bound to.
+        # technique was bound to, and onto the service-day clock the same way
+        # every other timetable technique gets there.
         inner_of = self._inner_of
         out = {inner_of[stop]: cost for stop, cost in found.to_stops if stop in inner_of}
+        sources, at = self._sources(out, departing)
 
         # A journey that boards nothing: the walk, which needs no vehicle and
         # so is the floor every ride has to beat — and, being the floor, is
@@ -439,7 +442,7 @@ class ULTRAPlanner(TimetablePlanner):
             # back its table over them. `max_transfers` goes with them because
             # the cap is the wrapped technique's to honour or to refuse.
             result = self.inner._search_stops(  # noqa: SLF001 - the seam this technique is
-                [(stop, at + cost) for stop, cost in out.items()], at, max_transfers
+                sources, at, max_transfers
             )
             # Where to get off: any stop that walks to the target sooner than
             # the target can be walked to directly. That is the final

@@ -16,24 +16,7 @@ import pytest
 import routelab as rl
 from routelab import GTFS
 
-from conftest import TINY_GTFS
-
-#: Every timetable technique. Every behavioural test runs against each,
-#: because "these two agree" is the paper's thesis and a test that only asked
-#: one would not notice the day they stopped. Written out because a technique
-#: is a configuration and some take arguments, and checked against the shelf
-#: in test_planners.py so a list somebody forgot to extend fails there.
-MODELS = [
-    rl.TimeDependent,
-    rl.TimeExpanded,
-    rl.RAPTOR,
-    rl.CSA,
-    rl.TripBased,
-    rl.PTL,
-    rl.ULTRA,
-    rl.LabelConstrained,
-    rl.UCCH,
-]
+from conftest import TIMETABLE_MODELS as MODELS, TINY_GTFS
 
 #: The ones that answer with an itinerary and nothing else, so a cost table
 #: and a search space are things they refuse: Pyrga's two; PTL, whose labels

@@ -80,7 +80,7 @@ class ContractionHierarchyPlanner(GraphPlanner):
 
     @property
     def footprint(self) -> int:
-        return self.hierarchy.footprint
+        return super().footprint + self.hierarchy.footprint
 
     def route(self, origin: Origins, destination: Hashable) -> Answer:
         """The cheapest journey, climbing from both ends and meeting above it.
@@ -89,7 +89,7 @@ class ContractionHierarchyPlanner(GraphPlanner):
         would cut off paths that are still cheap in the original.
         """
         target = self.node_id(destination)
-        return self._answer(self._run(self._origin_ids(origin), target), destination)
+        return self._answer(self.search(origin, target=target), destination)
 
     def search(self, origins: Origins, *, target: int) -> "_routelab.MeetingSearch":
         """Run the bidirectional query toward one target.
@@ -100,10 +100,7 @@ class ContractionHierarchyPlanner(GraphPlanner):
         which is all :class:`~routelab.Journey` ever asked of a result. A
         hierarchy climbs *toward* somewhere, so the target is required.
         """
-        return self._run(self._origin_ids(origins), target)
-
-    def _run(self, starts: "Dict[int, int]", target: int) -> "_routelab.MeetingSearch":
-        return self.hierarchy.query(list(starts.items()), target)
+        return self.hierarchy.query(list(self._origin_ids(origins).items()), target)
 
     def explored(self, result: "_routelab.MeetingSearch") -> MeetingTrees:
         """The two halves of the search, and where they met."""

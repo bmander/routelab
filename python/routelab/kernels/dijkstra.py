@@ -79,7 +79,7 @@ class DijkstraPlanner(TreePlanner):
         """
         target = self.node_id(destination)
         return self._answer(
-            self._run(self._origin_ids(origin), [target], max_cost), destination
+            self.search(origin, targets=[target], max_cost=max_cost), destination
         )
 
     def search(
@@ -96,12 +96,10 @@ class DijkstraPlanner(TreePlanner):
         to get between them and your labels. ``targets`` stops the search once
         all of them are settled.
         """
-        return self._run(self._origin_ids(origins), targets, max_cost)
+        return dijkstra(
+            self.compiled.graph,
+            self._origin_ids(origins),
+            targets=targets,
+            max_cost=max_cost,
+        )
 
-    def _run(
-        self,
-        starts: "Dict[int, int]",
-        targets: "Optional[Nodes]",
-        max_cost: Optional[int],
-    ) -> SearchResult:
-        return dijkstra(self.compiled.graph, starts, targets=targets, max_cost=max_cost)

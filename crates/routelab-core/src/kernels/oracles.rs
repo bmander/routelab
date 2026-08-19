@@ -1,7 +1,7 @@
-//! What every timetable technique is checked against.
+//! What every technique is checked against.
 //!
 //! Fixtures and oracles over the [`Timetable`] and [`Footpaths`] the papers
-//! all read: a hand-written town whose answers can be counted off the page,
+//! all read, and the random [`Graph`] the graph searches share: a hand-written town whose answers can be counted off the page,
 //! random instances, and two brute-force enumerations that are not a second
 //! copy of anybody's algorithm. They live here rather than with one paper
 //! because every paper needs them, and the contract asks each to be checked
@@ -12,9 +12,28 @@
 //! time-dependent model for an answer, and the model names nothing above it.
 
 use crate::kernels::timetable::earliest_arrival;
-use crate::model::graph::NodeId;
+use crate::model::graph::{Graph, NodeId};
 use crate::model::timetable::{Connection, Footpaths, Time, Timetable, Transfer, TripId};
 use crate::util::rng::Rng;
+
+/// A random directed graph: `num_nodes * density` arcs between random
+/// endpoints, each costing 1 to 50.
+///
+/// Dense enough that most pairs are connected and sparse enough to stay
+/// quick, which is what a "does this agree with Dijkstra" loop wants.
+pub(crate) fn random_graph(num_nodes: u32, density: f64, seed: u64) -> Graph {
+    let mut rng = Rng::new(seed);
+    let edges: Vec<_> = (0..(f64::from(num_nodes) * density) as usize)
+        .map(|_| {
+            (
+                rng.below(u64::from(num_nodes)) as u32,
+                rng.below(u64::from(num_nodes)) as u32,
+                1 + rng.below(50) as u32,
+            )
+        })
+        .collect();
+    Graph::from_edges(num_nodes as usize, &edges).expect("real endpoints")
+}
 
 /// A connection, spelled shortly enough to read a timetable off the page.
 pub(crate) fn c(trip: u32, from: NodeId, to: NodeId, departs: Time, arrives: Time) -> Connection {

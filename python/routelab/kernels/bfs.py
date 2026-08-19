@@ -68,13 +68,13 @@ class BFSPlanner(TreePlanner):
 
         Args:
             origin: A label or several labels. Not a mapping of head starts —
-                see :meth:`_run`.
+                see :meth:`search`.
             destination: The label to route to.
             max_depth: Do not expand past this hop count (inclusive).
         """
         target = self.node_id(destination)
         return self._answer(
-            self._run(self._origin_ids(origin), [target], max_depth), destination
+            self.search(origin, targets=[target], max_depth=max_depth), destination
         )
 
     def search(
@@ -85,18 +85,14 @@ class BFSPlanner(TreePlanner):
         max_depth: Optional[int] = None,
     ) -> SearchResult:
         """Run the search and return the raw, id-keyed result."""
-        return self._run(self._origin_ids(origins), targets, max_depth)
-
-    def _run(
-        self,
-        starts: "Dict[int, int]",
-        targets: "Optional[Nodes]",
-        max_depth: Optional[int],
-    ) -> SearchResult:
+        starts = self._origin_ids(origins)
         priced = {self.label(node) for node, cost in starts.items() if cost}
         if priced:
             raise ValueError(
                 f"BFS counts hops, so origins cannot carry an initial cost: "
                 f"{', '.join(repr(label) for label in sorted(priced, key=repr))}"
             )
-        return bfs(self.compiled.graph, list(starts), targets=targets, max_depth=max_depth)
+        return bfs(
+            self.compiled.graph, list(starts), targets=targets, max_depth=max_depth
+        )
+

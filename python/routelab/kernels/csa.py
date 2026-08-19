@@ -79,7 +79,7 @@ class CSAPlanner(TimetablePlanner):
     ) -> Answer:
         """The earliest arrival at ``destination``, and the table it came off."""
         return self._answer(
-            self._run(self._origin_ids(origin), self.node_id(destination), departing),
+            self.search(origin, departing=departing, target=self.node_id(destination)),
             destination,
         )
 
@@ -87,15 +87,7 @@ class CSAPlanner(TimetablePlanner):
         self, origins: Origins, *, departing: Departure, target: Optional[int] = None
     ) -> "_routelab.ScanSearch":
         """Scan — toward one target if given, else to every stop."""
-        return self._run(self._origin_ids(origins), target, departing)
-
-    def _run(
-        self,
-        starts: "Dict[int, int]",
-        target: Optional[int],
-        departing: Departure,
-    ) -> "_routelab.ScanSearch":
-        sources, at = self._sources(starts, departing)
+        sources, at = self._sources(self._origin_ids(origins), departing)
         return self._search_stops(sources, at, None, target)
 
     def _search_stops(

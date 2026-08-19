@@ -84,11 +84,11 @@ class RAPTORPlanner(Front, TimetablePlanner):
         here would have given.
         """
         return self._answer_front(
-            self._run(
-                self._origin_ids(origin),
-                self.node_id(destination),
-                departing,
-                max_transfers,
+            self.search(
+                origin,
+                departing=departing,
+                target=self.node_id(destination),
+                max_transfers=max_transfers,
             ),
             destination,
         )
@@ -102,16 +102,7 @@ class RAPTORPlanner(Front, TimetablePlanner):
         max_transfers: Optional[int] = None,
     ) -> "_routelab.RaptorSearch":
         """Run the rounds — toward one target if given, else to every stop."""
-        return self._run(self._origin_ids(origins), target, departing, max_transfers)
-
-    def _run(
-        self,
-        starts: "Dict[int, int]",
-        target: Optional[int],
-        departing: Departure,
-        max_transfers: Optional[int],
-    ) -> "_routelab.RaptorSearch":
-        sources, at = self._sources(starts, departing)
+        sources, at = self._sources(self._origin_ids(origins), departing)
         return self._search_stops(sources, at, max_transfers, target)
 
     def _search_stops(

@@ -6,6 +6,8 @@ import pytest
 
 import routelab as rl
 
+from conftest import TIMETABLE_MODELS
+
 
 @pytest.fixture
 def env() -> rl.Environment:
@@ -245,6 +247,21 @@ def test_every_technique_is_one_of_these():
         and value not in (rl.kernels.Technique, rl.kernels.TimetableTechnique)
     }
     assert {type(technique) for technique in EVERY_TECHNIQUE} == shelf
+
+
+def test_every_timetable_technique_is_in_the_shared_list():
+    # The check the two feed-level test modules rely on: they parametrize over
+    # conftest's TIMETABLE_MODELS, so a timetable technique missing from that
+    # list is one no feed ever reaches. Asked here, where the shelf is already
+    # read, rather than in either of the files that use the list.
+    shelf = {
+        value
+        for value in vars(rl.kernels).values()
+        if isinstance(value, type)
+        and issubclass(value, rl.kernels.TimetableTechnique)
+        and value is not rl.kernels.TimetableTechnique
+    }
+    assert set(TIMETABLE_MODELS) == shelf
 
 
 @pytest.mark.parametrize("technique", EVERY_TECHNIQUE, ids=repr)

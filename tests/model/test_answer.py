@@ -45,14 +45,14 @@ def test_routing_searches_once(streets, monkeypatch):
     """The claim that makes the answer worth having, held to by counting."""
     planner = rl.Dijkstra().bind(streets)
     searches = 0
-    underlying = type(planner)._run
+    underlying = type(planner).search
 
-    def counted(self, *arguments):
+    def counted(self, *arguments, **options):
         nonlocal searches
         searches += 1
-        return underlying(self, *arguments)
+        return underlying(self, *arguments, **options)
 
-    monkeypatch.setattr(type(planner), "_run", counted)
+    monkeypatch.setattr(type(planner), "search", counted)
 
     answer = planner.route("home", "work")
     answer.routes

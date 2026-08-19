@@ -95,7 +95,7 @@ class AStarPlanner(TreePlanner):
 
     @property
     def footprint(self) -> int:
-        return self.heuristic.footprint
+        return super().footprint + self.heuristic.footprint
 
     def route(
         self,
@@ -107,7 +107,7 @@ class AStarPlanner(TreePlanner):
         """The cheapest journey to ``destination``, guided toward it."""
         target = self.node_id(destination)
         return self._answer(
-            self._run(self._origin_ids(origin), target, max_cost), destination
+            self.search(origin, target=target, max_cost=max_cost), destination
         )
 
     def search(
@@ -119,11 +119,11 @@ class AStarPlanner(TreePlanner):
         target is a required argument rather than a bound on the search. There
         is nothing a heuristic could be a bound on for several of them.
         """
-        return self._run(self._origin_ids(origins), target, max_cost)
-
-    def _run(
-        self, starts: "Dict[int, int]", target: int, max_cost: Optional[int]
-    ) -> SearchResult:
         return astar(
-            self.compiled.graph, starts, target, self.heuristic, max_cost=max_cost
+            self.compiled.graph,
+            self._origin_ids(origins),
+            target,
+            self.heuristic,
+            max_cost=max_cost,
         )
+

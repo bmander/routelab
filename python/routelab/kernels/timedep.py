@@ -89,7 +89,7 @@ class TimeDependentDijkstraPlanner(TreePlanner):
 
     @property
     def footprint(self) -> int:
-        return self.calendar.footprint
+        return super().footprint + self.calendar.footprint
 
     def route(
         self,
@@ -107,7 +107,7 @@ class TimeDependentDijkstraPlanner(TreePlanner):
         """
         target = self.node_id(destination)
         return self._answer(
-            self._run(self._origin_ids(origin), departing, [target], max_cost),
+            self.search(origin, departing=departing, targets=[target], max_cost=max_cost),
             destination,
         )
 
@@ -120,21 +120,13 @@ class TimeDependentDijkstraPlanner(TreePlanner):
         max_cost: Optional[int] = None,
     ) -> SearchResult:
         """Run the search and return the raw, id-keyed result."""
-        return self._run(self._origin_ids(origins), departing, targets, max_cost)
-
-    def _run(
-        self,
-        starts: "Dict[int, int]",
-        departing: Departure,
-        targets: "Optional[Nodes]",
-        max_cost: Optional[int],
-    ) -> SearchResult:
         return _routelab.time_dependent_dijkstra(
             self.compiled.graph,
             self.calendar,
-            list(starts.items()),
+            list(self._origin_ids(origins).items()),
             weekly_seconds(departing),
             waiting=self.waiting,
             targets=normalize_nodes(targets),
             max_cost=max_cost,
         )
+

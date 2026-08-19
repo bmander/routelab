@@ -8,12 +8,17 @@
 //! search said it would.
 
 use crate::kernels::astar::{AStar, AStarQuery};
+use crate::kernels::bfs::{Bfs, BfsTechnique};
 use crate::kernels::contraction::{ContractionHierarchy, ContractionTechnique, Ordering};
 use crate::kernels::csa::{ConnectionScanTechnique, ScanQuery};
 use crate::kernels::dijkstra::{dijkstra, Dijkstra, DijkstraTechnique};
 use crate::kernels::heuristics::StandardHeuristic;
-use crate::kernels::oracles::{random_footpaths, random_timetable};
+use crate::kernels::oracles::{random_footpaths, random_graph, random_timetable};
 use crate::kernels::raptor::{RaptorQuery, RaptorTechnique};
+use crate::kernels::timedep::{
+    Calendar, Departure, TimeDependentDijkstra, TimeDependentDijkstraTechnique,
+    TimeDependentInputs, TimeDependentQuery,
+};
 use crate::kernels::tripbased::{TripBasedQuery, TripBasedTechnique};
 use crate::model::graph::{Graph, NodeId, Weight};
 use crate::model::search::SearchOptions;
@@ -23,21 +28,6 @@ use crate::model::technique::{
 };
 use crate::model::timetable::{Time, Transfer};
 use crate::util::progress::Progress;
-use crate::util::rng::Rng;
-
-fn random_graph(num_nodes: u32, density: f64, seed: u64) -> Graph {
-    let mut rng = Rng::new(seed);
-    let edges: Vec<_> = (0..(f64::from(num_nodes) * density) as usize)
-        .map(|_| {
-            (
-                rng.below(u64::from(num_nodes)) as u32,
-                rng.below(u64::from(num_nodes)) as u32,
-                1 + rng.below(50) as u32,
-            )
-        })
-        .collect();
-    Graph::from_edges(num_nodes as usize, &edges).unwrap()
-}
 
 /// Every distance Dijkstra finds from every source, `planner` finds too.
 fn distances_agree<P: Distance>(name: &str, planner: &P, graph: &Graph) {
@@ -53,27 +43,43 @@ fn distances_agree<P: Distance>(name: &str, planner: &P, graph: &Graph) {
     }
 }
 
-/// An unpacked path is a walk in the graph whose weights sum to the cost the
-/// search reported — for every target the search claims to know.
+/// An unpacked path is a real walk from the source that ends at the target
+/// and measures what the search said it cost — for every target the search
+/// claims to know, and nothing at all for the ones it does not.
+///
+/// Two closures for the two things the graph searches do not agree on:
+/// `from` writes a source as this planner takes it (a hop count starts every
+/// source at depth zero, so BFS takes bare nodes), and `measure` turns the
+/// walk into the planner's own units, given its weight and its length in
+/// edges.
 fn paths_cost_what_they_say<P>(
     name: &str,
     planner: &P,
     graph: &Graph,
+    from: impl Fn(NodeId) -> P::Source,
     to_query: impl Fn(NodeId) -> P::Query,
+    measure: impl Fn(Weight, usize) -> u32,
 ) where
-    P: Searches<Source = (NodeId, Weight)> + Unpacks,
+    P: Searches + Unpacks,
     P::Error: std::fmt::Debug,
 {
     for source in 0..graph.num_nodes() as NodeId {
         for target in 0..graph.num_nodes() as NodeId {
-            let search = planner.search(&[(source, 0)], &to_query(target)).unwrap();
+            let search = planner.search(&[from(source)], &to_query(target)).unwrap();
             let Some(cost) = search.cost(target) else {
                 assert!(planner.edge_path(&search, target).is_none());
                 continue;
             };
             let edges = planner.edge_path(&search, target).unwrap();
             let walked = graph.walk(source, &edges);
-            assert_eq!(walked, Some((target, cost)), "{name}: {source} -> {target}");
+            let (ended, weight) =
+                walked.unwrap_or_else(|| panic!("{name}: {source} -> {target} is not a walk"));
+            assert_eq!(ended, target, "{name}: {source} -> {target}");
+            assert_eq!(
+                measure(weight, edges.len()),
+                cost,
+                "{name}: {source} -> {target}"
+            );
         }
     }
 }
@@ -102,21 +108,74 @@ fn every_distance_technique_agrees_with_dijkstra() {
 
 #[test]
 fn every_unpacked_path_costs_what_the_search_said() {
+    let weighed = |weight: Weight, _edges: usize| weight;
+    let counted = |_weight: Weight, edges: usize| edges as u32;
     for seed in 0..4 {
         let graph = random_graph(30, 3.0, seed);
         let progress = Progress::new();
         let plain: Dijkstra<'_> = DijkstraTechnique.bind(&graph, &progress).unwrap();
-        paths_cost_what_they_say("Dijkstra", &plain, &graph, |_| SearchOptions::default());
+        paths_cost_what_they_say(
+            "Dijkstra",
+            &plain,
+            &graph,
+            |node| (node, 0),
+            |_| SearchOptions::default(),
+            weighed,
+        );
+        // The hop-count search: bare sources, and a cost measured in edges.
+        let hops: Bfs<'_> = BfsTechnique.bind(&graph, &progress).unwrap();
+        paths_cost_what_they_say(
+            "BFS",
+            &hops,
+            &graph,
+            |node| node,
+            |_| SearchOptions::default(),
+            counted,
+        );
         let zero = StandardHeuristic::Zero;
         let guided = AStar {
             graph: &graph,
             heuristic: &zero,
         };
-        paths_cost_what_they_say("A*", &guided, &graph, AStarQuery::to);
+        paths_cost_what_they_say(
+            "A*",
+            &guided,
+            &graph,
+            |node| (node, 0),
+            AStarQuery::to,
+            weighed,
+        );
         let hierarchy: ContractionHierarchy = ContractionTechnique::default()
             .bind(&graph, &progress)
             .unwrap();
-        paths_cost_what_they_say("contraction hierarchy", &hierarchy, &graph, |t| t);
+        paths_cost_what_they_say(
+            "contraction hierarchy",
+            &hierarchy,
+            &graph,
+            |node| (node, 0),
+            |target| target,
+            weighed,
+        );
+        // Every edge open at every hour is Dijkstra with a clock, so the same
+        // walk must come back — the one binding of the time-dependent planner.
+        let calendar = Calendar::unrestricted();
+        let timed: TimeDependentDijkstra<'_> = TimeDependentDijkstraTechnique
+            .bind(
+                TimeDependentInputs {
+                    graph: &graph,
+                    calendar: &calendar,
+                },
+                &progress,
+            )
+            .unwrap();
+        paths_cost_what_they_say(
+            "time-dependent Dijkstra",
+            &timed,
+            &graph,
+            |node| (node, 0),
+            |_| TimeDependentQuery::at(Departure::at(8 * 3_600)),
+            weighed,
+        );
     }
 }
 

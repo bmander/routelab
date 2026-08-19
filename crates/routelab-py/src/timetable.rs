@@ -5,14 +5,13 @@ use std::sync::Arc;
 use pyo3::prelude::*;
 
 use routelab_core::kernels::timetable::{
-    earliest_arrival as core_earliest_arrival, TimeExpanded as CoreTimeExpanded,
-    TimeExpandedTechnique,
+    TimeDependentTechnique, TimeExpanded as CoreTimeExpanded, TimeExpandedTechnique,
 };
 use routelab_core::model::timetable::{
     Footpaths as CoreFootpaths, Itinerary as CoreItinerary, Leg, Timetable as CoreTimetable,
     Transfer,
 };
-use routelab_core::{Footprint, NodeId, Progress, Technique, TransitNetwork};
+use routelab_core::{EarliestArrival, NodeId, Progress, Technique, TransitNetwork};
 
 use crate::graph::*;
 
@@ -163,7 +162,13 @@ impl PyTimetable {
         let timetable = Arc::clone(&self.inner);
         let footpaths = footpaths_or_none(footpaths);
         py.detach(|| {
-            core_earliest_arrival(&timetable, &sources, to, Transfer::instant(), &footpaths)
+            // The time-dependent model precomputes nothing, so binding it is
+            // free — and says which model answers here rather than leaving a
+            // free function to imply it.
+            TimeDependentTechnique
+                .bind(transit_network(&timetable, &footpaths), &Progress::new())
+                .expect("the time-dependent model reads any timetable")
+                .earliest_arrival(&sources, to)
         })
         .map(PyItinerary::from)
     }
@@ -205,12 +210,6 @@ impl PyTimeExpanded {
     #[getter]
     fn num_events(&self) -> usize {
         self.inner.num_events()
-    }
-
-    /// What a query settles and how many there are: `("events", n)`.
-    #[getter]
-    fn searches(&self) -> (&'static str, usize) {
-        Footprint::searches(&*self.inner)
     }
 
     #[getter]

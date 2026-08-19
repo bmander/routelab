@@ -118,11 +118,11 @@ class TripBasedPlanner(Front, TimetablePlanner):
     ) -> Answer:
         """Every journey worth having to ``destination``, earliest arrival first."""
         return self._answer_front(
-            self._run(
-                self._origin_ids(origin),
-                self.node_id(destination),
-                departing,
-                max_transfers,
+            self.search(
+                origin,
+                departing=departing,
+                target=self.node_id(destination),
+                max_transfers=max_transfers,
             ),
             destination,
         )
@@ -141,16 +141,7 @@ class TripBasedPlanner(Front, TimetablePlanner):
         whether it reaches the target — so the target is a required argument
         rather than a way to stop early.
         """
-        return self._run(self._origin_ids(origins), target, departing, max_transfers)
-
-    def _run(
-        self,
-        starts: "Dict[int, int]",
-        target: int,
-        departing: Departure,
-        max_transfers: Optional[int],
-    ) -> "_routelab.TripBasedSearch":
-        sources, at = self._sources(starts, departing)
+        sources, at = self._sources(self._origin_ids(origins), departing)
         return self._trips.search(
             sources,
             target,

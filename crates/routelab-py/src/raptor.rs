@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 use routelab_core::kernels::raptor::{
     Raptor as CoreRaptor, RaptorQuery, RaptorSearch as CoreRaptorSearch, RaptorTechnique,
 };
-use routelab_core::{EarliestArrival, Footprint, NodeId, Progress, Technique};
+use routelab_core::{NodeId, Progress, Technique};
 
 use crate::timetable::*;
 
@@ -34,25 +34,6 @@ impl PyRaptor {
         PyRaptor {
             inner: Arc::new(raptor),
         }
-    }
-
-    /// What a query settles and how many there are: `("stops", n)`.
-    #[getter]
-    fn searches(&self) -> (&'static str, usize) {
-        Footprint::searches(&*self.inner)
-    }
-
-    /// Earliest arrival at `to` from `sources` — `[(stop, time), ...]` — as
-    /// one itinerary, without keeping the search.
-    fn earliest_arrival(
-        &self,
-        py: Python<'_>,
-        sources: Vec<(NodeId, u32)>,
-        to: NodeId,
-    ) -> Option<PyItinerary> {
-        let raptor = Arc::clone(&self.inner);
-        py.detach(|| raptor.earliest_arrival(&sources, to))
-            .map(PyItinerary::from)
     }
 
     #[getter]

@@ -14,21 +14,8 @@ from datetime import time
 import pytest
 
 import routelab as rl
-#: Every timetable technique. Written out, and checked against the shelf in
-#: test_timetable.py, because a technique that nobody added here would
-#: silently not be tested — which is the one thing a list like this must not
-#: allow.
-MODELS = [
-    rl.TimeDependent,
-    rl.TimeExpanded,
-    rl.RAPTOR,
-    rl.CSA,
-    rl.TripBased,
-    rl.PTL,
-    rl.ULTRA,
-    rl.LabelConstrained,
-    rl.UCCH,
-]
+
+from conftest import TIMETABLE_MODELS as MODELS
 
 
 # --- The layer -----------------------------------------------------------------

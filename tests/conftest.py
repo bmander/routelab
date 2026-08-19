@@ -25,6 +25,25 @@ TINY_GTFS = (
 #: A Monday on which the fixture's weekday service runs.
 TINY_DATE = _datetime.date(2026, 9, 7)
 
+#: Every timetable technique, as the configuration a caller would write. Every
+#: behavioural test over a feed runs against each, because "these all agree" is
+#: the papers' thesis and a test that asked only one would not notice the day
+#: they stopped. Written out rather than derived, because a technique is a
+#: configuration and some take arguments — and checked against what the package
+#: exports by ``test_every_timetable_technique_is_in_the_shared_list``, so a
+#: technique nobody added here fails loudly instead of going untested.
+TIMETABLE_MODELS = [
+    rl.TimeDependent,
+    rl.TimeExpanded,
+    rl.RAPTOR,
+    rl.CSA,
+    rl.TripBased,
+    rl.PTL,
+    rl.ULTRA,
+    rl.LabelConstrained,
+    rl.UCCH,
+]
+
 
 @pytest.fixture
 def diamond() -> rl.Graph:
