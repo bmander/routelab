@@ -10,7 +10,7 @@ from ..model.environment import CompiledEnvironment, Environment
 from ..model.journey import Journey
 from ..model.searchspace import Segments
 from ..util.clock import Departure
-from .planner import Front, Origins, TimetablePlanner, TimetableTechnique
+from .planner import Front, Origins, TimetableTechnique
 
 __all__ = ["TripBased", "TripBasedPlanner"]
 
@@ -62,7 +62,7 @@ class TripBased(TimetableTechnique):
         return TripBasedPlanner(self, environment, self._compile(environment), progress)
 
 
-class TripBasedPlanner(Front, TimetablePlanner):
+class TripBasedPlanner(Front):
     """:class:`TripBased` over one feed, its transfer set already computed."""
 
     def __init__(
@@ -79,7 +79,9 @@ class TripBasedPlanner(Front, TimetablePlanner):
 
     @property
     def footprint(self) -> int:
-        return super().footprint + self._trips.footprint
+        """The timetable and the kernel. Not the walks: this kernel was built
+        from them and keeps its own copy, which its own footprint counts."""
+        return self.timetable.footprint + self._trips.footprint
 
     @property
     def num_lines(self) -> int:
@@ -117,7 +119,7 @@ class TripBasedPlanner(Front, TimetablePlanner):
         max_transfers: Optional[int] = None,
     ) -> Answer:
         """Every journey worth having to ``destination``, earliest arrival first."""
-        return self._answer_front(
+        return self._answer(
             self.search(
                 origin,
                 departing=departing,

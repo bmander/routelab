@@ -160,6 +160,11 @@ def test_a_model_without_a_table_answers_with_a_journey_and_nothing_else(model, 
     # checker says so before anything runs.
     planner = model().bind(env)
     assert not hasattr(planner, "search")
+    # Nor `journey`: reading a journey off a kept search is something only a
+    # technique that keeps one can do, so it lives on `Tabled` rather than on
+    # the family — the same line the kernels are split along.
+    assert not hasattr(planner, "journey")
+    assert not isinstance(planner, rl.kernels.Tabled)
     answer = planner.route("A", "C", departing=time(8, 0))
     assert answer.raw is None
     with pytest.raises(NotImplementedError, match="keeps no search space"):

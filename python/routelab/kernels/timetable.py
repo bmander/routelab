@@ -103,7 +103,9 @@ class TimeExpandedPlanner(TimetablePlanner):
 
     @property
     def footprint(self) -> int:
-        return super().footprint + self._expanded.footprint
+        """The timetable and the kernel. Not the walks: this kernel was built
+        from them and keeps its own copy, which its own footprint counts."""
+        return self.timetable.footprint + self._expanded.footprint
 
     @property
     def num_events(self) -> int:

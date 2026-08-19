@@ -175,7 +175,7 @@ class OSM(EdgeSource):
         self._network: "Optional[_routelab.OsmNetwork]" = None
         self._node_ids: "Optional[Sequence[int]]" = None
         self._coordinates: "Optional[Mapping[int, Tuple[float, float]]]" = None
-        self._positions: "Optional[Mapping[int, Tuple[float, float]]]" = None
+        self._positions: "Optional[Mapping[Hashable, Tuple[float, float]]]" = None
         self._windows: "Optional[Mapping[int, List[Tuple[int, int]]]]" = None
 
     @property
@@ -218,7 +218,9 @@ class OSM(EdgeSource):
         if self._positions is None:
             network = self.network
             xs, ys = network.projected()
-            self._positions = dict(zip(network.node_ids, zip(xs, ys)))
+            self._positions = {
+                node: place for node, place in zip(network.node_ids, zip(xs, ys))
+            }
         return self._positions
 
     def coordinates(self) -> "Mapping[int, Tuple[float, float]]":

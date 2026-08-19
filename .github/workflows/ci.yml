@@ -30,3 +30,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: pip install -e '.[dev]'
       - run: pytest -q
+      # The typed signatures are the veneer's whole contract, so something has
+      # to hold them to it. Once, on the version floor: the errors it finds do
+      # not differ by interpreter.
+      - run: pyright
+        if: matrix.python-version == '3.9'

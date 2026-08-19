@@ -210,10 +210,24 @@ class Journey:
         result: EdgeResult,
         destination: Hashable,
     ) -> "Journey":
-        """Rebuild a journey from a search result. Assumes the target was reached."""
+        """Rebuild a journey from a search result, which must have reached it.
+
+        Asking for a journey to somewhere the search never got is a caller's
+        mistake rather than an empty answer, so it says so: a planner checks
+        the cost first and hands back ``None`` (see
+        :meth:`~routelab.kernels.GraphPlanner.journey`).
+        """
         node_id = compiled.node_id(destination)
+        edges = result.edge_path(node_id)
+        path = result.path(node_id)
+        cost = result.cost(node_id)
+        if edges is None or path is None or cost is None:
+            raise ValueError(
+                f"{destination!r} was not reached by this search, so there is no "
+                f"journey to rebuild"
+            )
         legs = []
-        for edge_id in result.edge_path(node_id):
+        for edge_id in edges:
             tail, head, weight = compiled.graph.edge(edge_id)
             source, position = compiled.locate(edge_id)
             legs.append(
@@ -229,9 +243,9 @@ class Journey:
         return cls(
             # Where the journey starts, which with several origins is whichever
             # of them won rather than the first one the caller named.
-            origin=compiled.label(result.path(node_id)[0]),
+            origin=compiled.label(path[0]),
             destination=destination,
-            cost=result.cost(node_id),
+            cost=cost,
             legs=tuple(legs),
         )
 

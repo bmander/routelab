@@ -11,7 +11,7 @@ from ..model.environment import CompiledEnvironment, Environment
 from ..model.journey import Journey
 from ..model.searchspace import Scan
 from ..util.clock import Departure
-from .planner import Origins, TimetablePlanner, TimetableTechnique
+from .planner import Origins, Tabled, TimetableTechnique
 
 __all__ = ["CSA", "CSAPlanner"]
 
@@ -47,7 +47,7 @@ class CSA(TimetableTechnique):
         return CSAPlanner(self, environment, self._compile(environment), progress)
 
 
-class CSAPlanner(TimetablePlanner):
+class CSAPlanner(Tabled["_routelab.ScanSearch"]):
     """:class:`CSA` over one feed, its connections already sorted."""
 
     def __init__(
@@ -62,7 +62,9 @@ class CSAPlanner(TimetablePlanner):
 
     @property
     def footprint(self) -> int:
-        return super().footprint + self._csa.footprint
+        """The timetable and the kernel. Not the walks: this kernel was built
+        from them and keeps its own copy, which its own footprint counts."""
+        return self.timetable.footprint + self._csa.footprint
 
     @property
     def num_trips(self) -> int:
@@ -88,28 +90,17 @@ class CSAPlanner(TimetablePlanner):
     ) -> "_routelab.ScanSearch":
         """Scan — toward one target if given, else to every stop."""
         sources, at = self._sources(self._origin_ids(origins), departing)
-        return self._search_stops(sources, at, None, target)
+        return self._search_stops(sources, at, target=target)
 
     def _search_stops(
         self,
         sources: "List[Tuple[int, int]]",
         departing: int,
-        max_transfers: Optional[int],
+        *,
         target: Optional[int] = None,
     ) -> "_routelab.ScanSearch":
-        """The scan, from stops already on the service-day clock.
-
-        The seam :class:`~routelab.ULTRA` reaches through, which is the only
-        way a ``max_transfers`` can arrive here at all — a caller writing
-        ``CSA()`` never sees this argument, because a scan counts nothing but
-        time and would have to ignore it.
-        """
-        if max_transfers is not None:
-            raise TypeError(
-                "CSA tells journeys apart by when they arrive and counts no "
-                "changes, so it has no max_transfers to cap; the round-based "
-                "techniques do — ULTRA(RAPTOR())."
-            )
+        """The scan, from stops already on the service-day clock — the seam
+        :class:`~routelab.ULTRA` reaches through."""
         return self._csa.search(sources, target=target, departing=departing)
 
     def profile(

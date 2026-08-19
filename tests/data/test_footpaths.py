@@ -79,6 +79,24 @@ def test_walks_take_only_edges_between_stops_the_timetable_serves(feed):
 # --- The techniques ---------------------------------------------------------------
 
 
+def test_the_walks_are_counted_where_they_are_held(feed):
+    # A kernel built from the walks keeps its own copy of them, so a planner
+    # that reports its own walks *and* its kernel would report one structure
+    # twice. RAPTOR is the case where the kernel keeps exactly one copy, so
+    # the walks must cost it what they cost the model that holds nothing else.
+    bare = rl.Environment(feed)
+    walked = rl.Environment(feed, rl.Footpaths(feed, within=1200))
+    plain = rl.TimeDependent().bind(walked).footprint - rl.TimeDependent().bind(bare).footprint
+    rounds = rl.RAPTOR().bind(walked).footprint - rl.RAPTOR().bind(bare).footprint
+    assert plain > 0, "the fixture's stops are within reach of each other"
+    assert rounds == plain
+
+    # CSA costs twice that, and honestly: it indexes the walks by arrival as
+    # well, which is a second structure rather than the same one counted again.
+    scan = rl.CSA().bind(walked).footprint - rl.CSA().bind(bare).footprint
+    assert scan == 2 * plain
+
+
 @pytest.mark.parametrize("model", MODELS)
 def test_a_walk_beats_waiting_for_the_next_bus(model, feed):
     # WEEKDAY1 reaches B at 08:10; the fixture's good connection leaves B at

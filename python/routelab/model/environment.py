@@ -42,7 +42,19 @@ time-dependence on the floor. That refusal is the seam RAPTOR and CSA plug into.
 from __future__ import annotations
 
 import bisect
-from typing import Any, Dict, Hashable, Iterable, Iterator, List, Mapping, Optional, Tuple
+from typing import (
+    Any,
+    Dict,
+    Hashable,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Tuple,
+    runtime_checkable,
+)
 
 from .graph import Graph
 
@@ -50,8 +62,10 @@ __all__ = [
     "CompiledEnvironment",
     "EdgeSource",
     "Environment",
+    "Located",
     "Positions",
     "ScalarEdges",
+    "Snapping",
 ]
 
 #: An edge as a layer emits it: labelled endpoints and an integer cost.
@@ -82,6 +96,42 @@ def shape_of(source: "EdgeSource", index: int) -> "Optional[List[Tuple[float, fl
     return None if getter is None else getter(index)
 
 
+@runtime_checkable
+class Located(Protocol):
+    """A layer that knows where on the earth its nodes are.
+
+    Not every layer does — a graph of labelled edges knows its topology and
+    nothing else — so this is a capability a layer declares by having the
+    method, not something :class:`EdgeSource` promises on everyone's behalf.
+    What :class:`~routelab.Access` and :class:`~routelab.Footpaths` need of
+    the stops they are given, and what :class:`~routelab.GTFS` has.
+
+    Distinct from :meth:`EdgeSource.positions`: these are `(lat, lon)` on the
+    globe, for measuring metres between real places; positions are planar, in
+    whatever unit :attr:`EdgeSource.cost_per_distance` is priced against.
+    """
+
+    def coordinates(self) -> Mapping[Hashable, "Tuple[float, float]"]:
+        """Where each of this layer's nodes is, as ``{label: (lat, lon)}``."""
+        ...
+
+
+@runtime_checkable
+class Snapping(Located, Protocol):
+    """A layer that can say which of its nodes is nearest a point.
+
+    What :class:`~routelab.Access` needs of the streets it attaches stops to,
+    and what :class:`~routelab.OSM` has: a spatial index, which a layer built
+    from a list of labelled edges has no way to offer. A refinement of
+    :class:`Located` rather than a sibling — a layer cannot say which node is
+    nearest a point without knowing where its nodes are.
+    """
+
+    def nearest(self, lat: float, lon: float) -> Hashable:
+        """The label of the node closest to ``(lat, lon)``."""
+        ...
+
+
 class EdgeSource:
     """A layer of the world that contributes edges to an :class:`Environment`.
 
@@ -98,18 +148,27 @@ class EdgeSource:
     #: they cannot handle.
     cost_model = "scalar"
 
-    #: The least this layer can charge to cover one unit of distance — 1/speed if
-    #: costs are seconds and positions are metres. ``None`` means "unknown", which
-    #: is not the same as "free": a layer that might be arbitrarily fast makes any
-    #: distance-based lower bound unsafe, so it disables them rather than being
-    #: quietly assumed slow.
-    #:
-    #: One case this does not yet distinguish: a layer whose edges cover no ground
-    #: at all, like a transfer penalty inside a station. Its rate is not unknown,
-    #: it is undefined — but leaving it ``None`` disables distance bounds for the
-    #: whole environment rather than just for itself. Erring toward the safe answer
-    #: is right; telling the two apart is work for whoever adds such a layer.
-    cost_per_distance: Optional[float] = None
+    @property
+    def cost_per_distance(self) -> Optional[float]:
+        """The least this layer can charge to cover one unit of distance — 1/speed
+        if costs are seconds and positions are metres.
+
+        ``None`` means "unknown", which is not the same as "free": a layer that
+        might be arbitrarily fast makes any distance-based lower bound unsafe,
+        so it disables them rather than being quietly assumed slow.
+
+        A property rather than an attribute because most layers work theirs out
+        — from a profile's top speed, from a walking pace — and a layer that
+        knows its rate up front overrides it with one of its own.
+
+        One case this does not yet distinguish: a layer whose edges cover no
+        ground at all, like a transfer penalty inside a station. Its rate is not
+        unknown, it is undefined — but leaving it ``None`` disables distance
+        bounds for the whole environment rather than just for itself. Erring
+        toward the safe answer is right; telling the two apart is work for
+        whoever adds such a layer.
+        """
+        return None
 
     def edges(self) -> Iterable[LabelledEdge]:
         """Yield ``(tail, head, weight)`` with labelled endpoints."""
@@ -174,12 +233,18 @@ class ScalarEdges(EdgeSource):
     ):
         if len(edges) == 1 and not isinstance(edges[0], tuple):
             edges = tuple(edges[0])
-        self.cost_per_distance = cost_per_distance
+        self._cost_per_distance = cost_per_distance
         self._edges: List[LabelledEdge] = [
             (tail, head, int(weight)) for tail, head, weight in edges
         ]
         if bidirectional:
             self._edges += [(head, tail, weight) for tail, head, weight in self._edges]
+
+    @property
+    def cost_per_distance(self) -> Optional[float]:
+        """What the caller said, or ``None`` — these edges cover whatever
+        ground the caller says they do."""
+        return self._cost_per_distance
 
     def edges(self) -> Iterator[LabelledEdge]:
         return iter(self._edges)

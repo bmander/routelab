@@ -21,7 +21,7 @@ import math
 from typing import Hashable, Iterator, List, Mapping, Optional, Tuple
 
 from .. import _routelab
-from ..model.environment import EdgeSource, LabelledEdge
+from ..model.environment import EdgeSource, LabelledEdge, Located, Snapping
 
 __all__ = ["Access"]
 
@@ -56,8 +56,8 @@ class Access(EdgeSource):
 
     def __init__(
         self,
-        stops: EdgeSource,
-        streets: EdgeSource,
+        stops: Located,
+        streets: Snapping,
         within: float = 400.0,
         speed: float = 1.4,
     ):
@@ -83,7 +83,7 @@ class Access(EdgeSource):
         self._stranded = 0
 
     @property
-    def cost_per_distance(self) -> float:  # type: ignore[override]
+    def cost_per_distance(self) -> float:
         return 1.0 / self.speed
 
     def load(self) -> "Access":

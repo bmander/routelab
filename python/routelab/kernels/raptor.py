@@ -9,7 +9,7 @@ from ..model.answer import Answer
 from ..model.environment import CompiledEnvironment, Environment
 from ..model.searchspace import Rounds
 from ..util.clock import Departure
-from .planner import Front, Origins, TimetablePlanner, TimetableTechnique
+from .planner import Front, Origins, TimetableTechnique
 
 __all__ = ["RAPTOR", "RAPTORPlanner"]
 
@@ -42,7 +42,7 @@ class RAPTOR(TimetableTechnique):
         return RAPTORPlanner(self, environment, self._compile(environment), progress)
 
 
-class RAPTORPlanner(Front, TimetablePlanner):
+class RAPTORPlanner(Front):
     """:class:`RAPTOR` over one feed, its routes and trips already indexed."""
 
     def __init__(
@@ -57,7 +57,9 @@ class RAPTORPlanner(Front, TimetablePlanner):
 
     @property
     def footprint(self) -> int:
-        return super().footprint + self._raptor.footprint
+        """The timetable and the kernel. Not the walks: this kernel was built
+        from them and keeps its own copy, which its own footprint counts."""
+        return self.timetable.footprint + self._raptor.footprint
 
     @property
     def num_routes(self) -> int:
@@ -83,7 +85,7 @@ class RAPTORPlanner(Front, TimetablePlanner):
         so that ``routes[0]`` is the journey every other timetable technique
         here would have given.
         """
-        return self._answer_front(
+        return self._answer(
             self.search(
                 origin,
                 departing=departing,
@@ -103,14 +105,17 @@ class RAPTORPlanner(Front, TimetablePlanner):
     ) -> "_routelab.RaptorSearch":
         """Run the rounds — toward one target if given, else to every stop."""
         sources, at = self._sources(self._origin_ids(origins), departing)
-        return self._search_stops(sources, at, max_transfers, target)
+        return self._search_stops(
+            sources, at, target=target, max_transfers=max_transfers
+        )
 
     def _search_stops(
         self,
         sources: "List[Tuple[int, int]]",
         departing: int,
-        max_transfers: Optional[int],
+        *,
         target: Optional[int] = None,
+        max_transfers: Optional[int] = None,
     ) -> "_routelab.RaptorSearch":
         """The rounds, from stops already on the service-day clock.
 

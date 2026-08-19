@@ -963,7 +963,7 @@ The same layer, read differently. `Footpaths(feed, within=400)` is a *transfer
 graph* here rather than a set of walks: nothing closes it, and a long walk is a
 path of short hops instead of an edge somebody had to write down. RAPTOR does
 not know — it receives a smaller transfer set through the same
-`TimetablePlanner.walks()` seam every technique reads its walks through, and is
+`TimetableTechnique.walks()` seam every technique reads its walks through, and is
 otherwise untouched, which is the paper's central claim and this module's main
 test. `ULTRA(CSA())` is the other one the paper names, and answers identically.
 
